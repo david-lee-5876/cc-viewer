@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
 import { chmodSync, statSync } from 'node:fs';
 import { platform, arch } from 'node:os';
+import { prepareEmbeddedShellSpawn, stripClaudeNoFlickerUnlessOptedIn } from './lib/terminal-env.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -147,6 +148,9 @@ export async function spawnClaude(proxyPort, cwd, extraArgs = [], claudePath = n
   env.CCV_LOG_DIR = LOG_DIR; // 让 fork 出的 Claude Code 进程找到同一份 profile.json 等资源
   // 剥离 cc-viewer 的内部短路开关，避免泄漏给 claude 子进程
   delete env.CCV_SKIP_THINKING_DISPLAY;
+  // Claude Code NO_FLICKER 会让嵌入式 xterm 走 alt-screen 并丢失 scrollback。
+  // cc-viewer 默认剥离继承值；确实需要时可显式设 CCV_KEEP_CLAUDE_CODE_NO_FLICKER=1。
+  stripClaudeNoFlickerUnlessOptedIn(env);
 
   // Resolve real Node.js path (Electron's process.execPath is the Electron binary)
   let nodePath = process.execPath;
@@ -173,8 +177,6 @@ export async function spawnClaude(proxyPort, cwd, extraArgs = [], claudePath = n
   // 禁用 Claude Code CLI 的鼠标事件捕获，保住 xterm 面板原生文本选中（复制粘贴）。
   // 不设时 Claude 会启 SGR mouse tracking (DECSET ?1000/1006)，抢走 xterm 的鼠标事件。
   // ??= 尊重用户显式 export（比如调试时想看 mouse event）。
-  // 注意：NO_FLICKER 此处**故意**不注入——它会强制 alt-screen 销毁 xterm scrollback；
-  // 需要闪烁优化的用户自行 `export CLAUDE_CODE_NO_FLICKER=1`。
   env.CLAUDE_CODE_DISABLE_MOUSE ??= '1';
 
   // 通过 --settings 注入 ANTHROPIC_BASE_URL，确保覆盖 settings.json 中的配置。
@@ -353,15 +355,16 @@ export async function spawnShell() {
   delete shellEnv.CCVIEWER_PORT;
   delete shellEnv.CCV_EDITOR_PORT;
   delete shellEnv.CCVIEWER_PROTOCOL;
-  // 交互 shell 里手动敲 claude 时也禁鼠标，理由同 spawnClaude；NO_FLICKER 仍不注入
+  // 交互 shell 里手动敲 claude 时也禁鼠标，理由同 spawnClaude。
   shellEnv.CLAUDE_CODE_DISABLE_MOUSE ??= '1';
+  const shellSpawn = prepareEmbeddedShellSpawn(shell, shellEnv);
 
-  ptyProcess = pty.spawn(shell, [], {
+  ptyProcess = pty.spawn(shellSpawn.command, shellSpawn.args, {
     name: 'xterm-256color',
     cols: lastPtyCols,
     rows: lastPtyRows,
     cwd,
-    env: shellEnv,
+    env: shellSpawn.env,
   });
 
   ptyProcess.onData((data) => {

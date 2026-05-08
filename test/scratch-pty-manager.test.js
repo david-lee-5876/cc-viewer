@@ -1,6 +1,7 @@
-import { describe, it } from 'node:test';
+import { describe, it, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  spawnScratch,
   writeScratch,
   resizeScratch,
   killScratch,
@@ -12,10 +13,16 @@ import {
   getScratchOutputBuffer,
   getScratchStartupCwd,
   getScratchActiveCount,
+  _setPtyImportForTests,
 } from '../scratch-pty-manager.js';
 
 const TID_A = 'tab-test-a';
 const TID_B = 'tab-test-b';
+
+afterEach(() => {
+  killAllScratch();
+  _setPtyImportForTests(null);
+});
 
 describe('scratch-pty-manager: state queries without PTY', () => {
   it('getScratchPid returns null when no PTY for id', () => {
@@ -98,8 +105,55 @@ describe('scratch-pty-manager: listener registration & isolation', () => {
 
 describe('scratch-pty-manager: API shape', () => {
   it('spawnScratch throws/rejects without id', async () => {
-    const { spawnScratch } = await import('../scratch-pty-manager.js');
     await assert.rejects(() => spawnScratch(), /requires id/);
     await assert.rejects(() => spawnScratch(''), /requires id/);
+  });
+});
+
+describe('scratch-pty-manager: embedded shell env', () => {
+  it('strips inherited CLAUDE_CODE_NO_FLICKER even for zsh scratch shells', async () => {
+    const prevShell = process.env.SHELL;
+    const prevNoFlicker = process.env.CLAUDE_CODE_NO_FLICKER;
+    const prevKeep = process.env.CCV_KEEP_CLAUDE_CODE_NO_FLICKER;
+    const spawned = [];
+
+    process.env.SHELL = '/bin/zsh';
+    process.env.CLAUDE_CODE_NO_FLICKER = '1';
+    delete process.env.CCV_KEEP_CLAUDE_CODE_NO_FLICKER;
+
+    _setPtyImportForTests(() => ({
+      spawn(command, args, opts) {
+        const inst = {
+          pid: 9000 + spawned.length,
+          command,
+          args,
+          opts,
+          write() {},
+          resize() {},
+          kill() {},
+          onData() {},
+          onExit() {},
+        };
+        spawned.push(inst);
+        return inst;
+      },
+    }));
+
+    try {
+      await spawnScratch('tab-env-zsh');
+      assert.equal(spawned.length, 1);
+      assert.equal(spawned[0].command, '/bin/zsh');
+      assert.deepEqual(spawned[0].args, []);
+      assert.equal(spawned[0].opts.env.CLAUDE_CODE_NO_FLICKER, undefined);
+      assert.ok(spawned[0].opts.env.ZDOTDIR, 'zsh wrapper should set ZDOTDIR');
+      assert.ok(spawned[0].opts.env.CCV_ORIGINAL_ZDOTDIR, 'zsh wrapper should remember original ZDOTDIR');
+    } finally {
+      if (prevShell === undefined) delete process.env.SHELL;
+      else process.env.SHELL = prevShell;
+      if (prevNoFlicker === undefined) delete process.env.CLAUDE_CODE_NO_FLICKER;
+      else process.env.CLAUDE_CODE_NO_FLICKER = prevNoFlicker;
+      if (prevKeep === undefined) delete process.env.CCV_KEEP_CLAUDE_CODE_NO_FLICKER;
+      else process.env.CCV_KEEP_CLAUDE_CODE_NO_FLICKER = prevKeep;
+    }
   });
 });

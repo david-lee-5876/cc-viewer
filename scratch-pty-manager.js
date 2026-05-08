@@ -2,6 +2,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join, basename } from 'node:path';
 import { chmodSync, statSync } from 'node:fs';
 import { platform, arch, homedir } from 'node:os';
+import { prepareEmbeddedShellSpawn } from './lib/terminal-env.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -134,16 +135,17 @@ export async function spawnScratch(id) {
     }
     delete env.ANTHROPIC_BASE_URL;
     env.CLAUDE_CODE_DISABLE_MOUSE ??= '1';
+    const shellSpawn = prepareEmbeddedShellSpawn(shell, env);
 
     s.lastExitCode = null;
     s.outputBuffer = '';
 
-    s.ptyProcess = pty.spawn(shell, [], {
+    s.ptyProcess = pty.spawn(shellSpawn.command, shellSpawn.args, {
       name: 'xterm-256color',
       cols: s.lastCols,
       rows: s.lastRows,
       cwd: STARTUP_CWD,
-      env,
+      env: shellSpawn.env,
     });
 
     s.ptyProcess.onData((data) => {

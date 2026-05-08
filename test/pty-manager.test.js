@@ -197,6 +197,38 @@ describe('pty-manager: spawnClaude integration', () => {
     assert.equal(spawned.length, 2);
   });
 
+  it('spawnClaude strips inherited CLAUDE_CODE_NO_FLICKER by default', async () => {
+    const prevNoFlicker = process.env.CLAUDE_CODE_NO_FLICKER;
+    const prevKeep = process.env.CCV_KEEP_CLAUDE_CODE_NO_FLICKER;
+    process.env.CLAUDE_CODE_NO_FLICKER = '1';
+    delete process.env.CCV_KEEP_CLAUDE_CODE_NO_FLICKER;
+    try {
+      await spawnClaude(9999, process.cwd(), [], '/bin/echo');
+      assert.equal(spawned[0].opts.env.CLAUDE_CODE_NO_FLICKER, undefined);
+    } finally {
+      if (prevNoFlicker === undefined) delete process.env.CLAUDE_CODE_NO_FLICKER;
+      else process.env.CLAUDE_CODE_NO_FLICKER = prevNoFlicker;
+      if (prevKeep === undefined) delete process.env.CCV_KEEP_CLAUDE_CODE_NO_FLICKER;
+      else process.env.CCV_KEEP_CLAUDE_CODE_NO_FLICKER = prevKeep;
+    }
+  });
+
+  it('spawnClaude preserves CLAUDE_CODE_NO_FLICKER with explicit cc-viewer opt-in', async () => {
+    const prevNoFlicker = process.env.CLAUDE_CODE_NO_FLICKER;
+    const prevKeep = process.env.CCV_KEEP_CLAUDE_CODE_NO_FLICKER;
+    process.env.CLAUDE_CODE_NO_FLICKER = '1';
+    process.env.CCV_KEEP_CLAUDE_CODE_NO_FLICKER = '1';
+    try {
+      await spawnClaude(9999, process.cwd(), [], '/bin/echo');
+      assert.equal(spawned[0].opts.env.CLAUDE_CODE_NO_FLICKER, '1');
+    } finally {
+      if (prevNoFlicker === undefined) delete process.env.CLAUDE_CODE_NO_FLICKER;
+      else process.env.CLAUDE_CODE_NO_FLICKER = prevNoFlicker;
+      if (prevKeep === undefined) delete process.env.CCV_KEEP_CLAUDE_CODE_NO_FLICKER;
+      else process.env.CCV_KEEP_CLAUDE_CODE_NO_FLICKER = prevKeep;
+    }
+  });
+
   // 轮询等条件满足；替代固定 setTimeout 在慢 CI 上的 flake
   const waitUntil = async (predicate, { timeoutMs = 500, intervalMs = 5 } = {}) => {
     const deadline = Date.now() + timeoutMs;
@@ -522,4 +554,3 @@ describe('pty-manager: withDefaultThinkingDisplay', () => {
     assert.equal(count, 1);
   });
 });
-
