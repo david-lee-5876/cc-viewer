@@ -1,6 +1,7 @@
 import React from 'react';
 import { Checkbox, Input } from 'antd';
 import { t } from '../i18n';
+import { optionAriaLabel, hasOptionDescription } from '../utils/askOptionDesc';
 import styles from './ChatMessage.module.css';
 
 /**
@@ -117,7 +118,7 @@ export default class AskQuestionForm extends React.Component {
                         role="radio"
                         aria-checked={isSelected}
                         tabIndex={0}
-                        aria-label={opt.description ? `${opt.label}: ${opt.description}` : opt.label}
+                        aria-label={optionAriaLabel(opt)}
                         className={`${styles.askRadioItem}${isSelected ? ' ' + styles.askRadioItemSelected : ''}`}
                         onClick={activate}
                         onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activate(); } }}
@@ -125,7 +126,7 @@ export default class AskQuestionForm extends React.Component {
                         <span className={styles.askRadioDot}>{isSelected ? '◉' : '○'}</span>
                         <span className={styles.askOptionBody}>
                           <span className={styles.askOptionLabel}>{opt.label}</span>
-                          {opt.description && <span className={styles.askOptionDesc}>{opt.description}</span>}
+                          {hasOptionDescription(opt) && <span className={styles.askOptionDesc}>{opt.description}</span>}
                         </span>
                       </div>
                     );
@@ -177,7 +178,7 @@ export default class AskQuestionForm extends React.Component {
                         role="checkbox"
                         aria-checked={checked}
                         tabIndex={0}
-                        aria-label={opt.description ? `${opt.label}: ${opt.description}` : opt.label}
+                        aria-label={optionAriaLabel(opt)}
                         className={`${styles.askRadioItem}${checked ? ' ' + styles.askRadioItemSelected : ''}`}
                         onClick={activate}
                         onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activate(); } }}
@@ -185,7 +186,7 @@ export default class AskQuestionForm extends React.Component {
                         <span className={styles.askRadioDot}>{checked ? '☑' : '☐'}</span>
                         <span className={styles.askOptionBody}>
                           <span className={styles.askOptionLabel}>{opt.label}</span>
-                          {opt.description && <span className={styles.askOptionDesc}>{opt.description}</span>}
+                          {hasOptionDescription(opt) && <span className={styles.askOptionDesc}>{opt.description}</span>}
                         </span>
                       </div>
                     );

@@ -576,6 +576,43 @@
   font-size: 12px;
 }
 
+.askValidationErrorBadge {
+  background: var(--color-error-bg, rgba(255, 77, 79, 0.1));
+  border: 1px solid var(--color-error, #ff4d4f);
+  border-radius: 4px;
+  padding: 6px 10px;
+  margin: 0 0 8px 0;
+  font-size: 12px;
+  color: var(--color-error, #ff4d4f);
+}
+.askValidationErrorTitle {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.askValidationErrorDetails {
+  cursor: pointer;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.askValidationErrorDetails summary {
+  user-select: none;
+  outline: none;
+}
+.askValidationErrorRawText {
+  margin: 6px 0 0 0;
+  padding: 6px 8px;
+  background: var(--color-bg-elevated, rgba(0, 0, 0, 0.04));
+  border-radius: 3px;
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--text-primary);
+  max-height: 200px;
+  overflow: auto;
+}
+
 .askQuestionHeader {
   display: inline-block;
   background: var(--color-green-bg);

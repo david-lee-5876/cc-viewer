@@ -8,6 +8,7 @@ import { renderAssistantText } from '../utils/systemTags';
 import { apiUrl } from '../utils/apiUrl';
 import { isMobile, isIOS, isPad } from '../env';
 import AskQuestionForm from './AskQuestionForm';
+import { hasOptionDescription } from '../utils/askOptionDesc';
 import { ApprovalPortalContext } from './ApprovalPortalContext';
 import { SettingsContext } from '../contexts/SettingsContext';
 import { t } from '../i18n';
@@ -22,6 +23,19 @@ import defaultModelAvatarUrl from '../img/default-model-avatar.svg';
 import styles from './ChatMessage.module.css';
 
 const { Text } = Typography;
+
+function AskValidationBadge({ resultText }) {
+  if (!resultText) return null;
+  return (
+    <div className={styles.askValidationErrorBadge}>
+      <span className={styles.askValidationErrorTitle}>{t('ui.askValidationErrorBadge')}</span>
+      <details className={styles.askValidationErrorDetails}>
+        <summary>{t('ui.askValidationErrorRaw')}</summary>
+        <pre className={styles.askValidationErrorRawText}>{resultText}</pre>
+      </details>
+    </div>
+  );
+}
 
 function ViewRequestIcon() {
   return (
@@ -435,15 +449,24 @@ class ChatMessage extends React.Component {
     // AskUserQuestion: 问卷卡片
     if (tu.name === 'AskUserQuestion') {
       const questions = Array.isArray(inp.questions) ? inp.questions : [];
-      const { askAnswerMap } = this.props;
+      const { askAnswerMap, toolResultMap } = this.props;
       const selectedAnswers = askAnswerMap?.[tu.id] || {};
       const isRejected = selectedAnswers.__rejected__ === true;
       const hasAnswers = !isRejected && Object.keys(selectedAnswers).length > 0;
       const isPending = !hasAnswers && !isRejected;
       const isInteractive = isPending && this.props.onAskQuestionSubmit && tu.id === this.props.lastPendingAskId;
+      const validationError = toolResultMap?.[tu.id]?.isInputValidationError
+        ? toolResultMap[tu.id].resultText
+        : null;
 
       if (isInteractive) {
-        return this.renderAskQuestionInteractive(tu.id, questions);
+        const interactive = this.renderAskQuestionInteractive(tu.id, questions);
+        return validationError ? (
+          <div key={tu.id}>
+            <AskValidationBadge resultText={validationError} />
+            {interactive}
+          </div>
+        ) : interactive;
       }
 
       const checkSvg = (
@@ -453,6 +476,7 @@ class ChatMessage extends React.Component {
       );
       return (
         <div key={tu.id} className={styles.askQuestionBox}>
+          <AskValidationBadge resultText={validationError} />
           {questions.map((q, qi) => {
             const answer = selectedAnswers[q.question];
             const answerLabels = answer != null && q.multiSelect
@@ -477,7 +501,7 @@ class ChatMessage extends React.Component {
                         <span className={styles.askRadioDot}>{selected ? checkSvg : '○'}</span>
                         <span className={styles.askOptionBody}>
                           <span className={styles.askOptionLabel}>{opt.label}</span>
-                          {opt.description && <span className={styles.askOptionDesc}>{opt.description}</span>}
+                          {hasOptionDescription(opt) && <span className={styles.askOptionDesc}>{opt.description}</span>}
                         </span>
                       </div>
                     );

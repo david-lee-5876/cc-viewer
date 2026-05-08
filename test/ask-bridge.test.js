@@ -84,8 +84,9 @@ describe('ask-bridge.js', () => {
     });
 
     it('exits 0 and outputs correct JSON when server returns answers', async () => {
+      // 真实 Claude Code 调用都带 description（schema 必填）；这里也带上避免 normalize 改写 payload
       const questions = [
-        { question: 'Which?', header: 'Q', options: [{ label: 'A' }, { label: 'B' }], multiSelect: false },
+        { question: 'Which?', header: 'Q', options: [{ label: 'A', description: 'a' }, { label: 'B', description: 'b' }], multiSelect: false },
       ];
       const answers = { 'Which?': 'A' };
 
@@ -109,6 +110,33 @@ describe('ask-bridge.js', () => {
       assert.equal(output.hookSpecificOutput.permissionDecision, 'allow');
       assert.deepEqual(output.hookSpecificOutput.updatedInput.answers, answers);
       assert.deepEqual(output.hookSpecificOutput.updatedInput.questions, questions);
+    });
+
+    it('normalizes options[].description to "" when missing before forwarding', async () => {
+      // 防御 upstream schema 修了 / hook 移到 validation 前的兜底场景
+      const questions = [
+        { question: 'Q?', header: 'H', options: [{ label: 'X' }, { label: 'Y' }], multiSelect: false },
+      ];
+      const answers = { 'Q?': 'X' };
+
+      let received;
+      server.on('request', (req, res) => {
+        let body = '';
+        req.on('data', (c) => { body += c; });
+        req.on('end', () => {
+          received = JSON.parse(body);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ answers }));
+        });
+      });
+
+      const input = JSON.stringify({ tool_input: { questions } });
+      const { code } = await runBridge(input, { CCVIEWER_PORT: String(port) });
+
+      assert.equal(code, 0);
+      assert.equal(received.questions[0].options[0].description, '');
+      assert.equal(received.questions[0].options[1].description, '');
+      assert.equal(received.questions[0].options[0].label, 'X');
     });
 
     it('falls back to terminal UI when server returns non-200', async () => {

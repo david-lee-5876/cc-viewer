@@ -56,6 +56,13 @@ const useVirtuoso = isMobile && !isIOS && !isPad;
 const EMPTY_OBJ = {};
 const EMPTY_MAP = {};
 
+// pendingAsk.id 占位符 — 仅在连旧 server（pre-Map ask-hook 协议）时启用：
+// 那时 ask-hook-pending 不带 id，所以前端用这个固定串作 head id，提交时也省略 id 让 server fallback FIFO。
+// FIXME: 待旧 server 版本完全淘汰（>2~3 版本周期）后统一去掉此 fallback 路径。
+const LEGACY_ASK_PLACEHOLDER_ID = '__ask__';
+// askQueue entry.kind — 决定 _promoteNextAskFromQueue 弹起后路由哪条 submit 路径
+const ASK_KIND = { HOOK: 'hook', SDK: 'sdk' };
+
 // Virtuoso custom Scroller — 定义在类外部，避免每次 render 创建新组件引用
 const VirtuosoScroller = React.forwardRef((props, ref) => (
   <div ref={ref} {...props} className={styles.container} />
@@ -174,6 +181,7 @@ class ChatView extends React.Component {
       permissionQueue: [], // queued permission requests when one is already active
       pendingPlanApproval: null, // { id, input } — active ExitPlanMode approval in SDK mode
       pendingAsk: null, // { id, questions } — mirrored React state for global modal. _askHookQuestions / _sdkAskId 仍是提交路径权威源（handleAskQuestionSubmit 用于路由 SDK / hook bridge / PTY 三条提交路径）。
+      askQueue: [], // queued asks ({ id, questions, kind: ASK_KIND.HOOK|SDK }) when one is already active — mirrors permissionQueue. server.js pendingAskHooks Map 来源；hook bridge 现已 id 多路复用，sub-agent 并发 / 上一轮没答的 ask 不再阻塞下一轮。
       pendingPtyPlan: null, // { id, prompt } — active plan approval. id 与 ExitPlanMode tool_use id (lastPendingPlanId) 同源，由 componentDidUpdate 从 _currentLastPendingPlanId 派生（cliMode 守卫 + _resolvedPlanIds 短暂窗口守卫）。
       pendingImages: [], // [{ path, source }] — images uploaded/pasted, shown as previews in chat input
       agentTeamEnabled: false,
@@ -495,11 +503,16 @@ class ChatView extends React.Component {
           this.props.onPendingAsk(null);
         }
       }
-      // ask transition-to-null 时显式通知 main 清聚合状态。
-      // 正常 resolve 路径 server 已 process.send 过，这里是 no-op；WS 断连 / unmount 路径靠这条兜底。
+      // ask transition 时显式通知 main 清聚合状态。覆盖两种迁移：
+      //  (a) prev 有 → 当前 null（resolve / unmount / WS 断连 兜底）
+      //  (b) prev 有 → 当前也有但 id 变了（head swap，promote 队列下一个 ask 上头时旧 id 必须先释放）
+      // 正常 resolve 路径 server 已 process.send 过 (a)，(b) 是新增的多并发场景下 Electron pendingByTab
+      // Map<id> 同步必需，否则 main 进程 dock badge / flashFrame 仍认为旧 ask 在挂着。
       try {
         if (typeof window !== 'undefined' && window.tabBridge?.notifyAskResolved
-            && this.state.pendingAsk == null && prevState.pendingAsk) {
+            && prevState.pendingAsk
+            && (this.state.pendingAsk == null
+                || this.state.pendingAsk.id !== prevState.pendingAsk.id)) {
           window.tabBridge.notifyAskResolved({
             id: prevState.pendingAsk.id,
             tabId: this.props.ownTabId ?? null,
@@ -670,11 +683,17 @@ class ChatView extends React.Component {
           tabId: this.props.ownTabId ?? null,
         });
       }
-      if (this.state.pendingAsk && typeof window !== 'undefined' && window.tabBridge?.notifyAskResolved) {
-        window.tabBridge.notifyAskResolved({
-          id: this.state.pendingAsk.id,
-          tabId: this.props.ownTabId ?? null,
-        });
+      if (typeof window !== 'undefined' && window.tabBridge?.notifyAskResolved) {
+        const tabId = this.props.ownTabId ?? null;
+        if (this.state.pendingAsk) {
+          try { window.tabBridge.notifyAskResolved({ id: this.state.pendingAsk.id, tabId }); } catch {}
+        }
+        // Drain queued asks too — Electron main keeps pendingByTab[tabId].ask as Map<id>,
+        // so each must be removed individually or the badge / dock count goes stale.
+        // Per-item try-catch：单条 IPC throw 不中断后续清理。
+        for (const q of (this.state.askQueue || [])) {
+          try { window.tabBridge.notifyAskResolved({ id: q.id, tabId }); } catch {}
+        }
       }
     } catch {}
     if (this._queueTimer) clearTimeout(this._queueTimer);
@@ -2147,6 +2166,34 @@ class ChatView extends React.Component {
   // (renderDangerApproval / SubAgent 兜底权限面板路由 / handlePlanFeedbackSubmit isDanger 检查 /
   //  _submitViaSequentialQueue 非 danger 类型自检 等)。合并 ws 后 ChatView 仍需要这条解析路径,
   // CPU 开销保留,但网络层 1 条 ws 是仍有收益(改前 2 条同时收同一份 PTY 流)。
+  // Promote the next ask from askQueue to pendingAsk (or clear when empty).
+  // Side-effects on routing flags (_askHookActive / _sdkAskId / _askHookQuestions)
+  // are intentional — submit paths read these fields, so they must follow the head.
+  // Mirrors the permissionQueue dequeue pattern but additionally re-derives routing kind.
+  _promoteNextAskFromQueue = () => {
+    const queue = this.state.askQueue;
+    const next = queue && queue.length > 0 ? queue[0] : null;
+    if (next) {
+      if (next.kind === ASK_KIND.SDK) {
+        this._sdkAskId = next.id;
+        this._askHookActive = false;
+      } else {
+        this._sdkAskId = null;
+        this._askHookActive = true;
+      }
+      this._askHookQuestions = next.questions;
+      this.setState({
+        pendingAsk: { id: next.id, questions: next.questions },
+        askQueue: queue.slice(1),
+      });
+    } else {
+      this._askHookActive = false;
+      this._sdkAskId = null;
+      this._askHookQuestions = null;
+      this.setState({ pendingAsk: null, askQueue: [] });
+    }
+  };
+
   _onTerminalWsMessage = (msg) => {
     try {
       if (msg.type === 'data') {
@@ -2154,38 +2201,84 @@ class ChatView extends React.Component {
       } else if (msg.type === 'exit') {
           this._clearPtyPrompt();
         } else if (msg.type === 'ask-hook-pending') {
-          this._askHookActive = true;
-          this._askHookQuestions = msg.questions;
-          // Mirror to React state so the global modal can react. PTY hook has only one pending ask at a time.
-          // 仅当 pendingAsk 不存在或仍是占位符时才 setState；避免 sdk-ask-pending 已经设过真实 toolId
-          // 后被后到的 hook 退回 '__ask__'，触发 ChatMessage portal 旧通配 OR 子句把多份 form 都 portal 进 askSlot。
-          if (Array.isArray(msg.questions) && msg.questions.length > 0
-              && (!this.state.pendingAsk || this.state.pendingAsk.id === '__ask__')) {
-            this.setState({ pendingAsk: { id: '__ask__', questions: msg.questions } });
+          // Hook bridge: server now sends an id so multiple concurrent asks (sub-agents)
+          // multiplex through pendingAskHooks Map and never block each other.
+          // Legacy server (no id) → fall back to LEGACY_ASK_PLACEHOLDER_ID placeholder for single-slot semantics.
+          if (Array.isArray(msg.questions) && msg.questions.length > 0) {
+            const askId = msg.id != null ? String(msg.id) : LEGACY_ASK_PLACEHOLDER_ID;
+            // Telemetry：legacy server + 多并发 ask 的 mid-deploy 混合场景下，
+            // 第二条 ask 会因 placeholder id 撞库被静默 dedupe 丢弃。warn 让用户至少在
+            // Console 里能看到 "为什么有的 ask 没弹出来"，否则零 telemetry 黑盒。
+            // 仅 head 是 placeholder 时才会 dedupe（promote 走的是 setState updater 里的
+            // dedupe return null → askQueue 永远不会塞 placeholder），故只需检查 pendingAsk。
+            if (msg.id == null && this.state.pendingAsk?.id === LEGACY_ASK_PLACEHOLDER_ID) {
+              console.warn('[ChatView] legacy ask-hook-pending without id arrived while a placeholder ask is already active — second ask will be silently dropped (legacy server does not support concurrent asks). Upgrade server to enable multi-ask multiplexing.');
+            }
+            this.setState(state => {
+              // Already showing one — queue this new ask. dedupe by id (WS reconnects can re-deliver).
+              if (state.pendingAsk) {
+                if (state.pendingAsk.id === askId) return null;
+                if (state.askQueue.some(a => a.id === askId)) return null;
+                return { askQueue: [...state.askQueue, { id: askId, questions: msg.questions, kind: ASK_KIND.HOOK }] };
+              }
+              // Become the head and own routing flags.
+              this._askHookActive = true;
+              this._askHookQuestions = msg.questions;
+              this._sdkAskId = null;
+              return { pendingAsk: { id: askId, questions: msg.questions } };
+            });
           }
         } else if (msg.type === 'ask-hook-timeout') {
-          this._askHookActive = false;
-          this._askHookQuestions = null;
-          // 条件清理：只清自己设过的占位 id，避免误清 SDK 真实 id 路径上的 pendingAsk
-          if (this.state.pendingAsk?.id === '__ask__') {
-            this.setState({ pendingAsk: null });
+          // id-aware: only clear/promote when the timed-out ask matches the head.
+          // Legacy timeout without id (or LEGACY_ASK_PLACEHOLDER_ID) → match the legacy placeholder head only,
+          // never clobber an active SDK ask.
+          const askId = msg.id != null ? String(msg.id) : null;
+          if (askId == null) {
+            if (this.state.pendingAsk?.id === LEGACY_ASK_PLACEHOLDER_ID) this._promoteNextAskFromQueue();
+            return;
+          }
+          if (this.state.pendingAsk?.id === askId) {
+            this._promoteNextAskFromQueue();
+          } else if (this.state.askQueue.some(a => a.id === askId)) {
+            this.setState(state => ({ askQueue: state.askQueue.filter(a => a.id !== askId) }));
           }
         } else if (msg.type === 'sdk-plan-pending') {
           // SDK mode: ExitPlanMode — show plan approval UI
           this.setState({ pendingPlanApproval: { id: msg.id, input: msg.input } });
         } else if (msg.type === 'sdk-ask-pending') {
-          // SDK mode: AskUserQuestion via canUseTool
-          this._askHookActive = true;
-          this._askHookQuestions = msg.questions;
-          this._sdkAskId = msg.id;
+          // SDK mode: AskUserQuestion via canUseTool — id is the SDK toolUseId.
+          // Same queue as hook so SDK + hook (mutually exclusive in practice) share UX.
+          // sdk-manager.js always sets msg.id from toolUseID; warn loudly if invariant breaks
+          // rather than silently dropping the prompt (would leave the SDK side waiting forever).
+          if (msg.id == null) {
+            console.warn('[ChatView] sdk-ask-pending missing id — server invariant violated, ignoring');
+            return;
+          }
           if (Array.isArray(msg.questions) && msg.questions.length > 0) {
-            this.setState({ pendingAsk: { id: String(msg.id), questions: msg.questions } });
+            const askId = String(msg.id);
+            this.setState(state => {
+              if (state.pendingAsk) {
+                if (state.pendingAsk.id === askId) return null;
+                if (state.askQueue.some(a => a.id === askId)) return null;
+                return { askQueue: [...state.askQueue, { id: askId, questions: msg.questions, kind: ASK_KIND.SDK }] };
+              }
+              this._askHookActive = true;
+              this._askHookQuestions = msg.questions;
+              this._sdkAskId = msg.id;
+              return { pendingAsk: { id: askId, questions: msg.questions } };
+            });
           }
         } else if (msg.type === 'sdk-ask-timeout') {
-          this._askHookActive = false;
-          this._askHookQuestions = null;
-          this._sdkAskId = null;
-          this.setState({ pendingAsk: null });
+          const askId = msg.id != null ? String(msg.id) : null;
+          if (askId == null) {
+            // Defensive: no id — clear current head only if it's the placeholder. SDK ids never use placeholder.
+            return;
+          }
+          if (this.state.pendingAsk?.id === askId) {
+            this._promoteNextAskFromQueue();
+          } else if (this.state.askQueue.some(a => a.id === askId)) {
+            this.setState(state => ({ askQueue: state.askQueue.filter(a => a.id !== askId) }));
+          }
         } else if (msg.type === 'perm-hook-pending') {
           // Queue support: if a permission panel is already showing, queue the new one
           this.setState(state => {
@@ -2217,20 +2310,23 @@ class ChatView extends React.Component {
             return { permissionQueue: state.permissionQueue.filter(p => p.id !== msg.id) };
           });
         } else if (msg.type === 'ask-hook-resolved') {
-          // 另一端已回答 AskUserQuestion (PTY hook 模式)
-          this._askHookActive = false;
-          this._askHookQuestions = null;
-          // 条件清理：只清自己设过的占位 id，避免误清 SDK 真实 id 路径上的 pendingAsk
-          if (this.state.pendingAsk?.id === '__ask__') {
-            this.setState({ pendingAsk: null });
+          // 另一端已回答 AskUserQuestion (hook bridge 模式) — id-aware after Map migration.
+          // Legacy resolved without id → only clear the placeholder head.
+          const askId = msg.id != null ? String(msg.id) : null;
+          if (askId == null) {
+            if (this.state.pendingAsk?.id === LEGACY_ASK_PLACEHOLDER_ID) this._promoteNextAskFromQueue();
+          } else if (this.state.pendingAsk?.id === askId) {
+            this._promoteNextAskFromQueue();
+          } else if (this.state.askQueue.some(a => a.id === askId)) {
+            this.setState(state => ({ askQueue: state.askQueue.filter(a => a.id !== askId) }));
           }
         } else if (msg.type === 'sdk-ask-resolved') {
           // 另一端已回答 AskUserQuestion (SDK 模式)
-          if (this._sdkAskId === msg.id) {
-            this._askHookActive = false;
-            this._askHookQuestions = null;
-            this._sdkAskId = null;
-            if (this.state.pendingAsk) this.setState({ pendingAsk: null });
+          const askId = msg.id != null ? String(msg.id) : null;
+          if (askId != null && this.state.pendingAsk?.id === askId) {
+            this._promoteNextAskFromQueue();
+          } else if (askId != null && this.state.askQueue.some(a => a.id === askId)) {
+            this.setState(state => ({ askQueue: state.askQueue.filter(a => a.id !== askId) }));
           }
         } else if (msg.type === 'sdk-plan-resolved') {
           if (this.state.pendingPlanApproval?.id === msg.id) {
@@ -2258,8 +2354,23 @@ class ChatView extends React.Component {
     if (this.state.pendingPtyPlan?.id) {
       this._resolvedPlanIds.add(this.state.pendingPtyPlan.id);
     }
-    if (this.state.pendingPermission || this.state.pendingPlanApproval || this.state.pendingAsk || this.state.pendingPtyPlan) {
-      this.setState({ pendingPermission: null, permissionQueue: [], pendingPlanApproval: null, pendingAsk: null, pendingPtyPlan: null });
+    // Drain Electron pendingByTab[tabId].ask Map：清 askQueue 时每条都得逐条 notifyAskResolved，
+    // 否则 dock badge / flashFrame 状态不归零。镜像 componentWillUnmount drain 模式 +
+    // per-item try-catch 防单条 IPC throw 中断后续。
+    try {
+      if (typeof window !== 'undefined' && window.tabBridge?.notifyAskResolved) {
+        const tabId = this.props.ownTabId ?? null;
+        if (this.state.pendingAsk) {
+          try { window.tabBridge.notifyAskResolved({ id: this.state.pendingAsk.id, tabId }); } catch {}
+        }
+        for (const q of (this.state.askQueue || [])) {
+          try { window.tabBridge.notifyAskResolved({ id: q.id, tabId }); } catch {}
+        }
+      }
+    } catch {}
+    if (this.state.pendingPermission || this.state.pendingPlanApproval || this.state.pendingAsk
+        || this.state.pendingPtyPlan || this.state.askQueue?.length) {
+      this.setState({ pendingPermission: null, permissionQueue: [], pendingPlanApproval: null, pendingAsk: null, askQueue: [], pendingPtyPlan: null });
     }
     this._sdkAskId = null;
     this._askHookActive = false;
@@ -2654,6 +2765,15 @@ class ChatView extends React.Component {
    * answers: [{ questionIndex, type: 'single'|'multi'|'other', optionIndex, selectedIndices, text }]
    */
   handleAskQuestionSubmit = (answers, askId, questions) => {
+    // 关键：在 _promoteNextAskFromQueue 之前把当前 head 的所有提交上下文整体快照下来。
+    // promote 会立刻把 _askHookQuestions / _askHookActive / _sdkAskId 切到下一个 ask，
+    // 用 instance 字段就会用"下一个 ask 的 questions"给"当前 ask 的 answers"编 key —— 错位。
+    const submitCtx = {
+      headAskId: this.state.pendingAsk?.id || null,
+      hookQuestions: this._askHookQuestions,  // 当前 head 的 questions（hook bridge 提交按 questionText 编 key 用这份）
+      wasHookActive: this._askHookActive,     // 路由 flag 的当前值（promote 后会被改）
+      wasSdkAskId: this._sdkAskId,
+    };
     // 立即更新本地答案映射，解除 Last Response 中"提交中..."卡住状态
     if (askId && questions) {
       const localAnswers = {};
@@ -2677,16 +2797,15 @@ class ChatView extends React.Component {
       this._lastAskSubmitId = askId;
       this.setState(prev => ({
         localAskAnswers: { ...(prev.localAskAnswers || {}), [askId]: localAnswers },
-        // 乐观清空 pendingAsk：让全局 modal 与 inline form 在同一帧消失，不依赖 server ack。
-        // server 后续到达的 sdk-ask-resolved / ask-hook-resolved 会被现有守卫挡掉
-        // (_sdkAskId 已 null 或 pendingAsk?.id === '__ask__' 已不成立)，no-op 无副作用。
-        pendingAsk: null,
       }));
+      // 乐观推进 head：让全局 modal 与 inline form 在同一帧切到下一个 ask（或清空），不依赖 server ack。
+      // server 后续到达的 sdk-ask-resolved / ask-hook-resolved 因 head id 已变 → no-op 无副作用。
+      this._promoteNextAskFromQueue();
     }
 
     // SDK 模式：直接通过 WS 发送结构化答案，无需 hook bridge 或 PTY
     if (this.props.sdkMode) {
-      const resolvedId = askId || this._sdkAskId;
+      const resolvedId = askId || submitCtx.wasSdkAskId;
       if (!resolvedId) {
         // SDK 已被其他设备回答 / 没有可解析的 id：早退也要清暂存字段，
         // 否则下一轮 PTY abort 时会用过期 pendingAsk 错误回滚出已结束的 modal。
@@ -2697,8 +2816,9 @@ class ChatView extends React.Component {
       const ws = this._inputWs;
       if (ws && ws.readyState === WebSocket.OPEN) {
         // 构造 answers 对象: { questionText: selectedLabel }
+        // qs 优先取快照（promote 已经把 instance 字段切到了下一个 ask 的 questions，会错位）
         const sdkAnswers = {};
-        const qs = this._askHookQuestions || questions;
+        const qs = submitCtx.hookQuestions || questions;
         for (const answer of answers) {
           const q = qs?.[answer.questionIndex];
           if (!q) continue;
@@ -2712,7 +2832,6 @@ class ChatView extends React.Component {
           }
         }
         ws.send(JSON.stringify({ type: 'sdk-ask-answer', id: resolvedId, answers: sdkAnswers }));
-        this._sdkAskId = null;
         // 成功路径：清掉 abort 回滚用的暂存字段
         this._lastClearedPendingAsk = null;
         this._lastAskSubmitId = null;
@@ -2727,15 +2846,15 @@ class ChatView extends React.Component {
     }
 
     // Hook bridge path: submit structured JSON instead of PTY simulation
-    // Guard: don't switch to hook path if PTY submission is already in progress
-    if (this._askHookActive && !this._askSubmitting) {
-      this._submitViaHookBridge(answers);
+    // 路由判定也用快照（promote 后 _askHookActive 反映的是新 head，而当前提交的是旧 head）
+    if (submitCtx.wasHookActive && !this._askSubmitting) {
+      this._submitViaHookBridge(answers, submitCtx.headAskId, submitCtx.hookQuestions);
       return;
     }
 
     // Hook bridge 可能尚未就绪（streaming response 先于 hook 触发的时序竞争）：
     // WebSocket 已连接但 ask-hook-pending 消息还没到 → 短暂等待再决定路径
-    if (!this._askHookActive && !this._askSubmitting
+    if (!submitCtx.wasHookActive && !this._askSubmitting
         && this._inputWs && this._inputWs.readyState === WebSocket.OPEN) {
       this._pendingHookAnswers = answers;
       this._askHookWaitRetries = 0;
@@ -2898,8 +3017,20 @@ class ChatView extends React.Component {
       });
     }
     try {
-      message.warning(t('ui.askSubmitRetryHint'));
-    } catch {}
+      Modal.warning({
+        title: t('ui.askSubmitRetryHint'),
+        content: (
+          <div>
+            <div style={{ whiteSpace: 'pre-line' }}>{t('ui.askSubmitFailedDetail')}</div>
+            <div style={{ marginTop: 8, fontSize: 11, color: 'var(--text-muted)' }}>[reason] {String(reason || 'unknown')}</div>
+          </div>
+        ),
+      });
+    } catch {
+      // Modal.warning 在 SSR / antd ConfigProvider 缺失等极端路径下可能 throw，
+      // 退回到原 message.warning toast 保证用户至少能感知到失败（modal 失败比原 toast 失败更不可见）。
+      try { message.warning(t('ui.askSubmitRetryHint')); } catch {}
+    }
   }
 
   /**
@@ -2998,7 +3129,7 @@ class ChatView extends React.Component {
    * Submit AskUserQuestion answers via hook bridge (structured JSON, no PTY simulation).
    * Converts client answer format to hook answer format and sends via WebSocket.
    */
-  _submitViaHookBridge(answers) {
+  _submitViaHookBridge(answers, explicitHeadId, explicitQuestions) {
     const ws = this._inputWs;
     if (!ws || ws.readyState !== WebSocket.OPEN) {
       // Fallback to PTY path（直接走 PTY，跳过路由判断避免 WS reconnect 竞态白等 3s）
@@ -3010,7 +3141,12 @@ class ChatView extends React.Component {
 
     this._askSubmitting = true;
 
-    const questions = this._askHookQuestions || [];
+    // 优先用快照 questions：handleAskQuestionSubmit 在 _promoteNextAskFromQueue 之前已经把
+    // 当前 head 的 questions 抓出来传进来；instance 字段 _askHookQuestions 此时已被 promote
+    // 切到下一个 ask 的 questions（错位会让 hookAnswers 的 key 全部用错 question text）。
+    // 兜底：retry 路径（_waitForHookBridge）调本函数时不传 questions —— 那种场景 promote 是 no-op，
+    // 直接读 instance 字段才是正确的当前 head。
+    const questions = explicitQuestions || this._askHookQuestions || [];
     const hookAnswers = {};
 
     for (const answer of answers) {
@@ -3031,7 +3167,15 @@ class ChatView extends React.Component {
       }
     }
 
-    ws.send(JSON.stringify({ type: 'ask-hook-answer', answers: hookAnswers }));
+    // Resolve which pending ask in pendingAskHooks Map this answer addresses.
+    // Direct submit path passes explicitHeadId (captured before optimistic queue advance).
+    // Retry-from-_waitForHookBridge path omits it → read current head from state, since the
+    // hook arrived after the optimistic clear and is the freshly-set head.
+    // LEGACY_ASK_PLACEHOLDER_ID placeholder = legacy server (no Map); send no id and let server fall back to FIFO.
+    const resolvedAskId = (explicitHeadId !== undefined ? explicitHeadId : this.state.pendingAsk?.id) || null;
+    const payload = { type: 'ask-hook-answer', answers: hookAnswers };
+    if (resolvedAskId && resolvedAskId !== LEGACY_ASK_PLACEHOLDER_ID) payload.id = resolvedAskId;
+    ws.send(JSON.stringify(payload));
 
     // 成功路径：清掉 abort 回滚用的暂存字段
     this._lastClearedPendingAsk = null;

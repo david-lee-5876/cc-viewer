@@ -119,8 +119,10 @@ let _workspaceIsNpmVersion = false;
 let _workspaceLaunched = false; // 工作区是否已经启动了会话
 
 // Ask hook bridge state (for PreToolUse AskUserQuestion hook)
-// At most one pending request at a time (Claude Code is single-threaded)
-let pendingAskHook = null; // { questions, res, timer, createdAt }
+// Map supports concurrent ask requests (sub-agents / teammates) so a stale unanswered
+// ask never blocks the next one. Keyed by server-generated id.
+const pendingAskHooks = new Map(); // Map<id, { questions, res, timer, createdAt }>
+const ASK_HOOK_MAP_MAX = 50;
 
 // Permission hook bridge state (for PreToolUse permission approval)
 // Map supports concurrent sub-agent/teammate requests (keyed by request id)
@@ -2304,40 +2306,111 @@ async function handleRequest(req, res) {
   // Ask hook bridge: long-poll endpoint for PreToolUse AskUserQuestion hook
   if (url === '/api/ask-hook' && method === 'POST') {
     let body = '';
+    let bodyTooLarge = false;
     req.on('data', (chunk) => {
       body += chunk;
       if (body.length > 1000000) { // 1MB limit (questions may contain large previews)
-        res.writeHead(413, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'Request body too large' }));
-        return;
+        bodyTooLarge = true;
+        req.destroy();
       }
     });
     req.on('end', async () => {
+      if (bodyTooLarge) {
+        try { if (!res.headersSent) { res.writeHead(413, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: 'Request body too large' })); } } catch {}
+        return;
+      }
       try {
-        const { questions } = JSON.parse(body);
+        const { questions, toolUseId } = JSON.parse(body);
         if (!Array.isArray(questions) || questions.length === 0) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'Missing questions' }));
           return;
         }
-
-        // Cancel any previous pending hook request
-        if (pendingAskHook) {
-          try {
-            if (!pendingAskHook.res.headersSent) {
-              pendingAskHook.res.writeHead(409, { 'Content-Type': 'application/json' });
-              pendingAskHook.res.end(JSON.stringify({ error: 'Superseded' }));
+        // 镜像 ask-bridge 的 normalize：覆盖 plugin/SDK 等非 ask-bridge 的 client。
+        // 缺失 description 补 ""，前端按 hasOptionDescription 判断走非渲染分支。
+        for (const q of questions) {
+          if (!q || typeof q !== 'object' || !Array.isArray(q.options)) continue;
+          for (const opt of q.options) {
+            if (opt && typeof opt === 'object' && opt.description === undefined) {
+              opt.description = '';
             }
-          } catch {}
-          clearTimeout(pendingAskHook.timer);
+          }
+        }
+
+        // Evict oldest if Map is full (prevent memory leak from pathological concurrency).
+        // Mirrors perm-hook eviction; an evicted bridge process gets HTTP 429 and falls back
+        // to its own terminal UI rather than leaking long-poll state.
+        if (pendingAskHooks.size >= ASK_HOOK_MAP_MAX) {
+          const oldestId = pendingAskHooks.keys().next().value;
+          const oldest = pendingAskHooks.get(oldestId);
+          if (oldest) {
+            clearTimeout(oldest.timer);
+            try { if (!oldest.res.headersSent) { oldest.res.writeHead(429, { 'Content-Type': 'application/json' }); oldest.res.end(JSON.stringify({ error: 'Too many concurrent requests' })); } } catch {}
+            pendingAskHooks.delete(oldestId);
+            if (terminalWss) {
+              const tmsg = JSON.stringify({ type: 'ask-hook-timeout', id: oldestId });
+              terminalWss.clients.forEach((c) => {
+                if (c.readyState === 1) try { c.send(tmsg); } catch {}
+              });
+            }
+            _notifyParentPending({ type: 'ask-hook-timeout', id: oldestId });
+          }
         }
 
         const HOOK_TIMEOUT = 5 * 60 * 1000; // 5 minutes
+        // toolUseId 路由策略：
+        //  - char whitelist + ≤256 长度 防恶意 1MB key 撑大 Map
+        //  - 已存在同 id 但旧 res 已断（writableEnded/destroyed）→ 复用槽位（ask-bridge 重试场景）
+        //  - 已存在同 id 且旧 res 活 → 返 409 Conflict（真重复）而非走 fallback id 让前端 portal 失效
+        //  - 缺 toolUseId 或非法 → fallback 自生成 id
+        const wantsToolUseId = toolUseId && typeof toolUseId === 'string'
+          && toolUseId.length > 0 && toolUseId.length <= 256
+          && /^[a-zA-Z0-9_-]+$/.test(toolUseId);
+        let id;
+        if (wantsToolUseId) {
+          const existing = pendingAskHooks.get(toolUseId);
+          if (!existing) {
+            id = toolUseId;
+          } else if (!existing.res || existing.res.writableEnded || existing.res.destroyed) {
+            // 旧 res 已断（包含占位 res:null 残留）— ask-bridge 重试同 toolUseId 合理，复用槽位
+            if (existing.timer) clearTimeout(existing.timer);
+            pendingAskHooks.delete(toolUseId);
+            id = toolUseId;
+          } else {
+            res.writeHead(409, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Duplicate toolUseId, previous request still pending' }));
+            return;
+          }
+        } else {
+          do { id = `ask_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`; } while (pendingAskHooks.has(id));
+        }
+
+        // TOCTOU 防御：占位 id 之前先注册 res.on('close')，否则 await runWaterfallHook 期间 client
+        // abort 的 close 事件落空 → entry 残 5min。占位 set 提前到 await 之前防两条同 ms 并发
+        // POST 的 do-while 都通过 collision check 后 set 互相覆盖（first res 永泄漏到 5min）。
+        pendingAskHooks.set(id, { questions, res, timer: null, createdAt: Date.now() });
+
+        // res.on('close') 提前注册：handler 用 entry.timer 守卫（占位期 timer:null → 仅 delete Map）
+        res.on('close', () => {
+          const entry = pendingAskHooks.get(id);
+          if (entry) {
+            if (entry.timer) clearTimeout(entry.timer);
+            pendingAskHooks.delete(id);
+            if (terminalWss) {
+              const tmsg = JSON.stringify({ type: 'ask-hook-timeout', id });
+              terminalWss.clients.forEach((c) => {
+                if (c.readyState === 1) try { c.send(tmsg); } catch {}
+              });
+            }
+            _notifyParentPending({ type: 'ask-hook-timeout', id });
+          }
+        });
 
         // Plugin hook: let plugins answer questions directly
         try {
-          const hookResult = await runWaterfallHook('onAskRequest', { id: `ask_${Date.now()}`, questions, mode: 'hook' });
+          const hookResult = await runWaterfallHook('onAskRequest', { id, questions, mode: 'hook' });
           if (hookResult.answers) {
+            pendingAskHooks.delete(id); // 释放占位 — plugin 直接答了
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ answers: hookResult.answers }));
             return;
@@ -2345,52 +2418,38 @@ async function handleRequest(req, res) {
         } catch {}
 
         const timer = setTimeout(() => {
-          if (pendingAskHook && pendingAskHook.res === res) {
-            pendingAskHook = null;
+          const entry = pendingAskHooks.get(id);
+          if (entry) {
+            pendingAskHooks.delete(id);
             try {
-              if (!res.headersSent) {
-                res.writeHead(408, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ error: 'Timeout' }));
+              // null guard：plugin throw + outer body-parse race 极端下占位残留时 fire 防 TypeError
+              if (entry.res && !entry.res.headersSent) {
+                entry.res.writeHead(408, { 'Content-Type': 'application/json' });
+                entry.res.end(JSON.stringify({ error: 'Timeout' }));
               }
             } catch {}
-            // Broadcast timeout to clients
             if (terminalWss) {
-              const tmsg = JSON.stringify({ type: 'ask-hook-timeout' });
+              const tmsg = JSON.stringify({ type: 'ask-hook-timeout', id });
               terminalWss.clients.forEach((c) => {
                 if (c.readyState === 1) try { c.send(tmsg); } catch {}
               });
             }
-            _notifyParentPending({ type: 'ask-hook-timeout' });
+            _notifyParentPending({ type: 'ask-hook-timeout', id });
           }
         }, HOOK_TIMEOUT);
 
-        pendingAskHook = { questions, res, timer, createdAt: Date.now() };
+        pendingAskHooks.set(id, { questions, res, timer, createdAt: Date.now() });
 
         // Broadcast to all terminal WS clients
         if (terminalWss) {
-          const pmsg = JSON.stringify({ type: 'ask-hook-pending', questions });
+          const pmsg = JSON.stringify({ type: 'ask-hook-pending', id, questions });
           terminalWss.clients.forEach((client) => {
             if (client.readyState === 1) {
               try { client.send(pmsg); } catch {}
             }
           });
         }
-        _notifyParentPending({ type: 'ask-hook-pending', questions });
-
-        // Handle ask-bridge.js disconnection (use res instead of req — Node.js v24+ fires req 'close' immediately after body is read)
-        res.on('close', () => {
-          if (pendingAskHook && pendingAskHook.res === res) {
-            clearTimeout(pendingAskHook.timer);
-            pendingAskHook = null;
-            if (terminalWss) {
-              const tmsg = JSON.stringify({ type: 'ask-hook-timeout' });
-              terminalWss.clients.forEach((c) => {
-                if (c.readyState === 1) try { c.send(tmsg); } catch {}
-              });
-            }
-            _notifyParentPending({ type: 'ask-hook-timeout' });
-          }
-        });
+        _notifyParentPending({ type: 'ask-hook-pending', id, questions });
       } catch {
         res.writeHead(400, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: 'Invalid request body' }));
@@ -3701,12 +3760,13 @@ export async function startViewer() {
                 }
                 return true;
               },
-              getPendingAsk: () => pendingAskHook ? { questions: pendingAskHook.questions, createdAt: pendingAskHook.createdAt } : null,
-              resolveAsk: (answers) => {
-                if (!pendingAskHook) return false;
-                const { res: hookRes, timer } = pendingAskHook;
+              getPendingAsks: () => [...pendingAskHooks.entries()].map(([id, e]) => ({ id, questions: e.questions, createdAt: e.createdAt })),
+              resolveAsk: (id, answers) => {
+                const entry = pendingAskHooks.get(id);
+                if (!entry) return false;
+                const { res: hookRes, timer } = entry;
                 clearTimeout(timer);
-                pendingAskHook = null;
+                pendingAskHooks.delete(id);
                 try {
                   if (!hookRes.headersSent) {
                     hookRes.writeHead(200, { 'Content-Type': 'application/json' });
@@ -3714,10 +3774,10 @@ export async function startViewer() {
                   }
                 } catch {}
                 if (terminalWss) {
-                  const rmsg = JSON.stringify({ type: 'ask-hook-resolved' });
+                  const rmsg = JSON.stringify({ type: 'ask-hook-resolved', id });
                   terminalWss.clients.forEach((c) => { if (c.readyState === 1) try { c.send(rmsg); } catch {} });
                 }
-                _notifyParentPending({ type: 'ask-hook-resolved' });
+                _notifyParentPending({ type: 'ask-hook-resolved', id });
                 return true;
               },
               resolveSdkApproval: (...args) => _sdkResolveApproval?.(...args),
@@ -3967,12 +4027,25 @@ async function setupTerminalWebSocket(httpServer) {
               }, { settleMs: msg.settleMs || 150 });
             }
           } else if (msg.type === 'ask-hook-answer') {
-            // Client answered AskUserQuestion via hook bridge
+            // Client answered AskUserQuestion via hook bridge.
+            // New protocol: msg.id required to address one of multiple pending asks.
+            // Legacy fallback: no id → resolve the oldest pending ask (preserves pre-Map client behavior).
             let askAnswered = false;
-            if (pendingAskHook) {
-              const { res: hookRes, timer } = pendingAskHook;
+            let askId = msg.id;
+            let askEntry = null;
+            if (askId) {
+              askEntry = pendingAskHooks.get(askId);
+            } else {
+              const firstId = pendingAskHooks.keys().next().value;
+              if (firstId) {
+                askId = firstId;
+                askEntry = pendingAskHooks.get(firstId);
+              }
+            }
+            if (askEntry) {
+              const { res: hookRes, timer } = askEntry;
               clearTimeout(timer);
-              pendingAskHook = null;
+              pendingAskHooks.delete(askId);
               askAnswered = true;
               try {
                 if (!hookRes.headersSent) {
@@ -3983,12 +4056,12 @@ async function setupTerminalWebSocket(httpServer) {
             }
             // Broadcast resolved to other clients so they clear their ask panel
             if (askAnswered && terminalWss) {
-              const rmsg = JSON.stringify({ type: 'ask-hook-resolved' });
+              const rmsg = JSON.stringify({ type: 'ask-hook-resolved', id: askId });
               terminalWss.clients.forEach((c) => {
                 if (c !== ws && c.readyState === 1) try { c.send(rmsg); } catch {}
               });
             }
-            if (askAnswered) _notifyParentPending({ type: 'ask-hook-resolved' });
+            if (askAnswered) _notifyParentPending({ type: 'ask-hook-resolved', id: askId });
           } else if (msg.type === 'perm-hook-answer') {
             // Permission approval — SDK mode (canUseTool) or PTY mode (hook bridge)
             let permAnswered = false;

@@ -6,6 +6,7 @@
 import { extractToolResultText } from './helpers';
 import { t } from '../i18n';
 import { internToolResult } from './readResultPool.js';
+import { classifyToolResultError } from './toolResultClassifier.js';
 
 // --- WeakMap cache for tool result state ---
 
@@ -138,9 +139,8 @@ export function appendToolResultMap(state, messages, startIndex) {
           // 短结果（< 256）由 internToolResult 内部自动透传，无开销
           resultText = internToolResult(resultText);
           const isError = !!block.is_error;
-          const isPermissionDenied = isError && resultText && /doesn't want to proceed|Permission.*denied|rejected.*tool use|interrupted by user for tool use/i.test(resultText);
-          const isUltraplan = isPermissionDenied && resultText && /ultraplan/i.test(resultText);
-          toolResultMap[block.tool_use_id] = { label, toolName, toolInput, resultText, isError, isPermissionDenied, isUltraplan };
+          const { isPermissionDenied, isInputValidationError, isUltraplan } = classifyToolResultError(resultText, isError);
+          toolResultMap[block.tool_use_id] = { label, toolName, toolInput, resultText, isError, isPermissionDenied, isInputValidationError, isUltraplan };
           if (matchedTool && matchedTool.name === 'Read' && matchedTool.input?.file_path) {
             readContentMap[matchedTool.input.file_path] = resultText;
             // _fileState 更新（行号解析）
