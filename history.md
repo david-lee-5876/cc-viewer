@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+- feat(git): 在 git 变更面板顶部新增「本地未推送 commit」折叠区
+  - **需求**：之前面板只展示工作区未提交变更，看不到本地领先 origin/<branch> 的 commit。
+  - **后端**：`lib/git-diff.js` 新增 `getUnpushedCommits(cwd, {maxCommits=100})`，单次 `git log --pretty='...%x1f...' --name-status @{u}..HEAD` 同时拉 commit 元数据 + 改动文件（用 `\x1e`/`\x1f` 哨兵字符避免 subject 含 tab/换行误解析）；upstream 缺失 / 分离 HEAD / 非分支时返回 `{commits:[], hasUpstream:false}`，前端据此**静默隐藏**该区。同文件扩展 `getGitDiffs(cwd, files, commitHash)` 支持 commit-context diff（旧内容用 `<hash>^:file`，新内容用 `<hash>:file`，状态查 `git diff-tree -r --name-status --root <hash>`，`--root` 让初始 commit 也能正确标记 `A`）。新增 `isValidCommitHash` 严格 hex 校验（7..40 位）防 git 路径注入。
+  - **API**：`server.js` 新增 `GET /api/git-log-unpushed?repo=<path>` 返回 `{commits, hasUpstream, branch, upstream}`；`GET /api/git-diff` 新增可选 `commit=<hash>` 参数（commit-context diff），未通过 `isValidCommitHash` 校验时回退工作区模式不抛错。
+  - **前端**：`src/utils/gitApi.js` `fetchAllRepos` 同时并发拉 `git-status` + `git-log-unpushed`；`src/components/GitChanges.jsx` 抽 `CommitRow` 组件，每行显示短 hash + subject + author + 智能日期（今日时:分 / 否则月-日）+ 文件数 badge，点击展开内嵌 `TreeDir` 渲染该 commit 改动文件；commit-context 文件复用 `STATUS_COLORS`/`STATUS_LABELS`/`buildGitTree`，但隐藏 restore 按钮（commit 已落盘不应工作区 restore）。`selectedCommitHash` 与 `selectedFile`/`selectedRepo` 三元唯一标识高亮，避免工作区文件与同名 commit 文件高亮串扰。`src/components/GitDiffView.jsx` 接受 `commitHash` prop 透传到 API，并在头部多渲染一个短 hash chip 让用户知晓上下文。`src/components/ChatView.jsx` `currentGitDiff` state 增加 `commit` 字段。
+  - **设计决策**（user 单选锁定）：① 顶部折叠区与"工作区变更"并列于同一面板；② 点 commit 行展开文件 + 点文件右侧看 diff（与现有行为一致）；③ 无 upstream / detached HEAD 时静默隐藏该区。
+  - **i18n**：`src/i18n.js` 新增 `ui.gitChanges.unpushedCommits` 18 语言翻译。
+  - **CSS**：`src/components/GitChanges.module.css` 新增 `.unpushedHeader` / `.commitItem` / `.commitArrow` / `.commitHash` / `.commitSubject` / `.commitMeta` / `.commitFileBadge`，无 `!important`。
+  - **测试**：`test/git-unpushed.test.js` 新增 14 case 覆盖 `isValidCommitHash` 校验边界 / `getUnpushedCommits` 无 upstream / detached HEAD / 已同步 / commits ahead / subject 含 tab 的哨兵分隔健壮性 / `getGitDiffs` commit 模式（hash 校验 / 正常 diff / 文件新增 / 文件删除）。1750/1750 全过 + `npm run build` 通过。
+  - **多角色 review**（functional / risk / quality 三 agent）：P0 = 0；P1 三项均判为可接受不动（键盘 a11y 与现有 TreeDir 一致；初始 commit `^:` 已被 `--root` + is_new 守卫消化；R100/C75 截断到首字母不影响渲染）；P2/P3 全 ✓。
+
+- fix(ui): 弱化顶部"新版本"强提醒，移到 footer 版本号后的小黄签
+  - **需求**：顶部 Antd Tag color="orange" 横条强提示视觉过强；用户希望弱化为版本号后的小黄签 + hover 完整文案。
+  - **改动**：`src/components/AppHeader.jsx` 删除 `updateInfo && <Tag color="orange" closable>` 块及对应 `updateInfo`/`onDismissUpdate` props 与 `shouldComponentUpdate` 比较；`src/App.jsx` footer 把原 `<svg>NEW</svg>` 徽章改为 `<Tooltip title={ui.update.majorAvailable}><span className={newBadgeText}>有新版本</span></Tooltip>`，点击仍打开升级 Modal；同步删除传给 AppHeader 的失效 props。
+  - **CSS**：`src/App.module.css` 新增 `.newBadgeText` 用 `--color-warning` / `--color-warning-bg-faint` / `--color-warning-border-light` 渲染黄色 chip + hover 加深；删除已废弃的 `.footerVersionNew` / `.newBadge`。
+  - **i18n**：`src/i18n.js` 新增 `ui.update.newBadge`（"有新版本"）18 语言翻译。
+
 ## 1.6.250
 
 - fix(chat): 消费服务端 `_inPlaceReplaceDetected` 信号根治 SUGGESTION MODE 末位替换触发的 doubled-history（实证 cc-viewer 自身复现锁定）

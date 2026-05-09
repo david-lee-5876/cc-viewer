@@ -42,7 +42,7 @@ import { checkAndUpdate } from './lib/updater.js';
 import { loadPlugins, runWaterfallHook, runParallelHook, getPluginsInfo, getPluginsDir } from './lib/plugin-loader.js';
 import { uploadPlugins, installPluginFromUrl } from './lib/plugin-manager.js';
 import { getUserProfile } from './lib/user-profile.js';
-import { getGitDiffs, countUntrackedLines } from './lib/git-diff.js';
+import { getGitDiffs, countUntrackedLines, getUnpushedCommits, isValidCommitHash } from './lib/git-diff.js';
 import { CONTEXT_WINDOW_FILE, readModelContextSize, buildContextWindowEvent, getContextSizeForModel } from './lib/context-watcher.js';
 import { watchLogFile, startWatching, getWatchedFiles, sendEventToClients, sendToClients } from './lib/log-watcher.js';
 import { isMainAgentEntry, extractCachedContent } from './lib/kv-cache-analyzer.js';
@@ -3147,13 +3147,37 @@ async function handleRequest(req, res) {
       }
 
       const files = filesParam.split(',').map(f => f.trim()).filter(Boolean);
-      const diffs = await getGitDiffs(cwd, files);
+      const commitParam = parsedUrl.searchParams.get('commit');
+      // Reject malformed commit hashes; falsy = working-tree mode
+      const commitHash = commitParam && isValidCommitHash(commitParam) ? commitParam : undefined;
+      const diffs = await getGitDiffs(cwd, files, commitHash);
 
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ diffs }));
     } catch (err) {
       res.writeHead(500, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: err.message, diffs: [] }));
+    }
+    return;
+  }
+
+  // Local commits ahead of upstream (origin/<branch>..HEAD).
+  // Silent empty result when no upstream / detached HEAD — by design.
+  if (url.startsWith('/api/git-log-unpushed') && method === 'GET') {
+    try {
+      const repoParam = parsedUrl.searchParams.get('repo');
+      const cwd = resolveRepoCwd(repoParam);
+      if (!cwd) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Invalid repo parameter', commits: [], hasUpstream: false }));
+        return;
+      }
+      const result = await getUnpushedCommits(cwd);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(result));
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message, commits: [], hasUpstream: false }));
     }
     return;
   }

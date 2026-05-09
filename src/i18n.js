@@ -2464,6 +2464,26 @@ const i18nData = {
     "tr": "{name} dosyasındaki tüm değişiklikler geri alınsın mı? Bu işlem geri alınamaz.",
     "uk": "Скасувати всі зміни в {name}? Цю дію неможливо скасувати."
   },
+  "ui.gitChanges.unpushedCommits": {
+    "zh": "本地未推送 commit",
+    "en": "Local unpushed commits",
+    "zh-TW": "本地未推送 commit",
+    "ko": "푸시되지 않은 로컬 커밋",
+    "ja": "未プッシュのローカルコミット",
+    "de": "Nicht gepushte lokale Commits",
+    "es": "Commits locales no enviados",
+    "fr": "Commits locaux non poussés",
+    "it": "Commit locali non inviati",
+    "da": "Lokale commits ikke pushet",
+    "pl": "Lokalne commity nie wypchnięte",
+    "ru": "Локальные неотправленные коммиты",
+    "ar": "إيداعات محلية لم يتم دفعها",
+    "no": "Lokale commits ikke pushet",
+    "pt-BR": "Commits locais não enviados",
+    "th": "คอมมิตในเครื่องที่ยังไม่ได้พุช",
+    "tr": "Yerel itilmemiş commit'ler",
+    "uk": "Локальні непроштовхнуті коміти"
+  },
   "ui.roleFilter": {
     "zh": "角色筛选",
     "en": "Role Filter",
@@ -4791,6 +4811,26 @@ const i18nData = {
     "th": "อัปเดตเป็น v{version} แล้ว มีผลเมื่อเริ่มใหม่",
     "tr": "v{version} sürümüne güncellendi, bir sonraki başlatmada geçerli",
     "uk": "Оновлено до v{version}, набуде чинності при наступному запуску"
+  },
+  "ui.update.newBadge": {
+    "zh": "有新版本",
+    "en": "Update",
+    "zh-TW": "有新版本",
+    "ko": "업데이트",
+    "ja": "更新あり",
+    "de": "Update",
+    "es": "Actualizar",
+    "fr": "Mise à jour",
+    "it": "Aggiorna",
+    "da": "Opdatering",
+    "pl": "Aktualizacja",
+    "ru": "Обновление",
+    "ar": "تحديث",
+    "no": "Oppdatering",
+    "pt-BR": "Atualizar",
+    "th": "อัปเดต",
+    "tr": "Güncelle",
+    "uk": "Оновлення"
   },
   "ui.update.majorAvailable": {
     "zh": "新大版本 v{version} 可用，请手动更新: npm i -g cc-viewer@latest",

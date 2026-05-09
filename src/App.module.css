@@ -262,18 +262,24 @@
   color: var(--text-tertiary);
 }
 
-.footerVersionNew {
+.newBadgeText {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  height: 14px;
+  padding: 0 5px;
+  font-size: 10px;
+  line-height: 1;
+  color: var(--color-warning);
+  background: var(--color-warning-bg-faint);
+  border: 1px solid var(--color-warning-border-light);
+  border-radius: 3px;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
 }
 
-.footerVersionNew:hover {
-  color: var(--color-success);
-}
-
-.newBadge {
-  vertical-align: middle;
+.newBadgeText:hover {
+  background: var(--color-warning-bg-light);
+  border-color: var(--color-warning);
 }
 
 .footerDivider {

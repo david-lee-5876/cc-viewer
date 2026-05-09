@@ -273,7 +273,6 @@ class AppHeader extends React.Component {
       nextProps.expandDiff !== this.props.expandDiff ||
       nextProps.filterIrrelevant !== this.props.filterIrrelevant ||
       nextProps.logDir !== this.props.logDir ||
-      nextProps.updateInfo !== this.props.updateInfo ||
       nextProps.cliMode !== this.props.cliMode ||
       nextProps.sdkMode !== this.props.sdkMode ||
       nextProps.terminalVisible !== this.props.terminalVisible ||
@@ -1123,7 +1122,7 @@ class AppHeader extends React.Component {
   }
 
   render() {
-    const { requestCount, requests = [], viewMode, cacheType, onToggleViewMode, onImportLocalLogs, onLangChange, isLocalLog, localLogFile, projectName, collapseToolResults, onCollapseToolResultsChange, expandThinking, onExpandThinkingChange, showFullToolContent, onShowFullToolContentChange, expandDiff, onExpandDiffChange, filterIrrelevant, onFilterIrrelevantChange, logDir, onLogDirChange, updateInfo, onDismissUpdate, cliMode, terminalVisible, onToggleTerminal, onReturnToWorkspaces, contextWindow, contextBarOptimistic, serverCachedContent, resumeAutoChoice, onResumeAutoChoiceToggle, onResumeAutoChoiceChange, themeColor, onThemeColorChange, autoApproveSeconds, onAutoApproveChange } = this.props;
+    const { requestCount, requests = [], viewMode, cacheType, onToggleViewMode, onImportLocalLogs, onLangChange, isLocalLog, localLogFile, projectName, collapseToolResults, onCollapseToolResultsChange, expandThinking, onExpandThinkingChange, showFullToolContent, onShowFullToolContentChange, expandDiff, onExpandDiffChange, filterIrrelevant, onFilterIrrelevantChange, logDir, onLogDirChange, cliMode, terminalVisible, onToggleTerminal, onReturnToWorkspaces, contextWindow, contextBarOptimistic, serverCachedContent, resumeAutoChoice, onResumeAutoChoiceToggle, onResumeAutoChoiceChange, themeColor, onThemeColorChange, autoApproveSeconds, onAutoApproveChange } = this.props;
     const { countdownText } = this.state;
 
     const menuItems = [
@@ -1199,15 +1198,6 @@ class AppHeader extends React.Component {
             {t('ui.liveMonitoring')}{projectName ? `:${projectName}` : ''}
           </span>
           {this.renderContextBarPortal()}
-          {updateInfo && (
-            <Tag
-              color="orange"
-              closable
-              onClose={() => onDismissUpdate && onDismissUpdate()}
-            >
-              {t('ui.update.majorAvailable', { version: updateInfo.version })}
-            </Tag>
-          )}
         </Space>
 
         <Space size={12} align="center" className={styles.headerRightRow}>

@@ -3904,10 +3904,10 @@ class ChatView extends React.Component {
               style={{ width: this.state.sidebarWidth }}
               refreshTrigger={this.state.gitChangesRefresh}
               onClose={() => this.setState({ gitChangesOpen: false })}
-              onFileClick={(repoPath, filePath) => {
+              onFileClick={(repoPath, filePath, commitHash) => {
                 const resolvedPath = repoPath && repoPath !== '.' ? `${repoPath}/${filePath}` : filePath;
                 if (tryOpenWithSystem(resolvedPath, 'git-changes')) return;
-                this.setState({ currentGitDiff: { repo: repoPath, file: filePath }, currentFile: null });
+                this.setState({ currentGitDiff: { repo: repoPath, file: filePath, commit: commitHash || null }, currentFile: null });
               }}
               onOpenFile={(repoPath, filePath) => {
                 const resolvedPath = repoPath && repoPath !== '.' ? `${repoPath}/${filePath}` : filePath;
@@ -3934,6 +3934,7 @@ class ChatView extends React.Component {
                 <GitDiffView
                   filePath={this.state.currentGitDiff.file}
                   repoPath={this.state.currentGitDiff.repo}
+                  commitHash={this.state.currentGitDiff.commit || null}
                   onClose={() => this.setState({ currentGitDiff: null })}
                   onOpenFile={(path, line) => {
                     const repo = this.state.currentGitDiff?.repo;

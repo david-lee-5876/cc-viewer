@@ -15,7 +15,7 @@ function getFirstChangedLine(oldStr, newStr) {
   return 1;
 }
 
-export default function GitDiffView({ filePath, repoPath, onClose, onOpenFile }) {
+export default function GitDiffView({ filePath, repoPath, commitHash, onClose, onOpenFile }) {
   const [diffData, setDiffData] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -43,7 +43,8 @@ export default function GitDiffView({ filePath, repoPath, onClose, onOpenFile })
     setLightboxOpen(false);
 
     const repoParam = repoPath && repoPath !== '.' ? `&repo=${encodeURIComponent(repoPath)}` : '';
-    fetch(apiUrl(`/api/git-diff?files=${encodeURIComponent(filePath)}${repoParam}`))
+    const commitParam = commitHash ? `&commit=${encodeURIComponent(commitHash)}` : '';
+    fetch(apiUrl(`/api/git-diff?files=${encodeURIComponent(filePath)}${repoParam}${commitParam}`))
       .then(r => {
         if (!r.ok) {
           return r.json().then(err => {
@@ -72,7 +73,7 @@ export default function GitDiffView({ filePath, repoPath, onClose, onOpenFile })
       });
 
     return () => { mounted.current = false; };
-  }, [filePath, repoPath]);
+  }, [filePath, repoPath, commitHash]);
 
   const resolvedPath = repoPath && repoPath !== '.' ? `${repoPath}/${filePath}` : filePath;
 
@@ -103,6 +104,9 @@ export default function GitDiffView({ filePath, repoPath, onClose, onOpenFile })
             }}
           >{resolvedPath}</span>
           <span className={styles.diffBadge}>DIFF</span>
+          {commitHash && (
+            <span className={styles.diffBadge} style={{ marginLeft: 4 }} title={commitHash}>{commitHash.substring(0, 7)}</span>
+          )}
         </div>
         <div className={styles.headerRight}>
           <button className={styles.closeBtn} onClick={handleClose} title={t('ui.backToChat')}>

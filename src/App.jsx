@@ -1,5 +1,5 @@
 import React from 'react';
-import { ConfigProvider, Layout, theme, Modal, Button, Checkbox, Spin, Alert, message } from 'antd';
+import { ConfigProvider, Layout, theme, Modal, Button, Checkbox, Spin, Alert, message, Tooltip } from 'antd';
 import { UploadOutlined, DeleteOutlined, ReloadOutlined } from '@ant-design/icons';
 import AppBase, { styles } from './AppBase';
 import { isMobile, setViewMode } from './env';
@@ -368,8 +368,6 @@ class App extends AppBase {
               onFilterIrrelevantChange={this.handleFilterIrrelevantChange}
               logDir={this.state.logDir}
               onLogDirChange={this.handleLogDirChange}
-              updateInfo={this.state.updateInfo}
-              onDismissUpdate={() => this.setState({ updateInfo: null })}
               cliMode={this.state.cliMode}
               sdkMode={this.state.sdkMode}
               terminalVisible={this.state.sdkMode ? false : this.state.terminalVisible}
@@ -493,15 +491,19 @@ class App extends AppBase {
                 GitHub{this.state.githubStars != null ? ` ★ ${this.state.githubStars}` : ''}
               </a>
               <span className={styles.footerSep}>|</span>
-              <span className={`${styles.footerVersion}${this.state.updateInfo ? ` ${styles.footerVersionNew}` : ''}`} onClick={() => this.setState({ updateModalVisible: true })} style={{ cursor: 'pointer' }}>
+              <span className={styles.footerVersion} onClick={() => this.setState({ updateModalVisible: true })} style={{ cursor: 'pointer' }}>
                 v{typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : ''}
-                {this.state.updateInfo && (
-                  <svg className={styles.newBadge} width="28" height="12" viewBox="0 0 28 12">
-                    <rect width="28" height="12" rx="3" fill="currentColor" opacity="0.25" />
-                    <text x="14" y="9" textAnchor="middle" fill="currentColor" fontSize="8" fontWeight="600" fontFamily="system-ui">NEW</text>
-                  </svg>
-                )}
               </span>
+              {this.state.updateInfo && (
+                <Tooltip title={t('ui.update.majorAvailable', { version: this.state.updateInfo.version })} placement="top">
+                  <span
+                    className={styles.newBadgeText}
+                    onClick={() => this.setState({ updateModalVisible: true })}
+                  >
+                    {t('ui.update.newBadge')}
+                  </span>
+                </Tooltip>
+              )}
             </div>
           </div>
         </Layout>

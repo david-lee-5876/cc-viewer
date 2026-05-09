@@ -236,3 +236,94 @@
 .statDelete {
   color: #f14c4c;
 }
+
+/* ─── 本地未推送 commit 区 ─── */
+.unpushedHeader {
+  display: flex;
+  align-items: center;
+  height: 26px;
+  padding: 0 8px;
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+  gap: 6px;
+  user-select: none;
+}
+
+.unpushedHeader:hover {
+  background: var(--bg-elevated);
+}
+
+.unpushedTitle {
+  flex: 1;
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.4px;
+  color: var(--text-tertiary);
+}
+
+.commitItem {
+  display: flex;
+  align-items: center;
+  height: 26px;
+  padding: 0 8px;
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+  gap: 6px;
+  transition: background 0.1s;
+}
+
+.commitItem:hover {
+  background: var(--bg-elevated);
+}
+
+.commitArrow {
+  width: 14px;
+  flex-shrink: 0;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.15s;
+  transform: rotate(0deg);
+}
+
+.commitArrowExpanded {
+  transform: rotate(90deg);
+}
+
+.commitHash {
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  color: var(--text-tertiary);
+  background: var(--bg-elevated);
+  padding: 1px 5px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.commitSubject {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-primary);
+}
+
+.commitMeta {
+  font-size: 10px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.commitFileBadge {
+  font-size: 10px;
+  color: var(--text-disabled);
+  background: var(--bg-elevated);
+  padding: 1px 6px;
+  border-radius: 8px;
+  flex-shrink: 0;
+}
