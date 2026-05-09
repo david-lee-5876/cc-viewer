@@ -30,6 +30,7 @@ import { TerminalWsContext } from './TerminalWsContext';
 import CustomUltraplanEditModal from './CustomUltraplanEditModal';
 import { buildLocalUltraplan } from '../utils/ultraplanTemplates';
 import { Virtuoso } from 'react-virtuoso';
+import { StickyBottomController } from '../utils/stickyBottomController';
 import { isMobile, isIOS, isPad } from '../env';
 import { t } from '../i18n';
 import { apiUrl } from '../utils/apiUrl';
@@ -235,6 +236,17 @@ class ChatView extends React.Component {
       ? (Math.random() < 0.5 ? orbitingUrl : shimmerUrl)
       : null;
     this._unmounted = false;
+    // 流式吸底控制器：收敛 7 处 scrollTop 写入、3 套并行机制、引用计数 lock、touchSuppress
+    // 详见 src/utils/stickyBottomController.js + plan modular-floating-hopper.md (v2.1)
+    this._stickyController = new StickyBottomController({
+      getSticky: () => this.state.stickyBottom,
+      setSticky: (v) => {
+        if (this._unmounted) return;
+        if (this.state.stickyBottom === v) return;
+        this.setState({ stickyBottom: v });
+      },
+      getMode: () => useVirtuoso ? 'virtuoso' : 'desktop',
+    });
   }
 
   _setFileExplorerOpen(open) {
@@ -353,14 +365,12 @@ class ChatView extends React.Component {
     if (this.props.claudeSettings?.env?.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS === '1') {
       this.setState({ agentTeamEnabled: true });
     }
-    if (!useVirtuoso) this._bindStickyScroll();
-    // touch 守卫：用户手指在屏上时（含 momentum 前的握持），不让 RO 触发的 scrollTop 写入打断
-    this._userTouching = false;
-    this._onTouchStart = () => { this._userTouching = true; };
-    this._onTouchEnd = () => { this._userTouching = false; };
-    document.addEventListener('touchstart', this._onTouchStart, { passive: true });
-    document.addEventListener('touchend', this._onTouchEnd, { passive: true });
-    document.addEventListener('touchcancel', this._onTouchEnd, { passive: true });
+    // 桌面模式：containerRef 在 first render 后就绪，cdU 第一帧调 controller.bind
+    // virtuoso 模式：scrollerRef 回调里 controller.bind
+    // touch 守卫与 ResizeObserver 由 controller 内部管理（首次 bind 时统一注册 document touch）
+    if (!useVirtuoso && this.containerRef.current) {
+      this._stickyController.bind(this.containerRef.current);
+    }
     // 初始化时吸附到 60cols
     if (this.state.needsInitialSnap && this.props.cliMode && this.props.terminalVisible) {
       this._snapToInitialPosition();
@@ -557,11 +567,12 @@ class ChatView extends React.Component {
     }
     // Last Response 出现/消失时，Footer 高度变化会导致 Virtuoso atBottom 误判，需要重新吸底
     if (useVirtuoso && prevState.lastResponseItems !== this.state.lastResponseItems && this.state.stickyBottom) {
-      this._startSmoothStickyFollow(true);
+      this._stickyController.startSmoothFollow(this._virtuosoScrollerEl);
     }
     // 同样：Live streaming overlay 变化时也要重新吸底（丝滑缓动，避免每个 chunk 画面硬跳）。
     if (prevProps.streamingLatest !== this.props.streamingLatest && this.state.stickyBottom) {
-      this._startSmoothStickyFollow(useVirtuoso);
+      const el = useVirtuoso ? this._virtuosoScrollerEl : this.containerRef.current;
+      if (el) this._stickyController.startSmoothFollow(el);
     }
     // Streaming border fade-out: when isStreaming goes from true to false, trigger fade
     if (prevProps.isStreaming && !this.props.isStreaming) {
@@ -662,12 +673,12 @@ class ChatView extends React.Component {
           this.virtuosoRef.current.scrollToIndex({ index: 'LAST' });
         } else {
           const el = this.containerRef.current;
-          if (el) el.scrollTop = el.scrollHeight;
+          if (el) this._stickyController.writeUnderLock(el, el.scrollHeight);
         }
       });
     }
     // 不再在此建立 ws — Provider 通过 props.open 派生(cliMode || terminalVisible)集中管理
-    if (!useVirtuoso) this._rebindStickyEl();
+    if (!useVirtuoso) this._stickyController.bind(this.containerRef.current);
   }
 
   componentWillUnmount() {
@@ -711,33 +722,14 @@ class ChatView extends React.Component {
     if (this._hookWaitTimer) clearTimeout(this._hookWaitTimer);
     this._pendingHookAnswers = null;
     this._unbindScrollFade();
-    if (this._onTouchStart) {
-      document.removeEventListener('touchstart', this._onTouchStart);
-      document.removeEventListener('touchend', this._onTouchEnd);
-      document.removeEventListener('touchcancel', this._onTouchEnd);
-      this._onTouchStart = this._onTouchEnd = null;
-    }
-    if (!useVirtuoso) this._unbindStickyScroll();
-    if (this._virtuosoResizeObserver) {
-      try { this._virtuosoResizeObserver.disconnect(); } catch {}
-      this._virtuosoResizeObserver = null;
-      this._virtuosoBoundEl = null;
-    }
-    if (this._smoothFollowRafId) {
-      cancelAnimationFrame(this._smoothFollowRafId);
-      this._smoothFollowRafId = null;
-    }
+    // 流式吸底统一清理：dispose 内会卸 RO + scroll listener + document touch + cancel 全部 rAF
+    if (this._stickyController) this._stickyController.dispose();
     if (this._unsubWsHandler) { try { this._unsubWsHandler(); } catch {} this._unsubWsHandler = null; }
     if (this._unsubWsState) { try { this._unsubWsState(); } catch {} this._unsubWsState = null; }
   }
 
   startRender() {
     if (this._queueTimer) clearTimeout(this._queueTimer);
-
-    // 快照：捕获 startRender 开始时的 stickyBottom，防止 scroll handler 在 DOM 过渡期翻转它
-    const wasSticky = this.state.stickyBottom;
-    // 加锁：阻止 scroll handler 在 DOM commit 过渡期间误翻转 stickyBottom
-    this._stickyScrollLock = true;
 
     const rawItems = this.buildAllItems();
     const lastResponseItems = this._lastResponseItems;
@@ -746,9 +738,20 @@ class ChatView extends React.Component {
 
     this.setState({ allItems, lastResponseItems, visibleCount: allItems.length, loading: false },
       () => {
-        this.scrollToBottom(wasSticky);
-        // 延迟解锁：等待浏览器完成本次 layout + paint 后再允许 scroll handler 工作
-        requestAnimationFrame(() => { this._stickyScrollLock = false; });
+        // (a) 跳转语义优先（scrollToTimestamp / _scrollTargetIdx）
+        if (this._scrollTargetIdx != null || this.props.scrollToTimestamp) {
+          this.scrollToBottom();
+          return;
+        }
+        // (b) sticky 时同步写到底（避免 React 18 batched commit 后一帧"先看顶后瞬移"）
+        // 先 refreshFollowTarget 复用一次 forced layout，writeUnderLock 直接用缓存值（修补 1）
+        if (this.state.stickyBottom) {
+          const el = useVirtuoso ? this._virtuosoScrollerEl : this.containerRef.current;
+          if (el) {
+            this._stickyController.refreshFollowTarget(el);
+            this._stickyController.writeUnderLock(el, el.scrollHeight);
+          }
+        }
       });
   }
 
@@ -768,10 +771,10 @@ class ChatView extends React.Component {
     return el.scrollHeight - el.scrollTop - el.clientHeight <= 30;
   }
 
-  scrollToBottom(stickyOverride) {
-    // stickyOverride: startRender 传入的快照值，优先于当前 state（防止竞态翻转）
-    const shouldStick = stickyOverride != null ? stickyOverride : this.state.stickyBottom;
-    // 移动端：Virtuoso API
+  // 保留方法名（queueNext L759 仍在调）；常规吸底与跳转分流，常规吸底走 controller.writeUnderLock
+  scrollToBottom() {
+    const shouldStick = this.state.stickyBottom;
+    // 移动端 Virtuoso：跳转分支
     if (useVirtuoso && this.virtuosoRef.current) {
       if (this._scrollTargetIdx != null) {
         this.virtuosoRef.current.scrollToIndex({ index: this._scrollTargetIdx, align: 'center' });
@@ -785,17 +788,16 @@ class ChatView extends React.Component {
         return;
       }
       if (shouldStick) {
-        // 直接滚到容器最底部，避免 scrollToIndex('LAST') 对高消息的 atBottom 误判
         const scroller = this._virtuosoScrollerEl;
         if (scroller) {
-          scroller.scrollTop = scroller.scrollHeight;
+          this._stickyController.writeUnderLock(scroller, scroller.scrollHeight);
         } else {
           this.virtuosoRef.current.scrollToIndex({ index: 'LAST', behavior: 'auto' });
         }
       }
       return;
     }
-    // 桌面端/iPad/iPhone：用户主动跳转到指定消息（scrollToTimestamp 场景）
+    // 桌面端/iPad/iPhone：scrollToTimestamp 跳转分支
     if (this._scrollTargetRef.current && this.props.scrollToTimestamp) {
       const targetEl = this._scrollTargetRef.current;
       const container = this.containerRef.current;
@@ -813,125 +815,17 @@ class ChatView extends React.Component {
       if (this.props.onScrollTsDone) this.props.onScrollTsDone();
       return;
     }
-    // 常规吸底：直接滚到容器最底部
+    // 常规吸底：走 controller writeUnderLock（lock 引用计数 + 防 onScroll 翻 sticky）
     if (shouldStick) {
       const el = this.containerRef.current;
-      if (el) el.scrollTop = el.scrollHeight;
+      if (el) this._stickyController.writeUnderLock(el, el.scrollHeight);
     }
   }
 
-  // 缓存 scrollHeight - clientHeight（贴底缓动的目标 scrollTop）。
-  // step (60fps rAF) + scroll handler 共用此缓存，每帧只读 scrollTop 一次，避免 forced layout。
-  // 失效点：_startSmoothStickyFollow 入口（流式 chunk 抵达，DOM 已增长）/ container ResizeObserver
-  // （window resize / 容器尺寸变化）/ 初次 _rebindStickyEl 绑定。
-  // 流式之外 DOM 不增长（用户滚动不会改 scrollHeight），缓存值期间始终有效。
-  _refreshFollowTarget = (scroller) => {
-    if (!scroller) return;
-    this._followTarget = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
-  };
-
-  // 容器尺寸驱动的吸底：只看 .container（或 Virtuoso scroller）尺寸变化，与 props 解耦——
-  // 任何让内容长高的事件（teammate / sub-agent / plan 文件异步到达 / 字体加载完）都会自动跟。
-  // 锁期间不做：startRender 自己会管 scrollToBottom；stickyBottom=false 时不做：尊重用户主动滚走。
-  _followToTargetIfSticky = (scroller) => {
-    if (!scroller) return;
-    if (this._stickyScrollLock) return;
-    if (!this.state.stickyBottom) return;
-    if (this._userTouching) return;
-    if (typeof scroller.scrollTop === 'number') {
-      // 镜像 _startSmoothStickyFollow 的 lock 模式：阻止 RO 触发的强制 scrollTop 写入引起
-      // _onStickyScroll 翻转 stickyBottom，也避免与 Virtuoso 的 atBottomStateChange 防抖打架。
-      this._stickyScrollLock = true;
-      scroller.scrollTop = this._followTarget;
-      requestAnimationFrame(() => { this._stickyScrollLock = false; });
-    }
-  };
-
-  // 共享 RO 回调：尺寸变 → 刷新 _followTarget 缓存 → 必要时拉到底。
-  _onScrollerResize = (el) => {
-    this._refreshFollowTarget(el);
-    this._followToTargetIfSticky(el);
-  };
-
-  // Virtuoso 模式下也对 scroller 接 ResizeObserver。修复:移动端键盘弹起 / 横竖屏切换 /
-  // window resize 后 _followTarget 缓存失准（原本只在 _startSmoothStickyFollow 入口刷一次）。
-  // scrollerRef 会被 Virtuoso 多次回调（mount=el / unmount=null），需对应切换。
-  _bindVirtuosoResizeObserver = (el) => {
-    if (el === this._virtuosoBoundEl) return;
-    if (this._virtuosoResizeObserver) {
-      try { this._virtuosoResizeObserver.disconnect(); } catch {}
-      this._virtuosoResizeObserver = null;
-    }
-    this._virtuosoBoundEl = el;
-    if (!el || typeof ResizeObserver === 'undefined') return;
-    try {
-      this._virtuosoResizeObserver = new ResizeObserver(() => this._onScrollerResize(el));
-      this._virtuosoResizeObserver.observe(el);
-      this._refreshFollowTarget(el);
-    } catch {}
-  };
-
-  _bindStickyScroll() {
-    this._stickyScrollRafId = null;
-    this._followTarget = 0;
-    this._onStickyScroll = () => {
-      if (this._stickyScrollLock) return;
-      if (this._stickyScrollRafId) return;
-      this._stickyScrollRafId = requestAnimationFrame(() => {
-        this._stickyScrollRafId = null;
-        const el = this.containerRef.current;
-        if (!el) return;
-        // gap 用缓存的 _followTarget 算 —— 用户滚动不改 scrollHeight，缓存值有效。
-        // 仅当容器尺寸变化（ResizeObserver）或新 chunk 到达（_startSmoothStickyFollow）才需刷新。
-        const gap = this._followTarget - el.scrollTop;
-        if (this.state.stickyBottom && gap > 50) {
-          this.setState({ stickyBottom: false });
-        } else if (!this.state.stickyBottom && gap <= 10) {
-          this.setState({ stickyBottom: true });
-        }
-      });
-    };
-    this._rebindStickyEl();
-  }
-
-  _rebindStickyEl() {
-    const el = this.containerRef.current;
-    if (el === this._stickyBoundEl) return;
-    if (this._stickyBoundEl) {
-      this._stickyBoundEl.removeEventListener('scroll', this._onStickyScroll);
-      if (this._stickyResizeObserver) {
-        try { this._stickyResizeObserver.disconnect(); } catch {}
-        this._stickyResizeObserver = null;
-      }
-    }
-    this._stickyBoundEl = el;
-    if (el) {
-      el.addEventListener('scroll', this._onStickyScroll, { passive: true });
-      // 初次刷新 + 容器尺寸变化时重算 target（clientHeight 随窗口缩放变化）
-      this._refreshFollowTarget(el);
-      if (typeof ResizeObserver !== 'undefined') {
-        try {
-          this._stickyResizeObserver = new ResizeObserver(() => this._onScrollerResize(el));
-          this._stickyResizeObserver.observe(el);
-        } catch {}
-      }
-    }
-  }
-
-  _unbindStickyScroll() {
-    if (this._stickyBoundEl && this._onStickyScroll) {
-      this._stickyBoundEl.removeEventListener('scroll', this._onStickyScroll);
-      this._stickyBoundEl = null;
-    }
-    if (this._stickyScrollRafId) {
-      cancelAnimationFrame(this._stickyScrollRafId);
-      this._stickyScrollRafId = null;
-    }
-    if (this._stickyResizeObserver) {
-      try { this._stickyResizeObserver.disconnect(); } catch {}
-      this._stickyResizeObserver = null;
-    }
-  }
+  // 流式吸底状态机已收敛进 src/utils/stickyBottomController.js（StickyBottomController 实例）：
+  //   - bind/unbind/dispose、scroll/RO 监听、引用计数 lock、双 rAF 缓动、touchSuppress、决策去重
+  //   - notifyAtBottom（Virtuoso 接管）、suppressOnce（handleLoadMore 用）、writeUnderLock（唯一写入）
+  // 本类仅持 controller 实例（this._stickyController），所有 scrollTop 写入走 controller.writeUnderLock。
 
   handleStickToBottom = () => {
     this.setState({ stickyBottom: true }, () => {
@@ -939,45 +833,8 @@ class ChatView extends React.Component {
         this.virtuosoRef.current.scrollToIndex({ index: 'LAST', behavior: 'smooth' });
       } else {
         const el = this.containerRef.current;
-        if (el) el.scrollTop = el.scrollHeight;
+        if (el) this._stickyController.writeUnderLock(el, el.scrollHeight);
       }
-    });
-  };
-
-  // rAF 缓动吸底：流式 chunk 抵达后用 easeOut 平滑追底，避免每帧 scrollTop=scrollHeight
-  // 带来的硬跳与换行抖动。gap<=0.5 停止；新 chunk 到达会续约（cancel 旧 rAF 重启循环）。
-  //
-  // 性能：target = scrollHeight - clientHeight 不在 step 内每帧读（forced layout），
-  // 改为入口（DOM 已 layout 完）刷新一次缓存到 this._followTarget；step 仅读 scrollTop。
-  // 续约时（流式新 chunk 抵达）会重新调本函数，target 自动更新。
-  _startSmoothStickyFollow = (useVirtuoso) => {
-    const scroller = useVirtuoso ? this._virtuosoScrollerEl : this.containerRef.current;
-    if (!scroller) return;
-    this._stickyScrollLock = true;
-    if (this._smoothFollowRafId) cancelAnimationFrame(this._smoothFollowRafId);
-    const step = () => {
-      this._smoothFollowRafId = null;
-      if (this._unmounted) { this._stickyScrollLock = false; return; }
-      if (!this.state.stickyBottom) { this._stickyScrollLock = false; return; }
-      const target = this._followTarget;
-      const current = scroller.scrollTop;
-      const gap = target - current;
-      if (gap <= 0.5) {
-        scroller.scrollTop = target;
-        this._stickyScrollLock = false;
-        return;
-      }
-      // easeOut：每帧吃 35% gap，最小 1px，最大 120px（防极端高度突增瞬移感）
-      const delta = Math.max(1, Math.min(gap * 0.35, 120));
-      scroller.scrollTop = current + delta;
-      this._smoothFollowRafId = requestAnimationFrame(step);
-    };
-    // 先让新内容 layout 完成再测量（原实现用双 rAF 正是为此），随后刷新 target 缓存。
-    this._smoothFollowRafId = requestAnimationFrame(() => {
-      this._smoothFollowRafId = requestAnimationFrame(() => {
-        this._refreshFollowTarget(scroller);
-        step();
-      });
     });
   };
 
@@ -1027,6 +884,8 @@ class ChatView extends React.Component {
       const prevScrollTop = el ? el.scrollTop : 0;
       this.setState({ allItems, lastResponseItems: this._lastResponseItems, visibleCount: allItems.length }, () => {
         if (el) {
+          // suppressOnce：随后 RO fire（DOM 长高）期间锁短路，防止"维持位置"被吸底覆盖
+          this._stickyController.suppressOnce();
           const newScrollHeight = el.scrollHeight;
           el.scrollTop = prevScrollTop + (newScrollHeight - prevScrollHeight);
         }
@@ -3944,15 +3803,7 @@ class ChatView extends React.Component {
             data={visible}
             initialTopMostItemIndex={Math.max(0, visible.length - 1)}
             followOutput={this.state.stickyBottom ? 'smooth' : false}
-            atBottomStateChange={(atBottom) => {
-              if (this._stickyScrollLock) return;
-              // Footer 高度变化时 Virtuoso 可能误判，用真实 DOM 距离兜底
-              if (!atBottom && this.state.stickyBottom && this._virtuosoScrollerEl) {
-                const s = this._virtuosoScrollerEl;
-                if (s.scrollHeight - s.scrollTop - s.clientHeight <= 60) return;
-              }
-              if (atBottom !== this.state.stickyBottom) this.setState({ stickyBottom: atBottom });
-            }}
+            atBottomStateChange={(atBottom) => this._stickyController.notifyAtBottom(atBottom)}
             atBottomThreshold={60}
             increaseViewportBy={{ top: 400, bottom: 200 }}
             computeItemKey={(index) => visible[index]?.key || `v-${index}`}
@@ -3964,7 +3815,7 @@ class ChatView extends React.Component {
               if (needsHighlight) el = React.cloneElement(el, { highlight: highlightFading ? 'fading' : 'active' });
               return isScrollTarget ? <div ref={this._scrollTargetRef}>{el}</div> : el;
             }}
-            scrollerRef={(ref) => { this._virtuosoScrollerEl = ref; this._bindVirtuosoResizeObserver(ref); }}
+            scrollerRef={(ref) => { this._virtuosoScrollerEl = ref; this._stickyController.bind(ref); }}
             context={{ header: this._virtuosoHeader, footer: this._virtuosoFooter }}
             components={this._virtuosoComponents || (this._virtuosoComponents = {
               Scroller: VirtuosoScroller,
