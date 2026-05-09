@@ -10,7 +10,7 @@ import { formatTokenCount, filterRelevantRequests, isRelevantRequest, appendCach
 import { isMainAgent, isPostClearCheckpoint } from './utils/contentFilter';
 import { apiUrl } from './utils/apiUrl';
 import { saveEntries, loadEntries, clearEntries, getCacheMeta, saveSessionEntries, loadSessionEntries, saveSessionIndex } from './utils/entryCache';
-import { buildSessionIndex, splitHotCold, mergeSessionIndices, HOT_SESSION_COUNT } from './utils/sessionManager';
+import { buildSessionIndex, splitHotCold, mergeSessionIndices, HOT_SESSION_COUNT, assignMessageTimestamps } from './utils/sessionManager';
 import { mergeMainAgentSessions as _mergeMainAgentSessions } from './utils/sessionMerge';
 import { reconstructEntries, createIncrementalReconstructor } from '../lib/delta-reconstructor.js';
 import { createEntrySlimmer, createIncrementalSlimmer, restoreSlimmedEntry, internEntryBigFields } from './utils/entry-slim.js';
@@ -143,6 +143,10 @@ class AppBase extends React.Component {
     };
     this.eventSource = null;
     this._currentSessionId = null;
+    // 跟踪上一次 mainAgent entry 的 timestamp，给新增 assistant msg 赋 _generatedTs（生成时 ts）。
+    // 解决 bubble 时间标签晚一拍的 bug：assistant 响应是上一次 API 调用产出的，
+    // 被这次 API 调用带进 body.messages，旧逻辑统一赋 entry.timestamp 导致显示成"下一次 ts"。
+    this._prevMainAgentTs = null;
     this._autoSelectTimer = null;
     this._chunkedEntries = [];   // 分段加载缓冲
     this._chunkedTotal = 0;
@@ -206,6 +210,8 @@ class AppBase extends React.Component {
    */
   _processEntries(entries) {
     let timestamps = [];
+    let generatedTimestamps = [];   // 跟 timestamps 平行：position → _generatedTs（assistant 才有）
+    let prevMainAgentTs = null;      // 上一次 mainAgent entry 的 ts，给本次新增 assistant msg 赋
     let prevUserId = null;
     let sessions = [];
     const filtered = [];
@@ -252,14 +258,34 @@ class AppBase extends React.Component {
         if (isNewSession && !isTransient) {
           currentSessionId = timestamp;
           timestamps = [];
+          generatedTimestamps = [];
+          prevMainAgentTs = null;       // 新 session 起点：reset，防跨 session 串场
         } else if (currentSessionId === null) {
           currentSessionId = timestamp;
         }
-        for (let j = timestamps.length; j < count; j++) timestamps.push(timestamp);
+        // 扩展两个平行数组：新增 position 拿当前 entry 的 ts；并记录 prevMainAgentTs
+        // 作为该位置「首次加入时上一个 mainAgent 的 ts」。
+        // 注意：不在 push 时 gate isAsst —— offline 批量路径下，本次 entry 可能是 _slimmed
+        // （body.messages=[]）只靠 _messageCount 占位，messages[j] 是 undefined 会让 isAsst=false
+        // 永远 push null，导致后续 unslimmed checkpoint 的 inner loop 无法 backfill _generatedTs。
+        // 角色判断挪到 inner loop（msg 对象一定存在那时），用 m.role 在写入时 gate。
+        for (let j = timestamps.length; j < count; j++) {
+          timestamps.push(timestamp);
+          generatedTimestamps.push(prevMainAgentTs || null);
+        }
         if (messages.length > 0) {
-          for (let j = 0; j < messages.length; j++) messages[j]._timestamp = timestamps[j];
+          for (let j = 0; j < messages.length; j++) {
+            const m = messages[j];
+            if (!m) continue;
+            m._timestamp = timestamps[j];
+            if (m.role === 'assistant' && generatedTimestamps[j]) {
+              m._generatedTs = generatedTimestamps[j];
+            }
+          }
         }
         prevUserId = userId;
+        // 记录本次 mainAgent entry 的 ts，下一次循环用作 prevMainAgentTs
+        prevMainAgentTs = timestamp;
 
         // session 合并（跳过 _slimmed）
         if (!entry._slimmed) {
@@ -1196,20 +1222,23 @@ class AppBase extends React.Component {
           // 的 skipTransientFilter: true 统一放行，isNewSession 单独驱动 _currentSessionId。
           if (isNewSession) {
             this._currentSessionId = timestamp;
+            // 新 session 起点：reset _prevMainAgentTs 防跨 session 串场（旧 session 的末尾 ts
+            // 不应作为新 session 第一条 assistant msg 的"生成时 ts"）
+            this._prevMainAgentTs = null;
           } else if (this._currentSessionId === null) {
             this._currentSessionId = timestamp;
           }
 
-          for (let i = 0; i < messages.length; i++) {
-            if (!isNewSession && i < prevCount && prevMessages[i]._timestamp) {
-              messages[i]._timestamp = prevMessages[i]._timestamp;
-            } else if (!messages[i]._timestamp) {
-              messages[i]._timestamp = timestamp;
-            }
-          }
+          // 赋 _timestamp 和 _generatedTs（assistant 角色新增 msg 拿 prevMainAgentTs 反映生成时 ts）
+          assignMessageTimestamps(messages, prevMessages, isNewSession, prevCount, timestamp, this._prevMainAgentTs);
           // SSE 实时追加：每条 entry 都已是完整 request+response，不存在中间态，
           // 跳过 transient 过滤以避免误伤真实的 /clear → 短消息对话。
           mainAgentSessions = this.mergeMainAgentSessions(mainAgentSessions, entry, { skipTransientFilter: true });
+
+          // 记录本次 mainAgent entry 的 timestamp，给下一次 entry 处理时
+          // 当作 _generatedTs 赋给新增 assistant msg（反映"生成时刻"）。
+          // 必须放在 if (isMainAgent && !_slimmed) 块内 —— timestamp 是该块内的 const
+          this._prevMainAgentTs = timestamp;
         }
 
         // 标记 entry 的 _sessionId

@@ -1,6 +1,74 @@
 export const HOT_SESSION_COUNT = 8;
 
 /**
+ * 给一组 messages 赋 `_timestamp` 和 `_generatedTs`。
+ *
+ * 背景：cc-viewer 通过下一次 API 请求的 body.messages 才能感知到上一次的 assistant 响应。
+ * 旧逻辑给所有新增 message 统一赋 `entry.timestamp`，导致 assistant msg 的 _timestamp 是
+ * "下一次 request 的 ts"，bubble 显示时间晚一拍。helpers.js:resolveProducerModelInfo 用
+ * `idx-1` hack 修了 model icon，但 bubble 时间标签没修。
+ *
+ * 修法：保留 `_timestamp` 语义不变（仍然是 "carrier entry's ts"，所有现有消费者依赖此），
+ * 给 assistant 角色的新增 message 额外赋 `_generatedTs = prevMainAgentTs`（生成时 entry 的 ts），
+ * ChatMessage 显示 bubble 时优先用 `_generatedTs ?? _timestamp`。
+ *
+ * @param {Array} messages 当前 entry 的 messages 数组（in-place mutate）
+ * @param {Array} prevMessages 上一次 mainAgentSessions 的 last session.messages
+ * @param {boolean} isNewSession 是否触发新 session（postClearCheckpoint / 用户切换 / 长度骤降）
+ * @param {number} prevCount prevMessages.length（缓存）
+ * @param {string} currentTs 当前 entry.timestamp
+ * @param {string|null} prevMainAgentTs 上一次 mainAgent entry 的 timestamp，无则 null
+ * @returns {Array} messages（原数组引用）
+ */
+export function assignMessageTimestamps(messages, prevMessages, isNewSession, prevCount, currentTs, prevMainAgentTs) {
+  if (!Array.isArray(messages)) return messages;
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i];
+    if (!m) continue;
+    if (!isNewSession && i < prevCount && prevMessages[i] && prevMessages[i]._timestamp) {
+      // 历史 message：继承 prev 的 _timestamp 和 _generatedTs（如有）
+      m._timestamp = prevMessages[i]._timestamp;
+      if (prevMessages[i]._generatedTs) {
+        m._generatedTs = prevMessages[i]._generatedTs;
+      }
+    } else if (!m._timestamp) {
+      // 新增 message：赋 currentTs；assistant 角色额外赋 _generatedTs
+      m._timestamp = currentTs;
+      if (m.role === 'assistant' && prevMainAgentTs) {
+        m._generatedTs = prevMainAgentTs;
+      }
+    } else if (m.role === 'assistant' && !m._generatedTs && prevMainAgentTs) {
+      // 已有 _timestamp 但缺 _generatedTs（混合输入：部分 entry 来自旧版本）：补 _generatedTs
+      m._generatedTs = prevMainAgentTs;
+    }
+  }
+  return messages;
+}
+
+/**
+ * 解析 bubble 对应的"生产请求 ts" —— 双向映射 msg ↔ request 的 lookup key。
+ *
+ * 语义对齐：
+ *   - assistant msg：体现"哪次 API 调用 *生成* 此 response" → `_generatedTs` (= 上一次 mainAgent ts，
+ *     即真正产出该 content 的 request 的 ts)。fallback 到 `_timestamp` 兼容旧 cache / 首条 entry。
+ *   - user / 其他 role：体现"哪次 API 调用 *承载* 此 input" → `_timestamp` (carrier，本就 = 该请求自身 ts)。
+ *
+ * 用途：
+ *   - ChatView 1228 reqIdx = tsToIndex[resolveBubbleProducerTs(msg)] —— "查看请求"按钮跳到 producer
+ *   - ChatView 1791 tsItemMap[resolveBubbleProducerTs(msg)] —— 网络报文→对话反向跳转 highlight
+ *
+ * 不影响：`_timestamp` 作 carrier 语义（resolveModelInfo / 时间排序 / dedup key 等消费者保持不变）。
+ *
+ * @param {object} msg lastSession.messages[i]
+ * @returns {string|null}
+ */
+export function resolveBubbleProducerTs(msg) {
+  if (!msg) return null;
+  if (msg.role === 'assistant') return msg._generatedTs || msg._timestamp || null;
+  return msg._timestamp || null;
+}
+
+/**
  * 构建轻量 session 索引。
  * 遍历 entries 按 _sessionId 分组统计 firstTs/lastTs/entryCount。
  * 遍历 mainAgentSessions 提取 msgCount/preview/userId。

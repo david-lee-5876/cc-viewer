@@ -158,7 +158,7 @@ class ChatMessage extends React.Component {
     const p = this.props, n = nextProps;
     // 逐字段浅比较核心 prop，避免 inline {} 和 computed values 导致的无效重渲染
     return p.role !== n.role || p.content !== n.content || p.text !== n.text ||
-      p.timestamp !== n.timestamp || p.highlight !== n.highlight ||
+      p.timestamp !== n.timestamp || p.displayTs !== n.displayTs || p.highlight !== n.highlight ||
       p.collapseToolResults !== n.collapseToolResults || p.expandThinking !== n.expandThinking || p.showFullToolContent !== n.showFullToolContent ||
       p.showTrailingCursor !== n.showTrailingCursor ||
       p.showThinkingSummaries !== n.showThinkingSummaries ||
@@ -195,9 +195,13 @@ class ChatMessage extends React.Component {
   }
 
   formatTime(ts) {
-    if (!ts) return null;
+    // displayTs 优先于 ts：assistant message 用 _generatedTs（消息生成时刻）而非 _timestamp
+    // （后者是"被下一次 request 携带进 body.messages"时的 ts，晚一拍）。其他 role 不传 displayTs，
+    // fallback 到 ts，行为不变。
+    const effectiveTs = this.props.displayTs ?? ts;
+    if (!effectiveTs) return null;
     try {
-      const d = new Date(ts);
+      const d = new Date(effectiveTs);
       const pad = n => String(n).padStart(2, '0');
       const { showFullToolContent, isHistoryLog } = this.props;
       const compact = !showFullToolContent && !isHistoryLog;

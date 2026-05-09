@@ -13,7 +13,7 @@ import { homedir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join, basename } from 'node:path';
 import { LOG_DIR } from './findcc.js';
-import { assembleStreamMessage, createStreamAssembler, cleanupTempFiles, findRecentLog, isAnthropicApiPath, isMainAgentRequest, rotateLogFile } from './lib/interceptor-core.js';
+import { assembleStreamMessage, createStreamAssembler, cleanupTempFiles, findRecentLog, isAnthropicApiPath, isMainAgentRequest, rotateLogFile, fingerprintMsg } from './lib/interceptor-core.js';
 
 
 
@@ -239,14 +239,21 @@ function resolveResumeChoice(choice) {
 // Delta storage: 增量存储开关和状态（默认开启，设置 CCV_DISABLE_DELTA=1 关闭）
 // 注意：delta 计算依赖 mainAgent 请求串行（Claude CLI 保证），不做并发互斥
 const _deltaStorageEnabled = process.env.CCV_DISABLE_DELTA !== '1';
+// In-place last-msg replace 检测开关（默认开启，设置 CCV_DISABLE_TAIL_FP_CHECKPOINT=1 关闭）。
+// 关闭后回退到旧行为（仅按长度算 delta，遇到末位原地替换会丢失"末位换内容"信息）。
+const _tailFpCheckEnabled = process.env.CCV_DISABLE_TAIL_FP_CHECKPOINT !== '1';
 let _lastMessagesCount = 0;     // 上一次 mainAgent 写入的完整 messages 数量
+let _lastTailFp = '';           // 上一次 mainAgent 末位 message 的指纹（用于 in-place replace 检测）
 let _mainAgentDeltaCount = 0;   // mainAgent 请求计数器（用于触发定期 checkpoint）
 const CHECKPOINT_INTERVAL = 10; // 每 N 条 mainAgent 请求写一个 checkpoint
 
 /** Delta storage: completed 写入成功后更新状态 */
-function _commitDeltaState(originalLength) {
+function _commitDeltaState(originalLength, originalTailFp) {
   if (_deltaStorageEnabled && originalLength > 0) {
     _lastMessagesCount = originalLength;
+    if (typeof originalTailFp === 'string') {
+      _lastTailFp = originalTailFp;
+    }
   }
 }
 
@@ -374,6 +381,7 @@ function checkAndRotateLogFile() {
     // 重置 delta 状态，强制下一条 mainAgent 请求写完整 checkpoint
     if (_deltaStorageEnabled) {
       _lastMessagesCount = 0;
+      _lastTailFp = '';
       _mainAgentDeltaCount = 0;
     }
   }
@@ -599,16 +607,33 @@ export function setupInterceptor() {
 
     // Delta storage：仅 mainAgent 且开关启用时，将 body.messages 转为增量格式
     let _deltaOriginalMessagesLength = 0; // 缓存本次请求的原始 messages 长度，用于 completed 后更新状态
+    let _deltaOriginalTailFp = '';        // 缓存本次请求末位 message 的指纹，用于 completed 后更新 _lastTailFp
     if (_deltaStorageEnabled && requestEntry?.mainAgent && Array.isArray(requestEntry.body?.messages)) {
       const messages = requestEntry.body.messages;
       _deltaOriginalMessagesLength = messages.length;
+      // 立即把末位 fp 算成字符串保存（不存对象引用），避免后续 mutation 风险
+      _deltaOriginalTailFp = messages.length > 0 ? fingerprintMsg(messages[messages.length - 1]) : '';
       _mainAgentDeltaCount++;
+
+      // In-place last-msg replace 检测：messages.length 不变但末位 fp 不同。
+      // 触发场景：CLI 在 mainAgent 末位"原地替换"user msg（SUGGESTION MODE → 用户真实输入；
+      // synthetic recap 通道注入；等），wire 上长度未变内容变了。旧逻辑 messages.slice(_lastMessagesCount)
+      // 算出 delta=[]，丢失了"末位换内容"信息 → 客户端重建拿到错误的"前态末位"。
+      // 检测命中即强制写 checkpoint，让客户端拿到完整 wire 真实内容。
+      const _sameLenInPlaceReplace =
+        _tailFpCheckEnabled &&
+        messages.length === _lastMessagesCount &&
+        _lastMessagesCount > 0 &&
+        _lastTailFp !== '' &&
+        _deltaOriginalTailFp !== '' &&
+        _deltaOriginalTailFp !== _lastTailFp;
 
       // 判断是否需要写 checkpoint
       const needsCheckpoint =
         _lastMessagesCount === 0 ||                           // 进程重启 / 首次请求
         messages.length < _lastMessagesCount ||               // messages 缩短（/clear、context 压缩）
-        (_mainAgentDeltaCount % CHECKPOINT_INTERVAL === 0);   // 定期 checkpoint
+        (_mainAgentDeltaCount % CHECKPOINT_INTERVAL === 0) || // 定期 checkpoint
+        _sameLenInPlaceReplace;                                // in-place last-msg replace 检测
 
       if (needsCheckpoint) {
         // checkpoint：保持完整 messages，标记 _isCheckpoint
@@ -616,6 +641,11 @@ export function setupInterceptor() {
         requestEntry._totalMessageCount = messages.length;
         requestEntry._conversationId = 'mainAgent';
         requestEntry._isCheckpoint = true;
+        if (_sameLenInPlaceReplace) {
+          // 诊断字段：标记此 checkpoint 是被 in-place replace 检测触发的（频率约 1-2%，
+          // 用于在生产 jsonl 里事后核对触发率，不影响重建逻辑）
+          requestEntry._inPlaceReplaceDetected = true;
+        }
       } else {
         // delta：只保留新增的 messages
         const delta = messages.slice(_lastMessagesCount);
@@ -844,7 +874,7 @@ export function setupInterceptor() {
                       delete requestEntry.inProgress;
                       delete requestEntry.requestId;
                       appendFileSync(LOG_FILE, JSON.stringify(requestEntry) + '\n---\n');
-                      _commitDeltaState(_deltaOriginalMessagesLength);
+                      _commitDeltaState(_deltaOriginalMessagesLength, _deltaOriginalTailFp);
                       // Release memory: clear large objects after disk write
                       streamedChunks = [];
                       streamedContentLen = 0;
@@ -855,7 +885,7 @@ export function setupInterceptor() {
                       delete requestEntry.inProgress;
                       delete requestEntry.requestId;
                       appendFileSync(LOG_FILE, JSON.stringify(requestEntry) + '\n---\n');
-                      _commitDeltaState(_deltaOriginalMessagesLength);
+                      _commitDeltaState(_deltaOriginalMessagesLength, _deltaOriginalTailFp);
                       streamedChunks = [];
                       streamedContentLen = 0;
                       requestEntry.response = null;
@@ -925,7 +955,7 @@ export function setupInterceptor() {
           delete requestEntry.inProgress;
           delete requestEntry.requestId;
           appendFileSync(LOG_FILE, JSON.stringify(requestEntry) + '\n---\n');
-          _commitDeltaState(_deltaOriginalMessagesLength);
+          _commitDeltaState(_deltaOriginalMessagesLength, _deltaOriginalTailFp);
           resetStreamingState();
         }
       } else {
@@ -953,12 +983,12 @@ export function setupInterceptor() {
           delete requestEntry.requestId;
 
           appendFileSync(LOG_FILE, JSON.stringify(requestEntry) + '\n---\n');
-          _commitDeltaState(_deltaOriginalMessagesLength);
+          _commitDeltaState(_deltaOriginalMessagesLength, _deltaOriginalTailFp);
         } catch (err) {
           delete requestEntry.inProgress;
           delete requestEntry.requestId;
           appendFileSync(LOG_FILE, JSON.stringify(requestEntry) + '\n---\n');
-          _commitDeltaState(_deltaOriginalMessagesLength);
+          _commitDeltaState(_deltaOriginalMessagesLength, _deltaOriginalTailFp);
         }
       }
     }

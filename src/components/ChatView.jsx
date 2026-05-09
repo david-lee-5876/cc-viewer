@@ -19,6 +19,7 @@ import { isImageFile, isMutatingCommand } from '../utils/commandValidator';
 import { createEmptyToolState, appendToolResultMap, cachedBuildToolResultMap, getToolResultCache, setToolResultCache } from '../utils/toolResultBuilder';
 import { refreshPlanApprovalOnCachedItems } from '../utils/refreshPlanApprovalCache';
 import { refreshAskAnswerOnCachedItems } from '../utils/refreshAskAnswerCache';
+import { resolveBubbleProducerTs } from '../utils/sessionManager';
 import { TeamButton, TeamModal } from './TeamSessionPanel';
 import SnapLineOverlay from './SnapLineOverlay';
 import RoleFilterBar from './RoleFilterBar';
@@ -1225,8 +1226,11 @@ class ChatView extends React.Component {
     for (let mi = startIdx; mi < messages.length; mi++) {
       const msg = messages[mi];
       const content = msg.content;
-      const ts = msg._timestamp || null;
-      const reqIdx = ts ? tsToIndex[ts] : undefined;
+      const ts = msg._timestamp || null;  // carrier ts —— timestamp prop / resolveModelInfo / SubAgent 时间排序用
+      // lookupTs：assistant 用 _generatedTs（producer 的 request ts），其他 role 用 _timestamp（即 carrier）。
+      // 让 "查看请求" 按钮跳到真正产出该 bubble 内容的 mainAgent request，而不是下一次 carrier。
+      const lookupTs = resolveBubbleProducerTs(msg);
+      const reqIdx = lookupTs ? tsToIndex[lookupTs] : undefined;
       // cacheTotalTokens 仅传给 assistant 渲染处，避免 user 消息也接到该 prop 触发 SCU streaming 期间的虚假重渲。
       const cacheTotalTokens = reqIdx != null
         ? (requestCacheTokenMap?.get(reqIdx) ?? 0)
@@ -1337,14 +1341,14 @@ class ChatView extends React.Component {
           // 只在有非系统内容时才渲染
           if (filteredContent.length > 0) {
             renderedMessages.push(
-              <ChatMessage key={`${keyPrefix}-asst-${mi}`} role="assistant" content={filteredContent} toolResultMap={toolResultMap} readContentMap={readContentMap} editSnapshotMap={editSnapshotMap} askAnswerMap={mergedAskAnswerMap} planApprovalMap={planApprovalMap} latestPlanContent={latestPlanContent} planFileContents={this.state.planFileContents} timestamp={ts} modelInfo={modelInfo} collapseToolResults={collapseToolResults} expandThinking={expandThinking} showFullToolContent={showFullToolContent} showThinkingSummaries={showThinkingSummaries} ptyPrompt={this.state.ptyPrompt} activePlanPrompt={activePlanPrompt} activePtyPlanId={this.state.pendingPtyPlan?.id ?? null} activeDangerousPrompt={activeDangerousPrompt} lastPendingPlanId={msgLastPlanId} lastPendingAskId={msgLastAskId} onPlanApprovalClick={this.handlePromptOptionClick} onPlanFeedbackSubmit={this.handlePlanFeedbackSubmit} onDangerousApprovalClick={this.handlePromptOptionClick} onAskQuestionSubmit={this.handleAskQuestionSubmit} cliMode={this.props.cliMode} onOpenFile={this.handleOpenToolFilePath} cacheTotalTokens={cacheTotalTokens} requestIndex={hasViewRequest ? reqIdx : undefined} onViewRequest={hasViewRequest ? onViewRequest : undefined} isHistoryLog={isHistoryLog} />
+              <ChatMessage key={`${keyPrefix}-asst-${mi}`} role="assistant" content={filteredContent} toolResultMap={toolResultMap} readContentMap={readContentMap} editSnapshotMap={editSnapshotMap} askAnswerMap={mergedAskAnswerMap} planApprovalMap={planApprovalMap} latestPlanContent={latestPlanContent} planFileContents={this.state.planFileContents} timestamp={ts} displayTs={msg._generatedTs} modelInfo={modelInfo} collapseToolResults={collapseToolResults} expandThinking={expandThinking} showFullToolContent={showFullToolContent} showThinkingSummaries={showThinkingSummaries} ptyPrompt={this.state.ptyPrompt} activePlanPrompt={activePlanPrompt} activePtyPlanId={this.state.pendingPtyPlan?.id ?? null} activeDangerousPrompt={activeDangerousPrompt} lastPendingPlanId={msgLastPlanId} lastPendingAskId={msgLastAskId} onPlanApprovalClick={this.handlePromptOptionClick} onPlanFeedbackSubmit={this.handlePlanFeedbackSubmit} onDangerousApprovalClick={this.handlePromptOptionClick} onAskQuestionSubmit={this.handleAskQuestionSubmit} cliMode={this.props.cliMode} onOpenFile={this.handleOpenToolFilePath} cacheTotalTokens={cacheTotalTokens} requestIndex={hasViewRequest ? reqIdx : undefined} onViewRequest={hasViewRequest ? onViewRequest : undefined} isHistoryLog={isHistoryLog} />
             );
           }
         } else if (typeof content === 'string') {
           // 过滤字符串类型的系统文本
           if (!isSystemText(content)) {
             renderedMessages.push(
-              <ChatMessage key={`${keyPrefix}-asst-${mi}`} role="assistant" content={[{ type: 'text', text: content }]} toolResultMap={toolResultMap} readContentMap={readContentMap} editSnapshotMap={editSnapshotMap} askAnswerMap={mergedAskAnswerMap} planApprovalMap={planApprovalMap} latestPlanContent={latestPlanContent} planFileContents={this.state.planFileContents} timestamp={ts} modelInfo={modelInfo} collapseToolResults={collapseToolResults} expandThinking={expandThinking} showFullToolContent={showFullToolContent} showThinkingSummaries={showThinkingSummaries} ptyPrompt={this.state.ptyPrompt} activePlanPrompt={activePlanPrompt} activePtyPlanId={this.state.pendingPtyPlan?.id ?? null} activeDangerousPrompt={activeDangerousPrompt} lastPendingPlanId={msgLastPlanId} lastPendingAskId={msgLastAskId} onPlanApprovalClick={this.handlePromptOptionClick} onPlanFeedbackSubmit={this.handlePlanFeedbackSubmit} onDangerousApprovalClick={this.handlePromptOptionClick} onAskQuestionSubmit={this.handleAskQuestionSubmit} cliMode={this.props.cliMode} onOpenFile={this.handleOpenToolFilePath} cacheTotalTokens={cacheTotalTokens} requestIndex={hasViewRequest ? reqIdx : undefined} onViewRequest={hasViewRequest ? onViewRequest : undefined} isHistoryLog={isHistoryLog} />
+              <ChatMessage key={`${keyPrefix}-asst-${mi}`} role="assistant" content={[{ type: 'text', text: content }]} toolResultMap={toolResultMap} readContentMap={readContentMap} editSnapshotMap={editSnapshotMap} askAnswerMap={mergedAskAnswerMap} planApprovalMap={planApprovalMap} latestPlanContent={latestPlanContent} planFileContents={this.state.planFileContents} timestamp={ts} displayTs={msg._generatedTs} modelInfo={modelInfo} collapseToolResults={collapseToolResults} expandThinking={expandThinking} showFullToolContent={showFullToolContent} showThinkingSummaries={showThinkingSummaries} ptyPrompt={this.state.ptyPrompt} activePlanPrompt={activePlanPrompt} activePtyPlanId={this.state.pendingPtyPlan?.id ?? null} activeDangerousPrompt={activeDangerousPrompt} lastPendingPlanId={msgLastPlanId} lastPendingAskId={msgLastAskId} onPlanApprovalClick={this.handlePromptOptionClick} onPlanFeedbackSubmit={this.handlePlanFeedbackSubmit} onDangerousApprovalClick={this.handlePromptOptionClick} onAskQuestionSubmit={this.handleAskQuestionSubmit} cliMode={this.props.cliMode} onOpenFile={this.handleOpenToolFilePath} cacheTotalTokens={cacheTotalTokens} requestIndex={hasViewRequest ? reqIdx : undefined} onViewRequest={hasViewRequest ? onViewRequest : undefined} isHistoryLog={isHistoryLog} />
             );
           }
         }
@@ -1406,7 +1410,7 @@ class ChatView extends React.Component {
           const lastItems = respContent
             .filter(b => b.type === 'text' && b.text)
             .map((b, bi) => (
-              <ChatMessage key={`tm-resp-${si}-${bi}`} role="assistant" content={[b]} collapseToolResults={collapseToolResults} expandThinking={expandThinking} showFullToolContent={showFullToolContent} onViewRequest={onViewRequest} onOpenFile={this.handleOpenToolFilePath} isHistoryLog={isHistoryLog} />
+              <ChatMessage key={`tm-resp-${si}-${bi}`} role="assistant" content={[b]} timestamp={session.timestamp} collapseToolResults={collapseToolResults} expandThinking={expandThinking} showFullToolContent={showFullToolContent} onViewRequest={onViewRequest} onOpenFile={this.handleOpenToolFilePath} isHistoryLog={isHistoryLog} />
             ));
           if (lastItems.length > 0) {
             this._lastResponseItems = lastItems;
@@ -1775,9 +1779,15 @@ class ChatView extends React.Component {
 
       // 将 SubAgent entries 按时间戳插入到 session 消息之间
       for (const m of msgs) {
-        const msgTs = m.props.timestamp;
+        // 拆两个 ts 语义：
+        //   msgWallTs = m.props.timestamp (carrier) —— SubAgent 按 wall-clock 顺序穿插用
+        //   msgLookupTs = m.props.displayTs || m.props.timestamp —— tsItemMap 反向跳转 key
+        //     （assistant 已经收 displayTs={msg._generatedTs}，自动走 generation ts；
+        //      其他 role displayTs=undefined 自动 fallback 到 carrier）
+        const msgWallTs = m.props.timestamp;
+        const msgLookupTs = m.props.displayTs || m.props.timestamp;
         // 插入时间戳 <= 当前消息时间戳的 SubAgent entries
-        while (subIdx < subAgentEntries.length && msgTs && subAgentEntries[subIdx].timestamp <= msgTs) {
+        while (subIdx < subAgentEntries.length && msgWallTs && subAgentEntries[subIdx].timestamp <= msgWallTs) {
           const sa = subAgentEntries[subIdx];
           if (sa.timestamp) tsItemMap[sa.timestamp] = allItems.length;
           const subCacheTotal = sa.requestIndex != null
@@ -1788,7 +1798,7 @@ class ChatView extends React.Component {
           );
           subIdx++;
         }
-        if (msgTs) tsItemMap[msgTs] = allItems.length;
+        if (msgLookupTs) tsItemMap[msgLookupTs] = allItems.length;
         allItems.push(m);
       }
       // 插入剩余的 SubAgent entries（时间戳在最后一条消息之后）
@@ -3857,9 +3867,13 @@ class ChatView extends React.Component {
     // 缓存 visible，供 _buildUserPromptNav / _scrollToUserPrompt 使用
     this._currentVisible = visible;
     // 优先使用精确的 visibleIdx（同一请求的多条消息共享 timestamp，findIndex 会匹配到第一条）
+    // findIndex 用 displayTs ?? timestamp 作 key —— assistant bubble 的 props.timestamp 是 carrier
+    // (= 下一次 entry 的 ts)，而 highlightTs 来自 scrollToTimestamp (= request 自身 ts)；只看 timestamp
+    // 会让 assistant bubble 永远匹配不上，蓝色虚线选框落到错位的 bubble。displayTs 恰好就是 _generatedTs
+    // (producer request 的 ts)，跟 highlightTs 同源。其他 role 没 displayTs 自动 fallback 到 timestamp。
     const highlightIdx = highlightVisibleIdx >= 0 && highlightVisibleIdx < visible.length
       ? highlightVisibleIdx
-      : (highlightTs != null ? visible.findIndex(item => item.props?.timestamp === highlightTs) : -1);
+      : (highlightTs != null ? visible.findIndex(item => (item.props?.displayTs || item.props?.timestamp) === highlightTs) : -1);
 
     const { pendingInput, stickyBottom, ptyPromptHistory } = this.state;
 
