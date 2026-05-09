@@ -11,6 +11,23 @@ import { getClaudeConfigDir } from './findcc.js';
 // Setup interceptor to patch fetch
 setupInterceptor();
 
+// Node bundled undici 在 22.15 之前不识 zstd；上游若选 zstd 压缩，response.body 会被原样
+// 透传给 Claude CLI，触发 "Failed to parse JSON"。在转发前从 accept-encoding 摘掉 zstd，
+// 让上游回退到 gzip/deflate/br——所有 Node 版本都能正确解。
+export function stripZstdAcceptEncoding(headers) {
+  if (!headers) return headers;
+  const key = Object.keys(headers).find(k => k.toLowerCase() === 'accept-encoding');
+  if (!key) return headers;
+  const val = headers[key];
+  if (typeof val !== 'string' || !/\bzstd\b/i.test(val)) return headers;
+  const filtered = val
+    .split(',')
+    .map(s => s.trim())
+    .filter(s => s && !/^zstd(\s*;.*)?$/i.test(s))
+    .join(', ');
+  return { ...headers, [key]: filtered || 'gzip, deflate, br' };
+}
+
 function getBaseUrlFromSettings(settingsPath) {
   try {
     if (existsSync(settingsPath)) {
@@ -66,8 +83,9 @@ export function startProxy() {
       // Use the patched fetch (which logs to cc-viewer)
       try {
         // Convert incoming headers
-        const headers = { ...req.headers };
+        let headers = { ...req.headers };
         delete headers.host; // Let fetch set the host
+        headers = stripZstdAcceptEncoding(headers);
 
         const buffers = [];
         for await (const chunk of req) {

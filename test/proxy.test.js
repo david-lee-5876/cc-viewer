@@ -60,6 +60,21 @@ function filterResponseHeaders(headerEntries) {
   return filtered;
 }
 
+// Replicated from proxy.js: zstd stripping in upstream request headers
+function stripZstdAcceptEncoding(headers) {
+  if (!headers) return headers;
+  const key = Object.keys(headers).find(k => k.toLowerCase() === 'accept-encoding');
+  if (!key) return headers;
+  const val = headers[key];
+  if (typeof val !== 'string' || !/\bzstd\b/i.test(val)) return headers;
+  const filtered = val
+    .split(',')
+    .map(s => s.trim())
+    .filter(s => s && !/^zstd(\s*;.*)?$/i.test(s))
+    .join(', ');
+  return { ...headers, [key]: filtered || 'gzip, deflate, br' };
+}
+
 // Error message formatting logic from startProxy catch block
 function formatProxyError(err) {
   let msg = err.message;
@@ -493,6 +508,64 @@ describe('proxy', () => {
       const { headers } = replaceProxyAuthHeaders(input, 'sk-new');
       assert.notEqual(headers, input, 'should return a fresh object');
       assert.equal(input.authorization, 'Bearer old', 'input must remain untouched');
+    });
+  });
+
+  describe('stripZstdAcceptEncoding (zstd workaround for Node<22.15 bundled undici)', () => {
+    it('returns headers untouched when accept-encoding is absent', () => {
+      const input = { 'content-type': 'application/json' };
+      const out = stripZstdAcceptEncoding(input);
+      assert.equal(out, input);
+    });
+
+    it('returns headers untouched when zstd is not listed', () => {
+      const input = { 'accept-encoding': 'gzip, deflate, br' };
+      const out = stripZstdAcceptEncoding(input);
+      assert.equal(out, input);
+    });
+
+    it('removes zstd while preserving other algorithms (lowercase header)', () => {
+      const out = stripZstdAcceptEncoding({ 'accept-encoding': 'gzip, deflate, br, zstd' });
+      assert.equal(out['accept-encoding'], 'gzip, deflate, br');
+    });
+
+    it('handles TitleCase header key without losing it', () => {
+      const out = stripZstdAcceptEncoding({ 'Accept-Encoding': 'gzip, zstd, br' });
+      assert.equal(out['Accept-Encoding'], 'gzip, br');
+      assert.equal(out['accept-encoding'], undefined);
+    });
+
+    it('strips zstd with q-value', () => {
+      const out = stripZstdAcceptEncoding({ 'accept-encoding': 'gzip;q=1.0, zstd;q=0.9, br;q=0.8' });
+      assert.equal(out['accept-encoding'], 'gzip;q=1.0, br;q=0.8');
+    });
+
+    it('falls back to gzip,deflate,br when zstd is the only token', () => {
+      const out = stripZstdAcceptEncoding({ 'accept-encoding': 'zstd' });
+      assert.equal(out['accept-encoding'], 'gzip, deflate, br');
+    });
+
+    it('does not match substrings like "zstd-foo" or "fzstd"', () => {
+      const out = stripZstdAcceptEncoding({ 'accept-encoding': 'fzstd, gzip' });
+      assert.equal(out['accept-encoding'], 'fzstd, gzip', 'word-boundary regex should not match fzstd');
+    });
+
+    it('returns a new object (does not mutate input)', () => {
+      const input = { 'accept-encoding': 'gzip, zstd' };
+      const out = stripZstdAcceptEncoding(input);
+      assert.notEqual(out, input);
+      assert.equal(input['accept-encoding'], 'gzip, zstd', 'input must remain untouched');
+    });
+
+    it('tolerates non-string accept-encoding value (defensive)', () => {
+      const input = { 'accept-encoding': ['gzip', 'zstd'] };
+      const out = stripZstdAcceptEncoding(input);
+      assert.equal(out, input, 'array form left as-is — fetch normalizes upstream');
+    });
+
+    it('returns input untouched when input is null/undefined', () => {
+      assert.equal(stripZstdAcceptEncoding(null), null);
+      assert.equal(stripZstdAcceptEncoding(undefined), undefined);
     });
   });
 });
