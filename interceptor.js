@@ -237,17 +237,32 @@ function resolveResumeChoice(choice) {
 }
 
 // Delta storage: 增量存储开关和状态（默认开启，设置 CCV_DISABLE_DELTA=1 关闭）
-// 注意：delta 计算依赖 mainAgent 请求串行（Claude CLI 保证），不做并发互斥
+// 注意：delta 计算原本依赖 mainAgent 请求串行假设。实证发现 teammate 终止 / 多 SSE 通道
+// 注入等情况会让两条 mainAgent 请求 30ms 内连续到达（前一条流式响应未完成时后一条已发起），
+// 导致仅在 completed 时更新 _lastMessagesCount/_lastTailFp 出现状态滞后 → Plan C 漏检。
 const _deltaStorageEnabled = process.env.CCV_DISABLE_DELTA !== '1';
 // In-place last-msg replace 检测开关（默认开启，设置 CCV_DISABLE_TAIL_FP_CHECKPOINT=1 关闭）。
 // 关闭后回退到旧行为（仅按长度算 delta，遇到末位原地替换会丢失"末位换内容"信息）。
 const _tailFpCheckEnabled = process.env.CCV_DISABLE_TAIL_FP_CHECKPOINT !== '1';
-let _lastMessagesCount = 0;     // 上一次 mainAgent 写入的完整 messages 数量
-let _lastTailFp = '';           // 上一次 mainAgent 末位 message 的指纹（用于 in-place replace 检测）
+// 这两个变量代表"截至本次请求开始前的最新已知态"。请求开始处理时即同步更新（eager），
+// 不再等到 _commitDeltaState（completed 时执行）。Plan C 检测使用进入函数前的快照。
+// 异常分支（请求失败 / 服务端不发送）不会回滚——下一个成功请求覆盖即可，状态不会永久错位。
+// 命名说明：变量名保留 `_last` 前缀（历史命名），但语义已由"上次 commit 后"变为"上次见到的最新态"。
+// 三路并发场景下，连续 3 个请求若 length 非单调（如 257→259→258），_lastMessagesCount 会跟随
+// 最新一次 startRequest，可能让早到的更大值被覆盖；这种情况 Plan C 走 length 不等支路最终
+// 命中 needsCheckpoint 写完整快照，client 拿到正确数据，不破坏正确性。
+let _lastMessagesCount = 0;     // 截至最近一次 startRequest 的完整 messages 数量（eager-updated）
+let _lastTailFp = '';           // 截至最近一次 startRequest 的末位 message 指纹（eager-updated）
 let _mainAgentDeltaCount = 0;   // mainAgent 请求计数器（用于触发定期 checkpoint）
 const CHECKPOINT_INTERVAL = 10; // 每 N 条 mainAgent 请求写一个 checkpoint
 
-/** Delta storage: completed 写入成功后更新状态 */
+/**
+ * Delta storage: completed 写入成功后更新状态。
+ * eager-update 已在请求开始时把 _lastMessagesCount/_lastTailFp 推到本次值，本函数对同
+ * originalLength 的 commit 实际是 no-op（`originalLength > _lastMessagesCount` 判等返回 false）。
+ * 保留为防御层：处理 eager 块未跑到的早期 return / throw（例如 _deltaStorageEnabled=false
+ * 或 messages 不是数组时不会进入 eager 块），让 commit 路径仍能在 completed 时把状态推上去。
+ */
 function _commitDeltaState(originalLength, originalTailFp) {
   if (_deltaStorageEnabled && originalLength > 0) {
     _lastMessagesCount = originalLength;
@@ -615,23 +630,35 @@ export function setupInterceptor() {
       _deltaOriginalTailFp = messages.length > 0 ? fingerprintMsg(messages[messages.length - 1]) : '';
       _mainAgentDeltaCount++;
 
+      // 并发竞态修复（详见模块顶部注释 + history.md Unreleased 段 fix(interceptor) 条目）：
+      // snapshot 上一请求处理时的 count/fp 给 Plan C 用，然后 eager 把模块级状态推到本次值
+      // （不等 _commitDeltaState）。BUG 来源：teammate 终止快速串行让 mainAgent 30ms 内连续
+      // firing，旧 commit 时序使 Plan C 拿陈旧 prev 漏检 → client doubled-history。
+      const _prevMessagesCount = _lastMessagesCount;
+      const _prevTailFp = _lastTailFp;
+      if (_deltaOriginalMessagesLength > 0) {
+        _lastMessagesCount = _deltaOriginalMessagesLength;
+        if (_deltaOriginalTailFp !== '') _lastTailFp = _deltaOriginalTailFp;
+      }
+
       // In-place last-msg replace 检测：messages.length 不变但末位 fp 不同。
       // 触发场景：CLI 在 mainAgent 末位"原地替换"user msg（SUGGESTION MODE → 用户真实输入；
-      // synthetic recap 通道注入；等），wire 上长度未变内容变了。旧逻辑 messages.slice(_lastMessagesCount)
-      // 算出 delta=[]，丢失了"末位换内容"信息 → 客户端重建拿到错误的"前态末位"。
+      // synthetic recap 通道注入；teammate 终止快速串行 → SUGGESTION MODE 多次替换；等），
+      // wire 上长度未变内容变了。旧逻辑 messages.slice(_lastMessagesCount) 算出 delta=[]，
+      // 丢失了"末位换内容"信息 → 客户端重建拿到错误的"前态末位"。
       // 检测命中即强制写 checkpoint，让客户端拿到完整 wire 真实内容。
       const _sameLenInPlaceReplace =
         _tailFpCheckEnabled &&
-        messages.length === _lastMessagesCount &&
-        _lastMessagesCount > 0 &&
-        _lastTailFp !== '' &&
+        messages.length === _prevMessagesCount &&
+        _prevMessagesCount > 0 &&
+        _prevTailFp !== '' &&
         _deltaOriginalTailFp !== '' &&
-        _deltaOriginalTailFp !== _lastTailFp;
+        _deltaOriginalTailFp !== _prevTailFp;
 
       // 判断是否需要写 checkpoint
       const needsCheckpoint =
-        _lastMessagesCount === 0 ||                           // 进程重启 / 首次请求
-        messages.length < _lastMessagesCount ||               // messages 缩短（/clear、context 压缩）
+        _prevMessagesCount === 0 ||                           // 进程重启 / 首次请求
+        messages.length < _prevMessagesCount ||               // messages 缩短（/clear、context 压缩）
         (_mainAgentDeltaCount % CHECKPOINT_INTERVAL === 0) || // 定期 checkpoint
         _sameLenInPlaceReplace;                                // in-place last-msg replace 检测
 
@@ -651,8 +678,8 @@ export function setupInterceptor() {
           requestEntry._inPlaceReplaceDetected = true;
         }
       } else {
-        // delta：只保留新增的 messages
-        const delta = messages.slice(_lastMessagesCount);
+        // delta：只保留新增的 messages（必须用 _prevMessagesCount，不是 eager 已更新的 _lastMessagesCount）
+        const delta = messages.slice(_prevMessagesCount);
         requestEntry._deltaFormat = 1;
         requestEntry._totalMessageCount = messages.length;
         requestEntry._conversationId = 'mainAgent';

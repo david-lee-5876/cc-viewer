@@ -303,6 +303,10 @@ export function mergeSessionIndices(oldIndex, newIndex) {
  * @returns {{ applied: boolean, sessions?: Array }}
  */
 export function applyInPlaceLastMsgReplace(prevSessions, entry, timestamp, isNewSession) {
+  // 老 jsonl 兼容策略：1.6.250 之前 / 1.6.250 ship 后 interceptor 漏检 race 期间写入的
+  // entry 不会带 `_inPlaceReplaceDetected` 字段，本 helper 直接 fallback。客户端不做"事后
+  // 回填"——已污染的 mainAgentSessions 内存翻倍只能靠用户刷新浏览器重读 jsonl 全量重建
+  // 来清理（重建路径用 sessionMerge prefix-overlap，此时旧 entry 都已乱序到位，不会再翻倍）。
   if (!entry || entry._inPlaceReplaceDetected !== true || entry._isCheckpoint !== true) {
     return { applied: false };
   }

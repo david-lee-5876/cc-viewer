@@ -89,7 +89,10 @@ function TreeDir({ name, node, depth, repoPath, onFileClick, onOpenFile, onResto
 }
 
 function CommitRow({ commit, repoPath, expanded, onToggle, onFileClick, onOpenFile, selectedFile, selectedRepo, selectedCommitHash, depth = 0 }) {
-  const dateLabel = (() => {
+  // Memoize tree build to avoid recomputing on every parent re-render
+  // (e.g. when another commit is expanded or a file is selected elsewhere).
+  const fileTree = useMemo(() => buildGitTree(commit.files), [commit.files]);
+  const dateLabel = useMemo(() => {
     if (!commit.date) return '';
     try {
       const d = new Date(commit.date);
@@ -100,7 +103,7 @@ function CommitRow({ commit, repoPath, expanded, onToggle, onFileClick, onOpenFi
         ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
         : d.toLocaleDateString([], { month: 'short', day: 'numeric' });
     } catch { return ''; }
-  })();
+  }, [commit.date]);
   return (
     <>
       <div
@@ -123,7 +126,7 @@ function CommitRow({ commit, repoPath, expanded, onToggle, onFileClick, onOpenFi
       {expanded && commit.files.length > 0 && (
         <TreeDir
           name=""
-          node={buildGitTree(commit.files)}
+          node={fileTree}
           depth={depth + 1}
           repoPath={repoPath}
           onFileClick={onFileClick}
@@ -197,6 +200,36 @@ export default function GitChanges({ style, onClose, onFileClick, onOpenFile, re
   useEffect(() => {
     if (refreshTrigger > 0) refreshAllRepos();
   }, [refreshTrigger]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Prune per-repo state (`expandedCommits`, `collapsedUnpushed`) for repos that
+  // no longer exist — long sessions that switch between many repos otherwise leak.
+  // 同时校验 selectedCommitHash：commit 被推送后会从 commits[] 消失，残留的 selected hash
+  // 会让后续 hover/click 无法对位（无害，但会导致旧 commit 高亮飘忽）。
+  useEffect(() => {
+    if (!repos) return;
+    const validPaths = new Set(repos.map(r => r.path));
+    const pruneObj = (obj) => {
+      const next = {};
+      let changed = false;
+      for (const [k, v] of Object.entries(obj)) {
+        if (validPaths.has(k)) next[k] = v;
+        else changed = true;
+      }
+      return changed ? next : obj;
+    };
+    setExpandedCommits(prev => pruneObj(prev));
+    setCollapsedUnpushed(prev => pruneObj(prev));
+
+    if (selectedCommitHash && selectedRepo) {
+      const repo = repos.find(r => r.path === selectedRepo);
+      const stillExists = repo?.commits?.some(c => c.hash === selectedCommitHash);
+      if (!stillExists) {
+        setSelectedCommitHash(null);
+        // 同时清掉 selectedFile，避免错位高亮残留
+        setSelectedFile(null);
+      }
+    }
+  }, [repos, selectedCommitHash, selectedRepo]);
 
   const isSingleRepo = !repos || repos.length <= 1;
 
@@ -280,7 +313,14 @@ export default function GitChanges({ style, onClose, onFileClick, onOpenFile, re
                 <polyline points="5 12 12 5 19 12"/>
               </svg>
               <span className={styles.unpushedTitle}>{t('ui.gitChanges.unpushedCommits')}</span>
-              <span className={styles.repoBadge}>{repo.commits.length}</span>
+              {repo.truncated && (
+                <span className={styles.commitMeta} title={`total ${repo.totalCount}`}>
+                  {t('ui.gitChanges.unpushedTruncated', { count: repo.commits.length })}
+                </span>
+              )}
+              <span className={styles.repoBadge}>
+                {repo.truncated ? `${repo.commits.length}/${repo.totalCount}` : repo.commits.length}
+              </span>
             </div>
           );
           const workingTreeTree = (

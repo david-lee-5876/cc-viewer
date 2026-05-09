@@ -1,6 +1,15 @@
 # Changelog
 
-## Unreleased
+## 1.6.251
+
+- fix(interceptor): Plan C `_inPlaceReplaceDetected` 在并发 mainAgent 请求竞态下漏检的根治（doubled-history 残余 case）
+  - **背景**：1.6.250 已在 client 端消费 `_inPlaceReplaceDetected:true` 信号修掉 SUGGESTION MODE 末位替换的 doubled-history。但实证（cc-viewer 自验证 jsonl line 3489/3487 @21:33:46）发现 teammate 终止快速串行场景下，**信号根本没发出**——interceptor.js Plan C 漏检。
+  - **根因**：`_lastMessagesCount` / `_lastTailFp` 仅在 `_commitDeltaState`（响应完成后）才更新。mainAgent LLM 流式响应耗时数秒，期间若有另一条请求 30ms 内连续 firing（teammate shutdown_response → idle_notification → teammate_terminated 三波快速串行 / SUGGESTION MODE 多次替换），后续请求处理时 prev 状态仍是更早的值，长度比对 `messages.length === _lastMessagesCount` 失败 → Plan C 不触发 → 客户端拿到无信号的 entry → `mergeMainAgentSessions` prefix-overlap=0 → push 整段 → mainAgentSessions 内存翻倍（doubled-history）。
+  - **修法**：`interceptor.js:611-682` 在请求开始处理时即 **eager update** `_lastMessagesCount` / `_lastTailFp`（snapshot 旧值给 Plan C 用），不再等到 `_commitDeltaState`。effect：30ms 内连续 firing 的下一条请求能看到上一条已 in-flight 的 count/fp，Plan C 命中 → 写 `_inPlaceReplaceDetected:true` → 客户端 helper 短路。
+  - **失败请求场景兜底**：如果一个请求 startRequest 后失败，`_lastMessagesCount` 残留为该请求的 length，下一条成功请求会覆盖（不会永久错位）。最差情况是误命中 Plan C 写一个多余 checkpoint，client helper 的 `messages.length === lastSession.messages.length` 守卫会让 fallback 到 mergeMainAgentSessions —— 不会损坏数据。
+  - **delta 计算修正**：line 676 `messages.slice(_lastMessagesCount)` 改为 `messages.slice(_prevMessagesCount)`，否则 eager-updated 的 `_lastMessagesCount` 等于本请求的 length，slice 出空数组（消息被吞）。
+  - **协议契约不变**：`_inPlaceReplaceDetected:true + _isCheckpoint:true` 字段语义与 client `applyInPlaceLastMsgReplace` 之间的 KEEP IN SYNC 关系**完全保持**。本次修法是让 Plan C 检测更可靠，不改双端契约。
+  - **测试**：`test/interceptor-eager-update-race.test.js` 新增 5 case 覆盖：① eager update 命中竞态 in-place replace；② **control case**：关闭 eager update（旧行为）必须漏检（这是原 BUG）；③ sequential 路径回归；④ 3 路连续 replace 全部命中；⑤ 失败请求残留兜底。1759/1759 全过 + `npm run build` 通过；现存 `interceptor-delta-tail-fp.test.js` 8 个 Plan C case 全部仍 pass（eager 对 sequential 行为等价）。
 
 - feat(git): 在 git 变更面板顶部新增「本地未推送 commit」折叠区
   - **需求**：之前面板只展示工作区未提交变更，看不到本地领先 origin/<branch> 的 commit。

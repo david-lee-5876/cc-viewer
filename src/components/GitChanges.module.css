@@ -190,7 +190,8 @@
   background: var(--bg-elevated);
 }
 
-.repoArrow {
+.repoArrow,
+.commitArrow {
   width: 14px;
   flex-shrink: 0;
   color: var(--text-muted);
@@ -201,7 +202,8 @@
   transform: rotate(0deg);
 }
 
-.repoArrowExpanded {
+.repoArrowExpanded,
+.commitArrowExpanded {
   transform: rotate(90deg);
 }
 
@@ -279,21 +281,6 @@
 
 .commitItem:hover {
   background: var(--bg-elevated);
-}
-
-.commitArrow {
-  width: 14px;
-  flex-shrink: 0;
-  color: var(--text-muted);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: transform 0.15s;
-  transform: rotate(0deg);
-}
-
-.commitArrowExpanded {
-  transform: rotate(90deg);
 }
 
 .commitHash {

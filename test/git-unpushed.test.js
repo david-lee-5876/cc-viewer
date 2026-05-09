@@ -112,6 +112,43 @@ describe('getUnpushedCommits', () => {
     assert.deepStrictEqual(r.commits, []);
   });
 
+  it('marks truncated when commits exceed maxCommits', async () => {
+    ({ remote, work } = setupBareRemoteAndClone());
+    for (let i = 0; i < 5; i++) {
+      writeFileSync(join(work, `f${i}.txt`), `${i}\n`);
+      execSync(`git add f${i}.txt && git commit -m "c${i}"`, { cwd: work, stdio: 'pipe' });
+    }
+    const r = await getUnpushedCommits(work, { maxCommits: 3 });
+    assert.strictEqual(r.commits.length, 3);
+    assert.strictEqual(r.truncated, true);
+    assert.strictEqual(r.totalCount, 5);
+  });
+
+  it('marks truncated even when rev-list count exactly equals maxCommits (conservative default)', async () => {
+    // 当 commits.length === maxCommits 时，默认 truncated=true。
+    // 然后 rev-list 成功且 count==len 时改为 false。这里测的是 rev-list 成功的精确等量场景，
+    // 验证 truncated 被正确翻回 false（说明默认值修复没破坏精确数据路径）。
+    ({ remote, work } = setupBareRemoteAndClone());
+    for (let i = 0; i < 3; i++) {
+      writeFileSync(join(work, `f${i}.txt`), `${i}\n`);
+      execSync(`git add f${i}.txt && git commit -m "c${i}"`, { cwd: work, stdio: 'pipe' });
+    }
+    const r = await getUnpushedCommits(work, { maxCommits: 3 });
+    assert.strictEqual(r.commits.length, 3);
+    assert.strictEqual(r.truncated, false, 'rev-list 成功且 count==maxCommits 时应翻回 false');
+    assert.strictEqual(r.totalCount, 3);
+  });
+
+  it('does not mark truncated when commits fit under cap', async () => {
+    ({ remote, work } = setupBareRemoteAndClone());
+    writeFileSync(join(work, 'a.txt'), 'one\nTWO\n');
+    execSync('git add a.txt && git commit -m "c"', { cwd: work, stdio: 'pipe' });
+    const r = await getUnpushedCommits(work, { maxCommits: 100 });
+    assert.strictEqual(r.commits.length, 1);
+    assert.strictEqual(r.truncated, false);
+    assert.strictEqual(r.totalCount, 1);
+  });
+
   it('handles subjects with tabs/newlines safely (sentinel separators)', async () => {
     ({ remote, work } = setupBareRemoteAndClone());
     writeFileSync(join(work, 'a.txt'), 'one\ntwo\n');
@@ -171,6 +208,28 @@ describe('getGitDiffs with commitHash', () => {
     assert.strictEqual(r[0].is_new, true);
     assert.strictEqual(r[0].old_content, '');
     assert.strictEqual(r[0].new_content, 'hi\n');
+  });
+
+  it('accepts paths containing `..` only when not as a path segment (e.g. node..modules)', async () => {
+    ({ remote, work } = setupBareRemoteAndClone());
+    // Create a directory whose name literally contains `..` (substring, not path segment)
+    execSync('mkdir -p "node..modules"', { cwd: work, stdio: 'pipe' });
+    writeFileSync(join(work, 'node..modules/index.js'), 'console.log("hi");\n');
+    execSync('git add node..modules && git commit -m "add weird dir"', { cwd: work, stdio: 'pipe' });
+    const sha = execSync('git rev-parse HEAD', { cwd: work, encoding: 'utf-8' }).trim();
+    const r = await getGitDiffs(work, ['node..modules/index.js'], sha);
+    assert.strictEqual(r.length, 1, 'should accept node..modules/index.js (substring `..` is not traversal)');
+    assert.strictEqual(r[0].is_new, true);
+  });
+
+  it('rejects real path traversal as path segment', async () => {
+    ({ remote, work } = setupBareRemoteAndClone());
+    const r = await getGitDiffs(work, ['dir/../escape.txt'], undefined);
+    assert.deepStrictEqual(r, [], 'should reject dir/../escape.txt');
+    const r2 = await getGitDiffs(work, ['../etc/passwd'], undefined);
+    assert.deepStrictEqual(r2, [], 'should reject ../etc/passwd');
+    const r3 = await getGitDiffs(work, ['..'], undefined);
+    assert.deepStrictEqual(r3, [], 'should reject standalone ..');
   });
 
   it('handles file deleted in commit', async () => {
