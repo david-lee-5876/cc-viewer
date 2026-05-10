@@ -2384,6 +2384,10 @@ async function handleRequest(req, res) {
             return;
           }
         } else {
+          // Fallback id：当 hook caller 没传 toolUseId（如老 Claude Code PreToolUse hook
+          // payload 不含 tool_use_id），生成 ask_${ts}_${rnd} 占位。这个 id 与 jsonl 里
+          // tool_use.id（toolu_xxx）不同名，前端 portal 决策必须按 ask_* 前缀通配命中。
+          // 协议锚点：src/utils/askPortalMatcher.js — 改此处前缀格式必须同步改 matcher。
           do { id = `ask_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`; } while (pendingAskHooks.has(id));
         }
 

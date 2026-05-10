@@ -10,6 +10,7 @@ import { isMobile, isIOS, isPad } from '../env';
 import AskQuestionForm from './AskQuestionForm';
 import { hasOptionDescription } from '../utils/askOptionDesc';
 import { ApprovalPortalContext } from './ApprovalPortalContext';
+import { shouldPortalAskForm } from '../utils/askPortalMatcher';
 import { SettingsContext } from '../contexts/SettingsContext';
 import { t } from '../i18n';
 import { tc } from '../utils/tClaude';
@@ -828,18 +829,9 @@ class ChatMessage extends React.Component {
     return (
       <ApprovalPortalContext.Consumer>
         {(ctx) => {
-          // Portal 命中两个分支：
-          //   1) SDK 真实 toolId 模式：activeAskId === toolId 严格匹配
-          //   2) PTY-hook 模式：activeAskId='__ask__'，但只允许 owner ChatMessage 通配命中
-          //      —— 即必须同时满足 lastPendingAskId===toolId（owner-idx 已保证唯一性），
-          //         否则历史所有真实 toolId 都会被通配误命中，重现旧的双份 portal bug。
-          //      这条分支替代了 ApprovalModal 自渲染 fallback：让 inline 卡片唯一实例 portal
-          //      到 askSlot，状态完全互通（modal 与 inline 是同一 React 实例）。
-          if (!ctx || !ctx.askSlot || ctx.activeAskId == null) return node;
-          const isStrictMatch = String(ctx.activeAskId) === String(toolId);
-          const isPtyOwnerMatch = ctx.activeAskId === '__ask__'
-            && this.props.lastPendingAskId === toolId;
-          if (isStrictMatch || isPtyOwnerMatch) {
+          // 决策细节与三种 activeAskId 形态的解释：见 src/utils/askPortalMatcher.js
+          if (!ctx || !ctx.askSlot) return node;
+          if (shouldPortalAskForm(ctx.activeAskId, toolId, this.props.lastPendingAskId)) {
             return ReactDOM.createPortal(node, ctx.askSlot);
           }
           return node;

@@ -1,6 +1,7 @@
 node_modules
 dist
 electron-dist
+coverage
 .claude/setting.local.json
 .claude/scheduled_tasks.lock
 .claude/worktrees/

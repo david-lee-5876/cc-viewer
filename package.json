@@ -1,6 +1,6 @@
 {
   "name": "cc-viewer",
-  "version": "1.6.254",
+  "version": "1.6.255",
   "description": "Claude Code Logger visualization management tool",
   "license": "MIT",
   "main": "server.js",
@@ -20,7 +20,8 @@
     "build:sourcemap": "CCV_SOURCEMAP=1 node build.js",
     "start": "node server.js",
     "test": "CCV_LOG_DIR=tmp node --test",
-    "test:coverage": "CCV_LOG_DIR=tmp node --test --experimental-test-coverage --test-coverage-include='lib/*.js' --test-coverage-include='*.js'",
+    "test:coverage": "CCV_LOG_DIR=tmp node --test --experimental-test-coverage --test-coverage-include='lib/*.js' --test-coverage-include='src/utils/*.js' --test-coverage-include='*.js'",
+    "test:coverage:html": "CCV_LOG_DIR=tmp c8 --reporter=text-summary --reporter=html node --test",
     "prepublishOnly": "npm run build",
     "electron:dev": "electron electron/main.js",
     "electron:build": "npm run build && electron-builder",
@@ -88,6 +89,7 @@
     "@xterm/addon-webgl": "^0.19.0",
     "@xterm/xterm": "^6.0.0",
     "antd": "^5.29.2",
+    "c8": "^11.0.0",
     "diff": "^8.0.3",
     "electron": "^35.1.2",
     "electron-builder": "^26.0.12",
@@ -113,5 +115,26 @@
   },
   "optionalDependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.91"
+  },
+  "c8": {
+    "include": [
+      "lib/**/*.js",
+      "src/utils/**/*.js",
+      "*.js"
+    ],
+    "exclude": [
+      "test/**",
+      "dist/**",
+      "node_modules/**",
+      "build.js",
+      "vite.config.js",
+      "electron/**",
+      "scripts/**",
+      "coverage/**"
+    ],
+    "all": true,
+    "report-dir": "coverage",
+    "skip-full": false,
+    "check-coverage": false
   }
 }

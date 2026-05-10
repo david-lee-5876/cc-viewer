@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.6.255 (2026-05-10)
+
+- fix(ui): 文件浏览器 / Git 面板自动刷新机制重写——根治 Edit/Write/MultiEdit 触发时"忽刷忽不刷"
+  - **背景**：旧逻辑五条独立缺陷叠加：① 只把 `Write` 列入 needFileRefresh，`Edit/NotebookEdit` 只刷 Git 不刷文件树，`MultiEdit` 完全漏判；② 监听 tool_use（工具尚未执行，特别是 Bash 长命令）拿到旧文件状态；③ 仅扫 `mainAgentSessions`，subAgent / teammate（Task / Agent Team）的修改完全感知不到；④ `_processedToolIds.size > 5000` 暴力 clear() 让残留的旧 tool_use 被重新认作"新事件"再触发刷新；⑤ 文件浏览器关闭期间的信号被守卫直接丢弃。
+  - **修法**：`ChatView.jsx::_checkToolFileChanges()` 重写为 Pass 1 收集 `tool_use_id → {name, input}` 索引 + Pass 2 扫 `tool_result` 触发刷新双阶段；`tool_result` 出现 = 工具已执行完，`is_error=true` 跳过；两阶段都同时扫 `mainAgentSessions` + `props.requests` 覆盖 subAgent/teammate；`FILE_MUTATING_TOOLS = Set('Write','Edit','MultiEdit','NotebookEdit')` 取代长串 OR；`_pendingFileRefresh / _pendingGitRefresh` 累积关闭期间信号，打开瞬间消费；`_processedToolIdQueue` FIFO + LRU 砍头（上限 20000 / 保留 15000）替代暴力 clear；`collectToolUseBlocks` 提到模块顶层避免每次 cdU 重建闭包；`tool_use_id` 长度 cap 256；dev-only INVARIANT assertion；`componentDidUpdate` 的 `requests` 变化分支也调 `_checkToolFileChanges()`（否则 subAgent 路径感知不到）。
+  - **command 正则补 delete 系列**：`commandValidator.js::MUTATING_CMD_RE` 加 `rmdir` / `unlink` / `\bfind\b[^|;&\n]*-delete\b`（限定单条命令内避免跨管道误匹配）+ JSDoc 注明 trade-off。
+  - **测试**：新增 `test/commandValidator.test.js` 20 case 覆盖删除系列 / 创建移动 / 元信息 / git mutating / 包管理 / 重定向 + "已知 trade-off"分组带 ⚠️ 维护者警告。1829/1829 全过。
+
+- fix(ui): AskUserQuestion 弹窗"标题在但内容空白"——根治老 Claude Code 不传 tool_use_id 触发的 portal 失配
+  - **背景**：用户多次反馈 modal 顶部"需要回答"标题在但内容区空白，同时对话流 inline 卡片渲染正常。
+  - **根因**：`ask-bridge.js` 的 `payload?.tool_use_id || null` 在老 Claude Code PreToolUse hook payload 不传 `tool_use_id` 时拿到 null → `server.js:2387` 走 fallback 自生成 `ask_${Date.now()}_${rnd}`。前端 `pendingAsk.id` 是这个 fallback id 但对话流 `tool_use.id` 是 `toolu_xxx`，两套命名空间不映射。`ChatMessage.jsx` portal 决策只对 `__ask__`（LEGACY 占位）通配不对 `ask_*`（fallback）通配 → owner 那条 ChatMessage 走 inline 但 modal askSlot 永远空。
+  - **修法**：portal 决策抽到 `src/utils/askPortalMatcher.js::shouldPortalAskForm()`，明确列举三种合法 `activeAskId` 形态（`toolu_xxx` strict / `__ask__` LEGACY 通配 / `ask_${ts}_${rnd}` fallback 通配）。owner-idx 算法保证只有 owner 那条 ChatMessage 持非 null `lastPendingAskId`，通配不扩散误命中历史 tool_use。`server.js:2390` fallback id 生成处加 cross-link 注释指向 matcher，防 server 改格式后前端漏改。**不引入 modal 自渲染 fallback**——用户明确要求治本不治标。
+
+- chore(deps): 新增 c8 单元测试覆盖率工具
+  - devDep `c8 ^11.0.0`（零 CVE）。新增 `npm run test:coverage:html` 生成 `coverage/index.html`；原 `test:coverage` 补漏 `src/utils/*.js`。`package.json` 顶层 `c8` 配置 include/exclude/all/report-dir。`.gitignore` 加 `coverage`。当前基线：Statements 58.69% / Branches 74.88% / Functions 75.54% / Lines 58.69%。
+
+- chore(review): 三轮 5-agent UltraReview 采纳 P0/P1
+  - 第 1 轮（文件浏览器刷新）：常量化 `PROCESSED_TOOL_IDS_MAX/KEEP` / `FILE_MUTATING_TOOLS` Set / 命名 `dirty` → `pending` / 上限抬到 20000 / 新增 commandValidator 单测。
+  - 第 2 轮（portal 修复）：扩展 `ask_*` 通配（防御性 + 架构师双 ACCEPT）。
+  - 第 3 轮（累积 7 文件）：INVARIANT 守卫 `NODE_ENV === 'development'`（vite prod 能 DCE）；`_processToolResult` 加 `typeof fp === 'string'` 防御；test 加 ⚠️ 维护者警告；抽出 `askPortalMatcher.js` + server.js cross-link 注释形成 server↔client fallback id 协议显式锚点。1829/1829 全过 + `npm run build` 通过。
+
 ## 1.6.254 (2026-05-10)
 
 - feat(ui): 侧栏三个 hover popover（数据统计 / Team 会话 / 用户 Prompt 导航）改为视口贴顶 + 箭头跟随触发器中心
