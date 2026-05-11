@@ -124,7 +124,7 @@ export async function spawnScratch(id) {
     const pty = await getPty();
     fixSpawnHelperPermissions();
 
-    const shell = process.env.SHELL || '/bin/sh';
+    const shell = process.env.SHELL || (process.platform === 'win32' ? (process.env.ComSpec || 'cmd.exe') : '/bin/sh');
     const env = { ...process.env };
     // 前缀扫描剥离 cc-viewer 主进程的全部协调变量，scratch shell 只继承 cwd + 通用 shell env。
     // cli.js 会在父进程 set 一批 CCV_*（CCV_CLI_MODE / CCV_PROJECT_DIR / CCV_PROXY_PORT / CCV_SDK_MODE /
@@ -278,5 +278,5 @@ export function hasScratchPty(id) {
 
 // 当前 spawn 用的 shell basename（zsh / bash / fish 等），供前端渲染 tab 标签
 export function getScratchShellBasename() {
-  return basename(process.env.SHELL || '/bin/sh') || 'shell';
+  return basename(process.env.SHELL || (process.platform === 'win32' ? (process.env.ComSpec || 'cmd.exe') : '/bin/sh')) || 'shell';
 }

@@ -13,6 +13,7 @@ import {
   getScratchOutputBuffer,
   getScratchStartupCwd,
   getScratchActiveCount,
+  getScratchShellBasename,
   _setPtyImportForTests,
 } from '../scratch-pty-manager.js';
 
@@ -154,6 +155,58 @@ describe('scratch-pty-manager: embedded shell env', () => {
       else process.env.CLAUDE_CODE_NO_FLICKER = prevNoFlicker;
       if (prevKeep === undefined) delete process.env.CCV_KEEP_CLAUDE_CODE_NO_FLICKER;
       else process.env.CCV_KEEP_CLAUDE_CODE_NO_FLICKER = prevKeep;
+    }
+  });
+});
+
+describe('scratch-pty-manager: Windows shell fallback', () => {
+  it('spawns cmd.exe when SHELL is unset on Windows', async () => {
+    if (process.platform !== 'win32') return;
+    const prevShell = process.env.SHELL;
+    const prevComSpec = process.env.ComSpec;
+    const spawned = [];
+    delete process.env.SHELL;
+    delete process.env.ComSpec;
+
+    _setPtyImportForTests(() => ({
+      spawn(command, args, opts) {
+        const inst = {
+          pid: 9999,
+          command,
+          args,
+          opts,
+          write() {},
+          resize() {},
+          kill() {},
+          onData() {},
+          onExit() {},
+        };
+        spawned.push(inst);
+        return inst;
+      },
+    }));
+
+    try {
+      await spawnScratch('win-shell-test');
+      assert.equal(spawned.length, 1);
+      assert.equal(spawned[0].command, 'cmd.exe');
+    } finally {
+      if (prevShell !== undefined) process.env.SHELL = prevShell;
+      else delete process.env.SHELL;
+      if (prevComSpec !== undefined) process.env.ComSpec = prevComSpec;
+      else delete process.env.ComSpec;
+    }
+  });
+
+  it('getScratchShellBasename returns cmd.exe when SHELL is unset on Windows', () => {
+    if (process.platform !== 'win32') return;
+    const prevShell = process.env.SHELL;
+    delete process.env.SHELL;
+    try {
+      assert.equal(getScratchShellBasename(), 'cmd.exe');
+    } finally {
+      if (prevShell !== undefined) process.env.SHELL = prevShell;
+      else delete process.env.SHELL;
     }
   });
 });
