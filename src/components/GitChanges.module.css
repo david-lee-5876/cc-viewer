@@ -81,6 +81,16 @@
   gap: 6px;
 }
 
+/* 只在工作树 TreeDir 可折叠时叠加（commit details 路径不加 → 没有 hover bg / pointer 误导） */
+.dirItemClickable {
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.dirItemClickable:hover {
+  background: var(--bg-elevated);
+}
+
 .dirArrow {
   width: 16px;
   flex-shrink: 0;

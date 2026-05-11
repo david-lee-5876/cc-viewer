@@ -16,6 +16,7 @@ import { classifyRequest, formatRequestTag, formatTeammateLabel } from '../utils
 import { buildChunksForAnswer } from '../utils/ptyChunkBuilder';
 import { isPlanApprovalPrompt, isDangerousOperationPrompt, parseToolInfoFromBuffer } from '../utils/promptClassifier';
 import { isImageFile, isMutatingCommand } from '../utils/commandValidator';
+import { loadExpandedPaths, saveExpandedPaths } from '../utils/fileExpandedPathsStorage';
 import { createEmptyToolState, appendToolResultMap, cachedBuildToolResultMap, getToolResultCache, setToolResultCache } from '../utils/toolResultBuilder';
 import { refreshPlanApprovalOnCachedItems } from '../utils/refreshPlanApprovalCache';
 import { refreshAskAnswerOnCachedItems } from '../utils/refreshAskAnswerCache';
@@ -170,6 +171,13 @@ class ChatView extends React.Component {
     this._sessionItemCache = [];
     this._itemCacheToggleSig = null;
 
+    // 文件详情滚动位置快照（写/编辑触发 fileVersion remount 时跨实例传递）。
+    // 故意用 instance ref 而非 React state：onScroll throttle 100ms 期间会高频写入，
+    // 走 setState 会反复 re-render ChatView/FileContentView 拖累滚动顺滑度。
+    // FileContentView 通过 props.getFileScrollSnapshot()（闭包稳定）按需读取。
+    // 形态：{ path, viewerType: 'code'|'markdown'|'mdx', line?: number, percent?: number } | null
+    this._fileScrollSnapshot = null;
+
 
     // 从 localStorage 读取用户偏好的终端宽度（像素）
     const savedWidth = localStorage.getItem('cc-viewer-terminal-width');
@@ -198,7 +206,7 @@ class ChatView extends React.Component {
       currentFile: null,
       currentGitDiff: null,
       scrollToLine: null,
-      fileExplorerExpandedPaths: new Set(),
+      fileExplorerExpandedPaths: loadExpandedPaths(props.projectName),
       gitChangesOpen: false,
       hasGit: true,
       snapLines: [],
@@ -524,6 +532,23 @@ class ChatView extends React.Component {
       this._streamSpinnerUrl = this.props.isStreaming
         ? (Math.random() < 0.5 ? orbitingUrl : shimmerUrl)
         : null;
+    }
+    // workspace 切换：projectName 变了 → 按新 key 重新 hydrate；scroll 快照同样作废。
+    // ChatView 是 class 组件不能直接用 useSessionStoragePersistedSet hook，这里手抄同款
+    // 守卫语义：`空 → 非空` 是 /api/project-name 异步到达的延迟初始化，**跳过 rehydrate**
+    // 保留 ctor lazy load 后用户在此窗口内的内存操作；非空 → 非空 / 非空 → 空 才是真切换。
+    // （scroll 快照无所谓延迟初始化，工作流上用户必须先打开文件才有快照，每次都清安全。）
+    if (prevProps.projectName !== this.props.projectName) {
+      if (prevProps.projectName) {
+        this.setState({ fileExplorerExpandedPaths: loadExpandedPaths(this.props.projectName) });
+      }
+      this._fileScrollSnapshot = null;
+    }
+    // currentFile 变（含切到 null）→ 上一文件的 scroll 快照失效，集中在 cdU 一处清，
+    // 比在 8 个 setState({currentFile:...}) 站点各加一行更稳。fileVersion bump 走的是同
+    // currentFile 的 remount 路径，currentFile 不变 → 快照保留 → 用于 restore，正合需求。
+    if (prevState.currentFile !== this.state.currentFile) {
+      this._fileScrollSnapshot = null;
     }
     // SettingsContext 异步 fetch 完成后,props.claudeSettings / props.preferences 才到达;
     // 同步派生的 agentTeamEnabled 与 _loadPresets 都需在这里接力。
@@ -3482,7 +3507,26 @@ class ChatView extends React.Component {
     document.body.style.userSelect = 'none';
   };
 
+  // 文件详情 scroll 快照：FileContentView 内部 onScroll throttle 后调用；写 instance ref 不触发 re-render。
+  // path 守卫：throttle 100ms 内用户切文件 / unmount cleanup flush 时旧实例可能发来旧 path 的 snap，
+  // 这里单点拦下，独立于 React 生命周期时序（cdU vs effect cleanup 顺序），消除"跨文件污染"整类风险。
+  handleUpdateFileScroll = (snap) => {
+    if (snap && snap.path !== this.state.currentFile) return;
+    this._fileScrollSnapshot = snap || null;
+  };
+
+  // FileContentView 消费一次后清空，避免下次 mount 又恢复。
+  handleConsumeFileScroll = () => {
+    this._fileScrollSnapshot = null;
+  };
+
+  // 给 FileContentView 拿快照的稳定闭包，避免每次 render 创建新引用。
+  getFileScrollSnapshot = () => this._fileScrollSnapshot;
+
   handleToggleExpandPath = (path) => {
+    // capture projectName 到闭包：用户毫秒内切 workspace 时，callback 触发的写盘
+    // 应该落到"toggle 发生时"那个项目的 key，不要被切换后的 props 牵走。
+    const projectName = this.props.projectName;
     this.setState(state => {
       const newSet = new Set(state.fileExplorerExpandedPaths);
       if (newSet.has(path)) {
@@ -3491,6 +3535,8 @@ class ChatView extends React.Component {
         newSet.add(path);
       }
       return { fileExplorerExpandedPaths: newSet };
+    }, () => {
+      saveExpandedPaths(projectName, this.state.fileExplorerExpandedPaths);
     });
   };
 
@@ -4056,6 +4102,7 @@ class ChatView extends React.Component {
             <FileExplorer
               style={{ width: this.state.sidebarWidth }}
               refreshTrigger={this.state.fileExplorerRefresh}
+              onManualRefresh={() => this.setState(prev => ({ fileExplorerRefresh: prev.fileExplorerRefresh + 1 }))}
               onClose={() => this._setFileExplorerOpen(false)}
               onFileClick={(path) => {
                 if (tryOpenWithSystem(path, 'file-explorer')) return;
@@ -4078,6 +4125,8 @@ class ChatView extends React.Component {
             <GitChanges
               style={{ width: this.state.sidebarWidth }}
               refreshTrigger={this.state.gitChangesRefresh}
+              onManualRefresh={() => this.setState(prev => ({ gitChangesRefresh: prev.gitChangesRefresh + 1 }))}
+              projectName={this.props.projectName}
               onClose={() => this.setState({ gitChangesOpen: false })}
               onFileClick={(repoPath, filePath, commitHash) => {
                 const resolvedPath = repoPath && repoPath !== '.' ? `${repoPath}/${filePath}` : filePath;
@@ -4091,10 +4140,13 @@ class ChatView extends React.Component {
                 const ancestors = [];
                 for (let i = 1; i < parts.length; i++) ancestors.push(parts.slice(0, i).join('/'));
                 this._setFileExplorerOpen(true);
+                const projectName = this.props.projectName;
                 this.setState(prev => {
                   const newSet = new Set(prev.fileExplorerExpandedPaths);
                   ancestors.forEach(p => newSet.add(p));
                   return { currentGitDiff: null, currentFile: resolvedPath, scrollToLine: null, gitChangesOpen: false, fileExplorerExpandedPaths: newSet };
+                }, () => {
+                  saveExpandedPaths(projectName, this.state.fileExplorerExpandedPaths);
                 });
               }}
             />
@@ -4121,6 +4173,7 @@ class ChatView extends React.Component {
                       ancestors.push(parts.slice(0, i).join('/'));
                     }
                     this._setFileExplorerOpen(true);
+                    const projectName = this.props.projectName;
                     this.setState(prev => {
                       const newSet = new Set(prev.fileExplorerExpandedPaths);
                       ancestors.forEach(p => newSet.add(p));
@@ -4131,6 +4184,8 @@ class ChatView extends React.Component {
                         gitChangesOpen: false,
                         fileExplorerExpandedPaths: newSet,
                       };
+                    }, () => {
+                      saveExpandedPaths(projectName, this.state.fileExplorerExpandedPaths);
                     });
                   }}
                 />
@@ -4160,6 +4215,9 @@ class ChatView extends React.Component {
                     filePath={this.state.currentFile}
                     scrollToLine={this.state.scrollToLine}
                     editorSession={!!this.state.editorSessionId}
+                    onUpdateScroll={this.handleUpdateFileScroll}
+                    getRestoreScrollSnapshot={this.getFileScrollSnapshot}
+                    onConsumeScrollSnapshot={this.handleConsumeFileScroll}
                     onClose={() => {
                       if (this.state.editorSessionId) {
                         fetch(apiUrl('/api/editor-done'), {

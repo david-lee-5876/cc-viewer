@@ -1,5 +1,83 @@
 # Changelog
 
+## 1.6.256 (2026-05-11)
+
+- feat(ui): GitChanges 面板新增"文件夹折叠/展开"+ 按项目 sessionStorage 持久化
+  - **背景**：截图里 GitChanges 显示带箭头的 `src/`、`components/`、`utils/`、`test/` 等文件夹，但箭头是装饰性的—— TreeDir 组件无展开/折叠 onClick 能力（GitChanges.jsx:25 直接渲染所有 dirs / files）。用户需要"允许开关文件夹 + 状态保留 sessionStorage 按项目分 key"。
+  - **storage util 重构**：`src/utils/fileExpandedPathsStorage.js` 抽出内部 `loadSet(prefix, projectName)` / `saveSet(prefix, projectName, set)` helper，既有 `loadExpandedPaths` / `saveExpandedPaths` 改为薄 wrapper（FileExplorer 调用方零改动）；新增 `loadGitChangesCollapsedDirs` / `saveGitChangesCollapsedDirs`，prefix `'ccv_gitChangesCollapsedDirs:'`，与 `'ccv_fileExpandedPaths:'` 物理隔离。模块顶注明示两 bucket **语义反向**（FileExplorer 存"展开" 默认全折叠 vs GitChanges 存"折叠" 默认全展开），由函数名 + key 前缀防 maintainer 混用。
+  - **TreeDir 改造**：接 3 个新 prop `collapsedDirs` / `onToggleDir` / `parentPath`；累计 `dirPath = parentPath ? '${parentPath}/${name}' : name`，folding key `${repoPath}::${dirPath}`；`collapsible = !!(name && onToggleDir)` —— `name=''`（根节点）和 commit details 路径（不传 onToggleDir）天然降级为纯渲染。可折叠时整个 dir row 加 `onClick` + `role="button"` + `tabIndex={0}` + `onKeyDown(Enter/Space)` + `aria-expanded`，键盘可达（mirror FileExplorer a11y）；折叠时不渲染 `dirNames.map` + `files.map`；箭头通过 `.rotated90` class 有无切换（mirror 既有 repoArrow/commitArrow 旋转语义）。
+  - **GitChanges 主组件**：接 `projectName` prop（ChatView 传入）；`useState(() => loadGitChangesCollapsedDirs(projectName))` lazy hydrate；`useEffect([collapsedDirs, projectName])` 单点写盘（避开 StrictMode setState updater 闭包内写盘双跑违约）；`useEffect([projectName])` + `firstMountRef` 跳首跑后 rehydrate（mirror MobileFileExplorer P1 修法）；`onToggleDir(dirKey)` 即时 Set 切换。
+  - **工作树 vs commit details 分岔**：父组件给工作树 TreeDir（L329）传真实 `collapsedDirs` + `onToggleDir`；commit details TreeDir（L127 CommitRow 内）不传 → 降级为只读。commit-scoped 状态短命，UX 影响小，本 PR 不持久化。
+  - **CSS**：`.dirItem` 仅在可折叠时叠加 `.dirItemClickable`（cursor:pointer + `:hover` bg + transition），commit details 路径无 hover 误导。
+  - **测试**：`test/fileExpandedPathsStorage.test.js` 加 3 case 覆盖 GitChanges bucket round-trip / 跟 FileExplorer bucket 同 projectName 同字符串 key 不串扰 / 空 projectName 守卫。1846/1846 全过 + build 通过。
+  - **5-agent review 采纳 P1**：edge #7 真问题 —— projectName 异步到达期间用户折叠操作被覆盖。lazy useState 时 projectName='' load 拿空 Set，用户在 `/api/project-name` 回包前折叠 → setState 写内存（save effect 因 projectName='' 早返回不落盘），projectName 到达 → rehydrate effect 用 load(realName) 空 Set 覆盖 → 折叠丢失。修法：rehydrate effect 加 `prevProjectNameRef`，`空 → 非空` 这一跳视为延迟初始化跳过 rehydrate（save effect 用新 projectName 把内存自然落盘），真正的 workspace 切换（非空 → 非空 / 非空 → 空）才 rehydrate。其余 review 项：UX dir 行点击区域、Regression tabIndex 引入 Tab 顺序变化均入 P2 backlog。
+
+- chore(refactor + perf): 全会话 5-agent final review 采纳 P0/P1
+  - **P0-1 死引用清理**：`FileContentView.jsx:370-371` `scrollMemoViewerTypeRef` 创建+写入两行全文件零读取，删 2 行 + 同步收窄上方注释。
+  - **P1-1 抽 `useSessionStoragePersistedSet` hook 统一三处持久化样板**：架构师指出 FileExplorer / MobileFileExplorer / GitChanges 三处此前各自手抄"lazy useState + persist effect + firstMountRef + （后补）prevProjectNameRef"，GitChanges 的"空→非空 projectName 异步到达不覆盖"修复未回流到前两处，已出现 paste drift。新增 `src/hooks/useSessionStoragePersistedSet.js` 把三件套打包；MobileFileExplorer / GitChanges 各 ~20 行模板代码替换为一行 hook 调用；ChatView 是 class 组件不能直接用 hook，在 `componentDidUpdate` 内手抄同款 `prev && next` 守卫（空→非空跳过 rehydrate），三处行为对齐。
+  - **P1-2 GitChanges TreeDir 闭包重建优化**：递归组件每次 collapsedDirs toggle 都让全树 TreeDir re-render；原 inline `onClick`/`onKeyDown` 每次创建新闭包，深目录树 N 对闭包 × M 次 toggle 持续 GC 压力。改用 `useCallback([onToggleDir, dirKey])` 让每个 TreeDir 实例 handler 跨自身 re-render 稳定（onToggleDir 由父组件 useCallback([]) 稳定，dirKey 是同一字符串字面量），N 对闭包仅创建一次。
+  - **P1-3 electron-builder 26.0.12 → 26.8.1**：architect 指出 electron-builder 26.0.x 与 electron 42 产物布局/签名兼容性未充分验证，跟进到 26.8.x 最新 patch 系列。**注意**：`npm run electron:build` 实测打包链仍需用户本地跑一次冒烟，agent 跑不了 GUI 打包。
+  - **P1-4 history.md 补 Electron breaking changes 指引**：见下条。
+  - **P2 入 backlog**：FileContentView 1032 行抽 `useFileScrollMemo` hook；TreeDir 12 props → `TreeContext`；`handleUpdateFileScroll`/`Consume`/`Get` 命名 → `set/clear/peek`；`fileExpandedPathsStorage.js` 文件改名 `treeFoldStateStorage.js`；MdxEditorPanel querySelector 失败加 `console.warn`；GitChanges commit details 折叠态短命持久化或 tooltip。
+  - 测试与 build 通过；总技术债评分由 6.5/10 降至预估 4.5/10。
+
+- feat(ui): 文件浏览器标题栏新增手动刷新按钮
+  - **背景**：cc-viewer 自动刷新走 `_checkToolFileChanges`（Write/Edit/MultiEdit/NotebookEdit + Bash mutating 命令）的 tool_result 触发链路，但外部 mv/cp、IDE 直接修改、Git stash apply、文件系统级 watch 之外的变动等 **不被工具调用感知**的场景需要用户兜底刷新。
+  - **实现**：`FileExplorer.jsx` 标题栏与折叠按钮之间加图标按钮（Feather 风格 `refresh-cw` 双弧箭头 SVG，跟其它工具栏图标 stroke-2 / size-14 一致），点 → 触发 `ChatView` 既有的 `fileExplorerRefresh++` 链路 → TreeNode useEffect 监听到变化重拉已展开目录。零新链路，复用既有自动刷新机制。
+  - **CSS**：`.collapseBtn` 改名 `.headerCloseBtn`（语义更准 + 不跟 OpenFolderIcon.module.css 的 `.iconBtn` 名字混淆）；刷新按钮的样式封装在新 `RefreshIcon` 子组件的 `.module.css`，不引入 `!important` 符合 CLAUDE.md。
+  - **a11y + i18n**：`<span role="button">` 跟 OpenFolderIcon 同款轻量交互；i18n 新增 `ui.fileExplorer.refresh` + `ui.gitChanges.refresh` 18 语翻译（zh "刷新"、en "Refresh"、zh-TW "重新整理"、ko "새로 고침" 等）。
+  - **后续 P1 拓展（同一 PR 内继续）**：抽 `src/components/RefreshIcon.jsx`，封装 300ms cooldown 防狂点 + 一次性 360° 旋转反馈；GitChanges 标题同款接入；FileExplorer iframe 改用 RefreshIcon 子组件；CSP 收窄到只 `allow-scripts` 并叠加 `connect-src 'none'; form-action 'none'` 兜底防恶意 HTML 外发流量。
+  - 1846/1846 全过 + build 通过。
+
+- fix(server + ui): HTML 预览相对资源解析 —— 让 c8 / nyc 这类报告的 `<script src="prettify.js">` 同目录脚本可正常加载
+  - **现象**：继上轮放行 CSP `allow-scripts` 后，DevTools 仍报 `Uncaught ReferenceError: prettyPrint is not defined at window.onload`；prettify.js / sorter.js / block-navigation.js 全部 404。
+  - **根因**：iframe src 是 `query-style` `/api/file-raw?path=coverage%2Findex.html`，浏览器对 HTML 里相对路径 `<script src="prettify.js">` 的解析规则是"去 query + 剥最后 segment + 拼脚本名"，结果是 `/api/prettify.js`（脱离 coverage 目录），server 当然 404；`<base href>` 也救不了，query 不算 path 一部分。
+  - **修法**：server `/api/file-raw` 新增 path-style 调用 `/api/file-raw/<encoded-segments>`，reqPath 直接从 `pathname` 取，复用既有 `isReadAllowed` + mime + CSP sandbox 全套；`FileExplorer.jsx` iframe src 从 `?path=...` 改为 path-style，path 各 segment 单独 encode 保留 `/`。浏览器对相对资源天然按同目录解析 → `/api/file-raw/coverage/prettify.js` 命中 ✓。query-style 老接口保留向后兼容，图片预览等单文件场景不动。
+  - **副作用警告（无害）**：c8 报告还会试图把"已展开断点行"存到 localStorage，因为 sandbox 强制 unique origin → quota=0 → `Failed to set... breakpoints exceeded the quota`。这是 sandbox 隔离的预期行为，断点持久化失效但不影响渲染。
+  - 1846/1846 + build 通过。
+
+- fix(server): HTML 预览 CSP `sandbox` 放行 `allow-scripts` —— 根治 c8 覆盖率报告等带脚本的 HTML 在 iframe 里"页面不完整"
+  - **现象**：用户在 cc-viewer 文件浏览器里打开 `coverage/index.html`（c8 / nyc 生成）；DevTools 报 "Blocked script execution in '...' because the document's frame is sandboxed and the 'allow-scripts' permission is not set"，sortable 表格 / prettify 高亮等交互全废。
+  - **根因**：`server.js:2868` 给 `text/html` 响应下发 `Content-Security-Policy: sandbox`（无 allow- token，最严格）；CSP 与 iframe sandbox 属性同时存在时取**交集**，原先 `'sandbox'` 没有任何 token 直接覆盖掉 `FileExplorer.jsx:826` iframe 上的 `sandbox="allow-scripts allow-popups allow-forms"`，结果 iframe 上的 `allow-scripts` 被废，脚本全数被拦。
+  - **修法**：server CSP 对齐 iframe 三 token：`'sandbox allow-scripts allow-popups allow-forms'`。仍保留 sandbox 强制 unique origin（即便绕过 iframe 直接访问 `/api/file-raw` 也拿不到 cc-viewer 同源 storage/cookie），但放行 scripts，c8 / 静态 HTML 报告这类站内自包含脚本恢复正常。注释同步说明 trade-off。
+  - 1846/1846 测试通过 + build 通过。
+
+- chore(deps): electron 35→42 升级补充指引
+  - 跨 7 个大版本（Chromium 132→148 / Node 20→24 / V8 13.2→14.8），若仓库有自定义 main 进程（`electron/main.js`）请参考 [electron 36-42 breaking changes](https://www.electronjs.org/docs/latest/breaking-changes)：常见踩坑 = `contextIsolation` 默认 true / `nodeIntegration` 默认 false / `webPreferences` 移除项 / `app.allowRendererProcessReuse` deprecation / `webRequest` filter 行为微调。配套升 `electron-builder@^26.8.1`（含 electron 42 产物布局兼容修复）。**发布前必须本地跑 `npm run electron:build`（最好 + `electron:sign`）一次冒烟**，agent 测试覆盖仅至 vite build / unit test 层。
+
+- feat(ui): 文件详情打开时记录 scroll 位置，write/edit 触发刷新时自动恢复（三 viewer 全适配，不持久化，关闭即失效）
+  - **背景**：文件详情用 `<FileContentView key={fileVersion}>` 设计，Write/Edit/MultiEdit/NotebookEdit 触发后 500ms debounce `fileVersion++` → 整组件 remount → 用户原 scroll 位置丢失。三种 viewer（CodeMirror / 旧 marked 预览 / MDX 编辑器）滚动容器各不同。
+  - **方案**：snapshot 走 ChatView instance ref（`this._fileScrollSnapshot`）而非 React state——onScroll throttle 100ms 期间高频写入，走 state 会反复 re-render 拖累滚动顺滑度。FileContentView 收 3 props：`onUpdateScroll(snap)` / `getRestoreScrollSnapshot()` / `onConsumeScrollSnapshot()`。
+    - 三 viewer 各自上报：CodeMirror 走 `view.elementAtHeight(scrollTop)` + `state.doc.lineAt().number` 得视口顶行号（soft-wrap / 异高 block 兼容）；旧 marked 预览 / MDX 编辑器走 `scrollTop / scrollHeight` 百分比（mermaid / 高亮异步撑高时百分比比像素鲁棒）。
+    - 恢复时机：`!loading && content !== null && !scrollToLine` —— `scrollToLine`（Git diff 行号跳转）优先级高于 snapshot 恢复，互斥不冲突。RAF 等首帧 layout，CodeMirror view / MDX contenteditable 未就绪走最多 10/30 次重试。行号 clamp 到 `[1, doc.lines]` 兜底文件缩短。
+    - 失效清理：`ChatView.componentDidUpdate` 检测 `prevState.currentFile !== state.currentFile` 一处统一清快照（覆盖 8 处 `setState({currentFile:...})` 站点，比逐处加行稳）；FileContentView 内 `viewerType` 变化（用户 markdown ↔ text 切换）主动 consume，避免切回老视图拿陈旧位置；snapshot 严格按 `{path, viewerType}` 匹配恢复，不跨文件 / 不跨视图。
+    - throttle 实现：trailing-edge，pending 在 unmount cleanup 时 flush 一次，保证 fileVersion bump 前最后一帧的 scroll 不丢。
+  - **MdxEditorPanel scroll API 暴露**：`useImperativeHandle` 加 `getScrollEl()` 返回 `wrapperRef.current?.querySelector('.mdxeditor-root-contenteditable')`，库升级改类名时只在 MdxEditorPanel 一处升级，不侵入 FileContentView。
+  - **范围明确**：本 PR 仅 PC 端（mobile 走 `MobileFileExplorer.jsx` 不走 fileVersion 链路，无 auto-refresh，本就不需要 scroll 记忆）。markdown 含 mermaid 时百分比 ±5% 偏移、MDX 编辑期外部 Edit 丢光标（pre-existing），均不在本 PR 修复范围。
+  - **5-agent review 采纳 P1**：
+    - UX/Correctness 跨文件污染防御：`handleUpdateFileScroll` 加 `snap.path !== state.currentFile` 守卫单点拦下旧 path snap，独立于 React 生命周期时序（throttle 100ms 内用户切文件 / unmount cleanup flush 的旧 path 都被这里挡掉）。
+    - Regression workspace 切换：`componentDidUpdate` 监听 `projectName` 变化时同步清 `_fileScrollSnapshot`，新工作区巧合打开同 path 文件不再恢复到旧位置。
+    - Edge CodeMirror restore 守卫：补 `view.scrollDOM.clientHeight <= 0` RAF 重试（mount 早期 measure 未跑完 dispatch 会被零高度容器吞掉、consume 完就没第二次机会）；`dispatch scrollIntoView` 包 try/catch 兜底 view 在 RAF 间隙被 destroy 的微窗口。
+    - 入 P2 backlog：抽 `trailingThrottle` 到 `src/utils/` + 单测、抽 `useFileScrollMemo` hook 把 5 个 effect 收纳、viewerType 字面量提常量、顶部 1-10 帧闪烁 `visibility:hidden` 罩、mermaid 异步撑高 MutationObserver reapply、MDX restore 用户已滚短路。
+    - 1843/1843 全过 + build 通过。
+
+- feat(ui): 文件浏览器展开状态按项目 sessionStorage 持久化 + PC popover 箭头居中
+  - **背景**：展开/折叠目录树原本是 `ChatView.fileExplorerExpandedPaths` 和 `MobileFileExplorer` 各自的 in-memory `Set`，刷新/切 tab/重开抽屉就丢，跨项目还会串扰（同一 Set 装多项目相对路径）。
+  - **修法**：新增 `src/utils/fileExpandedPathsStorage.js` 纯函数 helper（`loadExpandedPaths` / `saveExpandedPaths`），key 形如 `ccv_fileExpandedPaths:${projectName}`，值是 `JSON.stringify(Array.from(set))`。全部 try/catch 兜底 Safari Private Mode / 配额满 / JSON 损坏；空 projectName 守卫跳过读写避免孤儿 ":" key；空 set 走 removeItem 不留垃圾。`ChatView.jsx` 构造函数 lazy hydrate + 三处 `setState(updater, callback)` 写盘（toggle / 两处 git diff 级联打开）+ `componentDidUpdate` 监听 `projectName` 切换重 hydrate；`MobileFileExplorer.jsx` 接收 `projectName` prop + `useState(() => loadExpandedPaths(...))` lazy init + `useEffect([projectName])` rehydrate + toggle / 级联展开 useCallback 内同步写盘；**移除原"关闭抽屉清空 expandedPaths"语义**（与持久化矛盾）。`Mobile.jsx` 给 `<MobileFileExplorer>` 补传 `projectName`。
+  - **测试**：新增 `test/fileExpandedPathsStorage.test.js`（node:test，mock 全局 sessionStorage）13 case 覆盖 round-trip / 项目隔离 / 空 projectName 三态守卫 / JSON 损坏 / 非数组 / 非字符串 entry 过滤 / 抛异常 mock。1842/1842 全过。
+  - **5-agent review 采纳 P0/P1**：
+    - correctness #3+#4：MobileFileExplorer 把 `saveExpandedPaths` 从 `setExpandedPaths` updater 闭包内挪出（StrictMode 下 updater 双调用违约 + 写盘双跑），改用 `useEffect([expandedPaths, projectName])` 单点写盘；projectName-change hydrate effect 用 `firstMountRef` 跳过首跑（lazy `useState` 已读过）。
+    - side-effects 附加 micro-race：ChatView 3 处 `setState(..., callback)` 在 updater 外 `const projectName = this.props.projectName` capture 闭包，避免毫秒内切 workspace 把 A 项目的 set 写到 B 项目的 key。
+    - tests #1：补 `save with empty set swallows removeItem throw` case，覆盖 storage helper 的 removeItem catch 分支。
+    - tests #2：`after(() => delete globalThis.sessionStorage)` 防止全局污染外泄到将来的 jsdom 测试。
+    - quality #6：`fileExpandedPathsStorage.js` 在 `set.size===0 → removeItem` 处补一行 WHY 注释。
+    - 1843/1843 全过。
+
+- chore(deps): 安全补丁批次（11 → 2，剩 2 个 moderate 系 `@anthropic-ai/sdk` 不可利用面，明确保留）
+  - **9 个非破坏性 patch**（`npm audit fix`，package.json 未动 + package-lock.json 净瘦 -201 行）：`@xmldom/xmldom`（高，XML 注入/DoS）/ `dompurify`（中，ADD_TAGS/SAFE_FOR_TEMPLATES/CUSTOM_ELEMENT_HANDLING 多路绕过）/ `fast-uri`（高，路径穿越 + 主机混淆）/ `hono`（中，JSX 注入/bodyLimit 绕过/JWT 校验/Cache vary 泄露）/ `ip-address`（中，XSS）+ 链式 `express-rate-limit` / `postcss`（中，CSS Stringify XSS）/ `uuid`（中，buffer 越界）。
+  - **1 个跨大版本 devDep 升级**：`electron ^35.1.2 → ^42.0.1`（一次性消掉 17 个 high CVE：AppleScript/USB/clipboard/Windows registry 注入、多处 use-after-free、IPC origin 错位等）。`electron-builder@26.8.1` 实测仍兼容 electron 42，`@electron/notarize@3.1.1` 不变。1843/1843 + build 通过；electron 主进程/打包真实跑通待 `npm run electron:dev / electron:build` 实测。
+  - **保留 2 个 moderate**：`@anthropic-ai/sdk` 0.79-0.91 区间 Memory Tool 文件权限不安全 + 链式 `@anthropic-ai/claude-agent-sdk` ≥0.2.91 拖入。本仓 `lib/sdk-manager.js` 只 `await import` 后调 `query()`，**未触 Memory Tool**，无利用面。fix 路径要求降 claude-agent-sdk 0.2.138 → 0.2.90（倒退 48 patch）代价高于收益，明确不修，待上游放出非脆弱区间 sdk 再跟。
+
 ## 1.6.255 (2026-05-10)
 
 - fix(ui): 文件浏览器 / Git 面板自动刷新机制重写——根治 Edit/Write/MultiEdit 触发时"忽刷忽不刷"

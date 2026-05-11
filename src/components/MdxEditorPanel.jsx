@@ -98,11 +98,19 @@ const MdxEditorPanel = forwardRef(function MdxEditorPanel(
     }
   }, [onError]);
 
+  // wrapperRef 用来给 FileContentView 的 scroll 记忆功能定位 MDXEditor 内部 contenteditable
+  // 滚动容器（MDXEditor 不暴露 scroller，故由外层 wrapper 内 querySelector 定位）。
+  const wrapperRef = useRef(null);
+
   // (c) 暴露给父组件
   useImperativeHandle(ref, () => ({
     getMarkdown: () => editorRef.current?.getMarkdown?.() ?? '',
     setMarkdown: (md) => editorRef.current?.setMarkdown?.(md ?? ''),
     focus: () => editorRef.current?.focus?.(),
+    // 返回内部 contenteditable 滚动容器；未挂载 / 类名漂移返回 wrapper 自身做兜底。
+    // MDXEditor 当前版本（@mdxeditor/editor 3.55.0）渲染出 .mdxeditor-root-contenteditable，
+    // 库主版本升级时可能改类名 —— 出 bug 时优先在这一处升级类名而不是侵入 FileContentView。
+    getScrollEl: () => wrapperRef.current?.querySelector('.mdxeditor-root-contenteditable') || wrapperRef.current || null,
   }), []);
 
   // (d) translation 注入：所有语言都走 mdxTranslation（未覆盖 key 由它自动 fall back 到 defaultValue 英文）
@@ -110,7 +118,7 @@ const MdxEditorPanel = forwardRef(function MdxEditorPanel(
   // init 时一次性读取，无 subscribe 机制）。代价：编辑光标 + undo/redo history 在切语言时丢失，
   // 用户切语言频率极低，可接受；initialMarkdown 回填保证内容不丢。
   return (
-    <div className={`${styles.container} ${theme === 'dark' ? `dark-theme ${styles.dark}` : styles.light}`}>
+    <div ref={wrapperRef} className={`${styles.container} ${theme === 'dark' ? `dark-theme ${styles.dark}` : styles.light}`}>
       <MDXEditor
         key={lang}
         ref={editorRef}

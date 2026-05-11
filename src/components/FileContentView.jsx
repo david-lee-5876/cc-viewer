@@ -298,7 +298,15 @@ const highlightStyle = HighlightStyle.define([
 
 const syntaxTheme = syntaxHighlighting(highlightStyle);
 
-export default function FileContentView({ filePath, onClose, editorSession, scrollToLine }) {
+export default function FileContentView({
+  filePath,
+  onClose,
+  editorSession,
+  scrollToLine,
+  onUpdateScroll,
+  getRestoreScrollSnapshot,
+  onConsumeScrollSnapshot,
+}) {
   const [content, setContent] = useState(null);
   const [currentContent, setCurrentContent] = useState(null);
   const [error, setError] = useState(null);
@@ -349,6 +357,43 @@ export default function FileContentView({ filePath, onClose, editorSession, scro
   const useMdxEditor = isMdFile && mdxFeatureEnabled && !isMobile && (!extensionDetected || forceMdxOverride) && !mdxParseErrored;
   // 「展示旧 marked 预览」= viewMode='markdown' && !useMdx
   const useLegacyPreview = isMdFile && viewMode === 'markdown' && !useMdxEditor;
+
+  // 当前活跃 viewer 类型。snapshot 严格按 viewerType 匹配恢复，避免跨视图位置乱跳。
+  // 注意：useMdxEditor 已含 viewMode 隐式条件（mdx 仅在 markdown 视图下激活）。
+  const viewerType = useMdxEditor ? 'mdx' : (useLegacyPreview ? 'markdown' : 'code');
+
+  // ── 文件详情 scroll 位置记忆（write/edit 触发 remount 时跨实例恢复）─────────────
+  // 用 ref 镜像 filePath / 回调，避免 throttle 闭包读到陈旧值（filePath 跨文件时 setState
+  // 异步，scroll handler 里直接读 state 可能拿到旧路径写到新文件的 snapshot）。
+  const scrollMemoFilePathRef = useRef(filePath);
+  scrollMemoFilePathRef.current = filePath;
+  const scrollMemoUpdateRef = useRef(onUpdateScroll);
+  scrollMemoUpdateRef.current = onUpdateScroll;
+
+  // trailing-edge throttle：onScroll 高频触发，100ms 内只上报一次（取最新值）。
+  // unmount cleanup flush 一次，保证 fileVersion bump 前最后那一帧的位置不丢。
+  const scrollSnapPendingRef = useRef(null);
+  const scrollSnapTimerRef = useRef(null);
+  const reportScrollSnap = useCallback((snap) => {
+    scrollSnapPendingRef.current = snap;
+    if (scrollSnapTimerRef.current) return;
+    scrollSnapTimerRef.current = setTimeout(() => {
+      scrollSnapTimerRef.current = null;
+      const pending = scrollSnapPendingRef.current;
+      if (pending) scrollMemoUpdateRef.current?.(pending);
+    }, 100);
+  }, []);
+  useEffect(() => {
+    return () => {
+      // unmount 时 flush 待发的 snapshot —— remount 实例靠它恢复。
+      if (scrollSnapTimerRef.current) {
+        clearTimeout(scrollSnapTimerRef.current);
+        scrollSnapTimerRef.current = null;
+      }
+      const pending = scrollSnapPendingRef.current;
+      if (pending) scrollMemoUpdateRef.current?.(pending);
+    };
+  }, []);
 
   // 取当前文本：MDX 模式优先从 editor ref 读 markdown（保持 GUI 编辑里的最新值），
   // 否则走原 content/currentContent。
@@ -554,11 +599,24 @@ export default function FileContentView({ filePath, onClose, editorSession, scro
       if (lineNumRef.current) {
         lineNumRef.current.scrollTop = scroller.scrollTop;
       }
+      // 同步上报视口顶部行号给 ChatView。elementAtHeight 兼容 soft-wrap / 异高 block，
+      // 比 scrollTop/lineHeight 精准；view destroy 期间 try/catch 兜底。
+      try {
+        const block = view.elementAtHeight(scroller.scrollTop);
+        const lineNum = view.state.doc.lineAt(block.from).number;
+        reportScrollSnap({
+          path: scrollMemoFilePathRef.current,
+          viewerType: 'code',
+          line: lineNum,
+        });
+      } catch {
+        // ignored
+      }
     };
     scroller.addEventListener('scroll', syncScroll);
     // 初始同步
     syncScroll();
-  }, []);
+  }, [reportScrollSnap]);
 
   const loadFileContent = useCallback(() => {
     mounted.current = true;
@@ -643,6 +701,118 @@ export default function FileContentView({ filePath, onClose, editorSession, scro
       });
     }
   }, [scrollToLine, loading, content]);
+
+  // 旧 marked 预览的 scroll 监听：记百分比（mermaid / 高亮异步渲染会撑高文档，
+  // 用百分比比像素鲁棒）。content 变化 → markdown 重渲染 → 重新挂监听。
+  useEffect(() => {
+    if (!useLegacyPreview || loading || content === null) return;
+    const el = markdownPreviewRef.current;
+    if (!el) return;
+    const handler = () => {
+      if (el.scrollHeight <= 0) return;
+      reportScrollSnap({
+        path: scrollMemoFilePathRef.current,
+        viewerType: 'markdown',
+        percent: el.scrollTop / el.scrollHeight,
+      });
+    };
+    el.addEventListener('scroll', handler);
+    return () => el.removeEventListener('scroll', handler);
+  }, [useLegacyPreview, loading, content, reportScrollSnap]);
+
+  // MDX 编辑器 scroll 监听：MDXEditor 是 lazy chunk + 异步初始化，contenteditable
+  // 未必立即在 DOM。轮询 50ms × 20 次（总 1s）找到 getScrollEl 暴露的容器再挂监听。
+  useEffect(() => {
+    if (!useMdxEditor || loading || content === null) return;
+    let attachedEl = null;
+    let cancelled = false;
+    let retries = 0;
+    let retryTimer = null;
+    const handler = () => {
+      if (!attachedEl || attachedEl.scrollHeight <= 0) return;
+      reportScrollSnap({
+        path: scrollMemoFilePathRef.current,
+        viewerType: 'mdx',
+        percent: attachedEl.scrollTop / attachedEl.scrollHeight,
+      });
+    };
+    const tryAttach = () => {
+      if (cancelled) return;
+      const el = mdxRef.current?.getScrollEl?.();
+      if (el) {
+        attachedEl = el;
+        attachedEl.addEventListener('scroll', handler);
+      } else if (retries++ < 20) {
+        retryTimer = setTimeout(tryAttach, 50);
+      }
+    };
+    tryAttach();
+    return () => {
+      cancelled = true;
+      if (retryTimer) clearTimeout(retryTimer);
+      if (attachedEl) attachedEl.removeEventListener('scroll', handler);
+    };
+  }, [useMdxEditor, loading, content, reportScrollSnap]);
+
+  // 恢复 scroll 位置：mount 完成 + 内容 ready + 无 scrollToLine（git diff 跳行优先）。
+  // viewerType 严格匹配 + path 匹配，避免跨视图 / 跨文件错位。rAF 等首帧 layout，
+  // CodeMirror / MDX 可能需要多轮重试拿到非空 view / 非空 scrollHeight。
+  useEffect(() => {
+    if (loading || content === null) return;
+    if (scrollToLine) return;
+    const snap = getRestoreScrollSnapshot?.();
+    if (!snap || snap.path !== filePath || snap.viewerType !== viewerType) return;
+    let cancelled = false;
+    let retries = 0;
+    const attempt = () => {
+      if (cancelled) return;
+      if (snap.viewerType === 'code') {
+        const view = editorViewRef.current;
+        // view.scrollDOM.clientHeight <= 0：CodeMirror mount 早期 measure 还没跑完，
+        // 此时 dispatch scrollIntoView 会被零高度容器吞掉，consume 完就没第二次机会；
+        // 走 RAF 重试直到 measure 完成。
+        if (!view || !view.scrollDOM || view.scrollDOM.clientHeight <= 0) {
+          if (retries++ < 10) requestAnimationFrame(attempt);
+          return;
+        }
+        const lineNum = Math.max(1, Math.min(snap.line || 1, view.state.doc.lines));
+        const line = view.state.doc.line(lineNum);
+        // try/catch 兜底 view 在 RAF 间隙被 destroy 的微窗口（cancelled flag 已防大部分）
+        try {
+          view.dispatch({ effects: EditorView.scrollIntoView(line.from, { y: 'start' }) });
+        } catch {
+          // view destroyed mid-RAF — 静默忽略
+        }
+      } else if (snap.viewerType === 'markdown') {
+        const el = markdownPreviewRef.current;
+        if (!el || el.scrollHeight <= 0) {
+          if (retries++ < 10) requestAnimationFrame(attempt);
+          return;
+        }
+        el.scrollTop = el.scrollHeight * (snap.percent || 0);
+      } else if (snap.viewerType === 'mdx') {
+        const el = mdxRef.current?.getScrollEl?.();
+        if (!el || el.scrollHeight <= 0) {
+          if (retries++ < 30) { setTimeout(attempt, 50); return; }
+          return;
+        }
+        el.scrollTop = el.scrollHeight * (snap.percent || 0);
+      }
+      onConsumeScrollSnapshot?.();
+    };
+    requestAnimationFrame(attempt);
+    return () => { cancelled = true; };
+  }, [loading, content, viewerType, filePath, scrollToLine, getRestoreScrollSnapshot, onConsumeScrollSnapshot]);
+
+  // viewerType 切换（用户在打开期间切 markdown ↔ text）→ 旧 viewerType 的 snapshot
+  // 永远 match 不上新 viewerType，但留着会在切回老 viewerType 时拿到陈旧位置；主动清。
+  const prevViewerTypeRef = useRef(viewerType);
+  useEffect(() => {
+    if (prevViewerTypeRef.current !== viewerType) {
+      prevViewerTypeRef.current = viewerType;
+      onConsumeScrollSnapshot?.();
+    }
+  }, [viewerType, onConsumeScrollSnapshot]);
 
   const extensions = useMemo(() => {
     const exts = [

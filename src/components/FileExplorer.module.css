@@ -28,7 +28,9 @@
   gap: 5px;
 }
 
-.collapseBtn {
+/* 右侧折叠/关闭按钮。原 .collapseBtn → .iconBtn → 改名 .headerCloseBtn：
+   语义更准（只服务 close），避免跟 OpenFolderIcon.module.css 的 .iconBtn 同名混淆。 */
+.headerCloseBtn {
   width: 20px;
   height: 20px;
   border: none;
@@ -42,7 +44,7 @@
   padding: 0;
 }
 
-.collapseBtn:hover {
+.headerCloseBtn:hover {
   color: var(--text-secondary);
   background: var(--bg-surface);
 }

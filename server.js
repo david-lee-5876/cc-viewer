@@ -2807,8 +2807,19 @@ async function handleRequest(req, res) {
   // 历史 isEditorSession 后门 + uploadPrefix/persistPrefix 硬编码豁免已收敛:
   // policy 的 allowlist 已含 /tmp/cc-viewer-uploads/、tmpdir()/cc-viewer-uploads/、
   // ~/.claude/cc-viewer/<project>/images/、CCV_PROJECT_DIR、~/.claude/、registered workspaces。
-  if (url === '/api/file-raw' && (method === 'GET' || method === 'HEAD')) {
-    const reqPath = parsedUrl.searchParams.get('path');
+  // 支持两种调用形式：
+  //   query-style `/api/file-raw?path=<encoded>` —— 老接口，前端按文件路径单次取（图片预览等）
+  //   path-style  `/api/file-raw/<encoded-segments>` —— HTML 预览专用，让 iframe 里 c8/nyc 这类
+  //     报告的相对 `<script src="sorter.js">` 能解析到同目录另一个文件（query-style URL 浏览器
+  //     无法做相对路径解析）；reqPath 直接从 pathname 取，复用下方 isReadAllowed + mime + CSP 全套
+  if ((url === '/api/file-raw' || url.startsWith('/api/file-raw/')) && (method === 'GET' || method === 'HEAD')) {
+    let reqPath;
+    if (url.startsWith('/api/file-raw/')) {
+      const tail = parsedUrl.pathname.slice('/api/file-raw/'.length);
+      try { reqPath = decodeURIComponent(tail); } catch { reqPath = tail; }
+    } else {
+      reqPath = parsedUrl.searchParams.get('path');
+    }
     const cwd = process.env.CCV_PROJECT_DIR || process.cwd();
     try {
       if (!reqPath) {
@@ -2864,8 +2875,15 @@ async function handleRequest(req, res) {
       const data = method === 'HEAD' ? null : readFileSync(targetFile);
       const size = method === 'HEAD' ? stat.size : data.length;
       const headers = { 'Content-Type': mime, 'Content-Length': size };
-      // 防止用户项目中的恶意 HTML 在同源下执行脚本（XSS 防护）
-      if (mime === 'text/html') headers['Content-Security-Policy'] = 'sandbox';
+      // 防止用户项目中的恶意 HTML 在同源下执行脚本（XSS 防护）：CSP sandbox 强制 unique origin，
+      // 即便绕过 iframe 直接访问也拿不到 cc-viewer 同源的 storage/cookie。
+      // CSP 与 iframe sandbox 同时存在时取交集（更严格者胜），iframe 端 sandbox 也只配 `allow-scripts`
+      // 跟这里保持一致，c8 / nyc 覆盖率报告需要的 sortable table / prettify / block-navigation 都
+      // 不依赖 popup / form，因此 allow-popups / allow-forms 都不放（防 `window.open` 弹外站 +
+      // `<form action>` 提交任意 URL）。再叠加 `connect-src 'none'` + `form-action 'none'` 兜底
+      // 阻断脚本外发流量（fetch / XHR / WebSocket / form 提交）—— 用户项目里的静态报告页都不需要
+      // 网络通信，能跑就够；外联即可疑。
+      if (mime === 'text/html') headers['Content-Security-Policy'] = "sandbox allow-scripts; connect-src 'none'; form-action 'none'";
       res.writeHead(200, headers);
       res.end(data);
     } catch (err) {

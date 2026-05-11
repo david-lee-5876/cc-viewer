@@ -4,6 +4,7 @@ import { t } from '../i18n';
 import { apiUrl } from '../utils/apiUrl';
 import { getFileIcon } from '../utils/fileIcons';
 import OpenFolderIcon from './OpenFolderIcon';
+import RefreshIcon from './RefreshIcon';
 import styles from './FileExplorer.module.css';
 
 function isExternalFileDrag(e) {
@@ -507,7 +508,7 @@ function TreeNode({ item, path, depth, onFileClick, expandedPaths, onToggleExpan
   );
 }
 
-export default function FileExplorer({ style, onClose, onFileClick, expandedPaths, onToggleExpand, currentFile, refreshTrigger, onFileRenamed, onAttachToChat, onInsertPathToChat }) {
+export default function FileExplorer({ style, onClose, onFileClick, expandedPaths, onToggleExpand, currentFile, refreshTrigger, onManualRefresh, onFileRenamed, onAttachToChat, onInsertPathToChat }) {
   const [items, setItems] = useState(null);
   const [error, setError] = useState(null);
   const [htmlPreviewPath, setHtmlPreviewPath] = useState(null);
@@ -785,9 +786,16 @@ export default function FileExplorer({ style, onClose, onFileClick, expandedPath
           <span className={styles.headerTitle}>
             <OpenFolderIcon apiEndpoint={apiUrl('/api/open-project-dir')} title={t('ui.openProjectDir')} size={14} />
             {t('ui.fileExplorer')}
+            {/* 手动刷新：外部 mv/cp/系统级文件变化等 tool_result 感知不到的场景下用户兜底；
+                复用既有 refreshTrigger++ 链路（ChatView state.fileExplorerRefresh），TreeNode
+                的 useEffect 监听到变化 → 已展开目录全部重拉一次。RefreshIcon 内部封装 300ms
+                cooldown 防狂点 + 360° 单次旋转反馈。 */}
+            {onManualRefresh && (
+              <RefreshIcon onClick={onManualRefresh} title={t('ui.fileExplorer.refresh')} />
+            )}
           </span>
         </Dropdown>
-        <button className={styles.collapseBtn} onClick={onClose} title="Close">
+        <button className={styles.headerCloseBtn} onClick={onClose} title="Close">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <polyline points="11 17 6 12 11 7"/>
             <polyline points="18 17 13 12 18 7"/>
@@ -820,10 +828,15 @@ export default function FileExplorer({ style, onClose, onFileClick, expandedPath
           centered
         >
           <iframe
-            src={apiUrl(`/api/file-raw?path=${encodeURIComponent(htmlPreviewPath)}`)}
+            // 用 path-style URL 而非 ?path=...：HTML 里相对 `<script src="sorter.js">` 浏览器
+            // 才能按"同目录"解析到 `/api/file-raw/<dir>/sorter.js`，c8 / nyc 类报告才完整。
+            // path segment 各自 encode 保留分隔斜杠。
+            src={apiUrl('/api/file-raw/' + htmlPreviewPath.split('/').map(encodeURIComponent).join('/'))}
             style={{ width: '100%', height: '100%', border: 'none' }}
             title={htmlPreviewPath}
-            sandbox="allow-scripts allow-popups allow-forms"
+            // 只放 allow-scripts 跟 server CSP 同步（取交集后才生效）。popup / form 都不放：
+            // c8 / nyc 报告纯静态交互（sortable / 折叠 / 行内 location.hash 跳转）不依赖这两个。
+            sandbox="allow-scripts"
           />
         </Modal>
       )}

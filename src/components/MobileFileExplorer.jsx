@@ -2,6 +2,8 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { t } from '../i18n';
 import { apiUrl } from '../utils/apiUrl';
 import { isImageFile } from '../utils/commandValidator';
+import { loadExpandedPaths, saveExpandedPaths } from '../utils/fileExpandedPathsStorage';
+import { useSessionStoragePersistedSet } from '../hooks/useSessionStoragePersistedSet';
 import FileContentView from './FileContentView';
 import ImageViewer from './ImageViewer';
 import styles from './MobileFileExplorer.module.css';
@@ -96,11 +98,16 @@ function MobileTreeNode({ item, path, depth, expandedPaths, onToggleExpand, curr
   );
 }
 
-export default function MobileFileExplorer({ visible, onClose, targetFile }) {
+export default function MobileFileExplorer({ visible, onClose, targetFile, projectName }) {
   const [items, setItems] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [expandedPaths, setExpandedPaths] = useState(new Set());
+  // 持久化 + projectName 守卫 + firstMountRef + prevProjectNameRef 全套走共用 hook。
+  const [expandedPaths, setExpandedPaths] = useSessionStoragePersistedSet({
+    projectName,
+    load: loadExpandedPaths,
+    save: saveExpandedPaths,
+  });
   const [currentFile, setCurrentFile] = useState(null);
   const mounted = useRef(true);
   const lastTargetRef = useRef(null);
@@ -109,9 +116,9 @@ export default function MobileFileExplorer({ visible, onClose, targetFile }) {
   useEffect(() => {
     mounted.current = true;
     if (!visible) {
-      // 关闭时清理状态，下次打开回到初始界面
+      // 关闭抽屉时清掉 currentFile / lastTargetRef，但保留 expandedPaths（sessionStorage 已持久化，
+      // 下次打开仍能恢复用户上一轮浏览到的目录结构）。
       setCurrentFile(null);
-      setExpandedPaths(new Set());
       lastTargetRef.current = null;
       return;
     }
