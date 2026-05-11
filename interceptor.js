@@ -873,11 +873,13 @@ export function setupInterceptor() {
                     // 此处一次性 join — 流式累积期间唯一的物化点（错误路径除外）。
                     const fullContent = streamedChunks.join('');
                     try {
-                      const events = fullContent.split('\n\n')
+                      // HTTP SSE 规范是 \r\n\r\n 分块，POSIX 上常被 normalize 成 \n\n
+                      // 但 Windows 直接收到的就是 CRLF，硬切 '\n\n' 在 Win 上整块响应当一个事件解析失败。
+                      const events = fullContent.split(/\r?\n\r?\n/)
                         .filter(block => block.trim())
                         .map(block => {
                           // SSE 块可能包含多行: event: xxx\ndata: {...}
-                          const lines = block.split('\n');
+                          const lines = block.split(/\r?\n/);
                           const dataLine = lines.find(l => l.startsWith('data:'));
                           if (dataLine) {
                             // 处理 "data:" 或 "data: " 两种格式

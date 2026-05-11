@@ -215,13 +215,25 @@ export default function GitChanges({ style, onClose, onFileClick, onOpenFile, re
       title: t('ui.gitChanges.restoreConfirm', { name: fileName }),
       okType: 'danger',
       okText: t('ui.gitChanges.restoreFile'),
-      onOk: () => fetch(apiUrl('/api/git-restore'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: filePath, repo: repoPath }),
-      }).then(r => {
-        if (r.ok) refreshAllRepos();
-      }),
+      // 失败要 throw —— antd Modal.confirm 只在 onOk 解析为成功时才关弹窗，
+      // 否则 4xx/5xx 会沉默关闭让人误以为撤销成功。toast + throw 双路把错误显式化。
+      onOk: async () => {
+        let errMsg;
+        try {
+          const r = await fetch(apiUrl('/api/git-restore'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path: filePath, repo: repoPath }),
+          });
+          if (r.ok) { refreshAllRepos(); return; }
+          errMsg = `HTTP ${r.status}`;
+          try { const data = await r.json(); if (data?.error) errMsg = data.error; } catch {}
+        } catch (err) {
+          errMsg = err?.message || 'network error';
+        }
+        message.error(t('ui.gitChanges.restoreFailed', { error: errMsg }));
+        throw new Error(errMsg);
+      },
     });
   }, [refreshAllRepos]);
 

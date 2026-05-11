@@ -2504,6 +2504,26 @@ const i18nData = {
     "tr": "{name} dosyasındaki tüm değişiklikler geri alınsın mı? Bu işlem geri alınamaz.",
     "uk": "Скасувати всі зміни в {name}? Цю дію неможливо скасувати."
   },
+  "ui.gitChanges.restoreFailed": {
+    "zh": "撤销变更失败：{error}",
+    "en": "Failed to discard changes: {error}",
+    "zh-TW": "撤銷變更失敗：{error}",
+    "ko": "변경 취소 실패: {error}",
+    "ja": "変更の破棄に失敗しました: {error}",
+    "de": "Änderungen verwerfen fehlgeschlagen: {error}",
+    "es": "Error al descartar cambios: {error}",
+    "fr": "Échec de l'annulation des modifications : {error}",
+    "it": "Impossibile annullare le modifiche: {error}",
+    "da": "Kunne ikke forkaste ændringer: {error}",
+    "pl": "Nie udało się odrzucić zmian: {error}",
+    "ru": "Не удалось отменить изменения: {error}",
+    "ar": "فشل تجاهل التغييرات: {error}",
+    "no": "Klarte ikke å forkaste endringer: {error}",
+    "pt-BR": "Falha ao descartar alterações: {error}",
+    "th": "ยกเลิกการเปลี่ยนแปลงไม่สำเร็จ: {error}",
+    "tr": "Değişiklikler geri alınamadı: {error}",
+    "uk": "Не вдалося скасувати зміни: {error}"
+  },
   "ui.gitChanges.unpushedTruncated": {
     "zh": "已截断，仅显示 {count} 条",
     "en": "truncated, showing {count}",

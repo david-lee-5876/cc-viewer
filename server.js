@@ -5,7 +5,7 @@ import { randomBytes } from 'node:crypto';
 import { readFileSync, writeFileSync, existsSync, watchFile, unwatchFile, statSync, readdirSync, renameSync, unlinkSync, rmSync, openSync, readSync, closeSync, realpathSync, mkdirSync, createReadStream, cpSync, copyFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, extname, resolve, basename, sep } from 'node:path';
-import { homedir, platform, networkInterfaces } from 'node:os';
+import { homedir, platform, networkInterfaces, tmpdir } from 'node:os';
 import { execFile, exec, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { Worker } from 'node:worker_threads';
@@ -418,7 +418,9 @@ async function handleRequest(req, res) {
         const closingBoundary = Buffer.from('\r\n--' + boundary);
         const bodyEnd = buf.indexOf(closingBoundary, bodyStart);
         const fileData = bodyEnd !== -1 ? buf.slice(bodyStart, bodyEnd) : buf.slice(bodyStart);
-        const uploadDir = '/tmp/cc-viewer-uploads';
+        // Windows 没有 /tmp，走 os.tmpdir() (%TEMP%)；POSIX 保留 /tmp/cc-viewer-uploads/
+        // 以兼容 1.6.245 PR #81 的 macOS allowlist 修复（/private/tmp 双 realpath）。
+        const uploadDir = process.platform === 'win32' ? join(tmpdir(), 'cc-viewer-uploads') : '/tmp/cc-viewer-uploads';
         mkdirSync(uploadDir, { recursive: true });
         bumpWorkspacesVersion();
         // Unique filename: prepend timestamp to avoid silent overwrite
@@ -497,7 +499,7 @@ async function handleRequest(req, res) {
         mkdirSync(targetDir, { recursive: true });
         const realDir = realpathSync(targetDir);
         const realCwd = realpathSync(cwd);
-        if (realDir !== realCwd && !realDir.startsWith(realCwd + '/')) {
+        if (realDir !== realCwd && !realDir.startsWith(realCwd + sep)) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'Path traversal not allowed' }));
           return;
@@ -1765,7 +1767,7 @@ async function handleRequest(req, res) {
         if (statSync(oldFullPath).isDirectory()) {
           const srcResolved = resolve(oldFullPath);
           const destResolved = resolve(toDirFull);
-          if (destResolved === srcResolved || destResolved.startsWith(srcResolved + '/')) {
+          if (destResolved === srcResolved || destResolved.startsWith(srcResolved + sep)) {
             res.writeHead(400, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: 'Cannot move directory into itself' }));
             return;
@@ -1843,15 +1845,18 @@ async function handleRequest(req, res) {
         }
         const realFull = realpathSync(fullPath);
         const realCwd = realpathSync(cwd);
-        if (!realFull.startsWith(realCwd + '/')) {
+        if (!realFull.startsWith(realCwd + sep)) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'Path traversal not allowed' }));
           return;
         }
         const stat = statSync(fullPath);
         if (stat.isDirectory()) {
+          // protectedDirs 守卫得对 Win backslash 路径 & NTFS case-insensitive 同时设防 ——
+          // 否则 `path: "node_modules\\foo"` 或 `".GIT"` 都能绕过 split('/') 直接删整目录。
           const protectedDirs = new Set(['node_modules', '.git', '.svn', '.hg']);
-          if (filePath.split('/').some(part => protectedDirs.has(part))) {
+          const normalizedSegs = filePath.split(/[\\/]/).map(s => s.toLowerCase());
+          if (normalizedSegs.some(part => protectedDirs.has(part))) {
             res.writeHead(400, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: 'Cannot delete protected directory' }));
             return;
@@ -1906,7 +1911,7 @@ async function handleRequest(req, res) {
         }
         const realFull = realpathSync(fullPath);
         const realCwd = realpathSync(cwd);
-        if (!realFull.startsWith(realCwd + '/')) {
+        if (!realFull.startsWith(realCwd + sep)) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'Path traversal not allowed' }));
           return;
@@ -1961,7 +1966,7 @@ async function handleRequest(req, res) {
         }
         const realFull = realpathSync(fullPath);
         const realCwd = realpathSync(cwd);
-        if (!realFull.startsWith(realCwd + '/')) {
+        if (!realFull.startsWith(realCwd + sep)) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'Path traversal not allowed' }));
           return;
@@ -2052,7 +2057,7 @@ async function handleRequest(req, res) {
         }
         const realDir = realpathSync(fullDirPath);
         const realCwd = realpathSync(cwd);
-        if (realDir !== realCwd && !realDir.startsWith(realCwd + '/')) {
+        if (realDir !== realCwd && !realDir.startsWith(realCwd + sep)) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'Path traversal not allowed' }));
           return;
@@ -2102,7 +2107,7 @@ async function handleRequest(req, res) {
         }
         const realDir = realpathSync(fullDir);
         const realCwd = realpathSync(cwd);
-        if (realDir !== realCwd && !realDir.startsWith(realCwd + '/')) {
+        if (realDir !== realCwd && !realDir.startsWith(realCwd + sep)) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'Path traversal not allowed' }));
           return;
@@ -2181,7 +2186,7 @@ async function handleRequest(req, res) {
         }
         const realDir = realpathSync(fullDirPath);
         const realCwd = realpathSync(cwd);
-        if (realDir !== realCwd && !realDir.startsWith(realCwd + '/')) {
+        if (realDir !== realCwd && !realDir.startsWith(realCwd + sep)) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'Path traversal not allowed' }));
           return;
@@ -2726,8 +2731,8 @@ async function handleRequest(req, res) {
       } catch {
         return respondJson(404, { error: 'File not found' });
       }
-      const sep = realDir.endsWith('/') ? realDir : realDir + '/';
-      if (realFile !== realDir && !realFile.startsWith(sep)) {
+      const realDirWithSep = realDir.endsWith(sep) ? realDir : realDir + sep;
+      if (realFile !== realDir && !realFile.startsWith(realDirWithSep)) {
         return respondJson(403, { error: 'Path traversal not allowed' });
       }
       const policy = isReadAllowed(realFile);
@@ -3057,7 +3062,7 @@ async function handleRequest(req, res) {
         if (existsSync(fullPath)) {
           const realFull = realpathSync(fullPath);
           const realCwd = realpathSync(cwd);
-          if (!realFull.startsWith(realCwd + '/')) {
+          if (!realFull.startsWith(realCwd + sep)) {
             res.writeHead(400, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: 'Path traversal not allowed' }));
             return;
@@ -4207,8 +4212,10 @@ async function setupTerminalWebSocket(httpServer) {
           } else if (msg.type === 'image-remove-notify' || msg.type === 'image-upload-notify') {
             // Security: only allow paths within upload directories, reject traversal
             const p = msg.path;
+            // Windows 走 tmpdir()/cc-viewer-uploads/，POSIX 仍是 /tmp/cc-viewer-uploads/（macOS realpath 解为 /private/tmp 两种前缀都放行）。
+            const winUploadPrefix = join(tmpdir(), 'cc-viewer-uploads') + sep;
             if (terminalWss && p && !p.includes('..') && (
-              p.startsWith('/tmp/cc-viewer-uploads/') || (p.includes('/cc-viewer/') && p.includes('/images/'))
+              p.startsWith('/tmp/cc-viewer-uploads/') || p.startsWith('/private/tmp/cc-viewer-uploads/') || p.startsWith(winUploadPrefix) || (p.includes('/cc-viewer/') && p.includes('/images/'))
             )) {
               const rmsg = msg.type === 'image-upload-notify'
                 ? JSON.stringify({ type: 'image-upload-notify', path: p, source: msg.source || 'unknown' })

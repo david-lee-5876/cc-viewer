@@ -1,5 +1,31 @@
 # Changelog
 
+## 1.6.257 (2026-05-11)
+
+- fix(git): Issue #84 —— GitChanges 单文件「撤销变更」在 Windows 下静默 no-op
+  - **现象**：PC 浏览器 → Git 变更面板 → 文件行后「撤销变更」→ 弹窗确认 → 弹窗关闭，**但文件并未撤销**，依旧在变更列表里。报告者环境：Windows 11 + cc-viewer 1.6.255 本地部署。
+  - **根因 1（Windows 路径分隔符）**：`server.js` 与 `lib/file-api.js` 共 10 处路径包含校验硬编码 `realCwd + '/'` / `srcResolved + '/'`，而 Node `realpathSync` 在 Windows 返回 backslash 原生路径（`C:\repo\src\file.js`），`"...\\".startsWith("...//")` 永远 false → 凡是 `existsSync(fullPath)` 为 true 的文件全部 400「Path traversal not allowed」。只有「已删除文件」侥幸走 false 分支跳过校验，所以同界面其它 Git revert 子场景表现不一致。
+  - **根因 2（前端静默吞错）**：`GitChanges.jsx` `handleRestore` 的 `onOk` 只在 `r.ok` 时 `refreshAllRepos()`，对 4xx/5xx 不分流也不 toast；fetch 异常 / 网络错误也无 `.catch()`。`Modal.confirm` 把 resolved promise 当成功，弹窗照关，用户当成做对了。
+  - **修法**：
+    - 全局 sweep：`lib/file-api.js:19` 与 `server.js` 9 处（500 / 1768 / 1846 / 1909 / 1964 / 2055 / 2105 / 2184 / 3060）从 `+ '/'` / `+ '\\'` 统一改 `+ sep`（`server.js:7` 已 import `sep`，`file-api.js` 补 import）。语义在 POSIX 下完全等价（`sep === '/'`），Windows 下从「永远拒」变成「正确放行子路径」。
+    - `GitChanges.jsx`：`handleRestore` 改 async；失败路径走 `message.error(t('ui.gitChanges.restoreFailed', { error }))` + `throw` 让 antd `Modal.confirm` 保住弹窗供重试，4xx/5xx body 里的 `error` 字段会展开给用户。
+    - `src/i18n.js` 新增 `ui.gitChanges.restoreFailed` 18 语种翻译（mirror 同段 `restoreConfirm` 结构）。
+  - **测试**：新增 `test/git-restore.test.js` 14 case：modified / 未跟踪 / 工作树删除 / 嵌套子目录（path-separator 回归守卫）/ `../` 穿越 / 绝对路径 / 缺 path / 非 JSON body / `isPathContained` 跨平台 5 case（含 prefix-match 兄弟目录 ROOT vs ROOT_extra 防误判）。1860/1860 全过 + build 通过。
+  - **作用域取舍**：未把 9 处 inline 校验合并进 `isPathContained` —— 同形不同上下文（有的带 `realDir !== realCwd` 守卫、有的对 `srcResolved`），按 CLAUDE.md「bug 修复不夹带 refactor」原则留作 backlog；MobileGitDiff 无 per-file revert 按钮（确认过），无平行 bug。
+  - **5-agent UltraReview 采纳 P1**：code-quality 提的 `handleRestore` 控制流摊平（单 throw + 单 toast）+ 注释自包含（去掉 "见 #84" 外部引用）已落地；side-effects 发现 `FileExplorer.jsx` 5 处 Modal.confirm 文件操作（411 / 432 / 572 / 593 / 669）存在同款「fetch 失败弹窗静默关」UX 漏洞，按 CLAUDE.md scope 纪律入 backlog 单独 PR 修；compatibility 提醒「## Unreleased」段在本仓首次出现，发版时需手动并入新版本号 header。
+
+- fix(windows): #84 同类排查广义 Windows 适配批 1 —— 6 P0 + 2 P1 一锅修
+  - **触发**：#84 修了 10 处 `+ '/'` → `+ sep` 之后，用户要求顺线深扫 Windows 同类问题。5 个并发 Explore agent + 2 reviewer 复核出共 32 条，本批挑出 6 P0 + 2 关键 P1，剩余 P1/P2 入 backlog 独立 PR。
+  - **P0-1 `server.js:2729`**：CLAUDE.md viewer detail endpoint 的路径包含校验 `realDir.endsWith('/') ? realDir : realDir + '/'`，**#84 漏掉的第 11 处**——分两步拼让原版 grep 命中不了。Windows 上 realpathSync 返回 backslash 路径，永远不命中前缀，**全员 403** 拿不到 CLAUDE.md 详情。改成 `realDir + sep`；为避免跟模块顶层 `import { sep }` 重名，局部变量从 `sep` 改名 `realDirWithSep`。
+  - **P0-2 `server.js:1854` 受保护目录守卫被反斜杠绕过**：`protectedDirs.has(part)` 检查 `node_modules/.git/.svn/.hg`，但前面是 `filePath.split('/')`——用户 POST `path: "node_modules\\foo"` 切完是单元素，**直接绕过守卫被 rmSync 递归删**。同样 `.GIT/HEAD`（NTFS case-insensitive）也能绕。**真 P0 安全洞 + 数据丢失**。修法：`filePath.split(/[\\/]/).map(s => s.toLowerCase())`，反斜杠 + 大小写双兜底。
+  - **P0-3 `lib/file-api.js` 6 处 `reqPath.startsWith('/')`**：用来检测「绝对路径走严格校验，相对路径默认放行」。Windows 上 `C:\evil` 不以 `/` 开头，`includes('..')` 也不命中，**直接走 fallback `join(cwd, "C:\\evil")`**——Node 在 Win 上 `path.join` 见到绝对参数会**覆盖前面 cwd**，结果就是 `C:\evil` 本身，sandbox 直接被绕走任意读写。**真 P0 安全洞**。修法：6 处 `reqPath.startsWith('/')` → `isAbsolute(reqPath)`（统一覆盖 POSIX `/foo`、Win `C:\foo`、UNC `\\server\share`、driveless `\foo`）；import 补 `isAbsolute`。POSIX 行为完全等价（`isAbsolute('/foo')` 跟 `'/foo'.startsWith('/')` 同结果）。
+  - **P0-4 `interceptor.js:876,880` SSE 块 `split('\n\n')` 在 CRLF 上失败**：HTTP SSE 规范是 `\r\n\r\n` 分块。Windows 直收的就是 CRLF，硬切 `'\n\n'` 整块响应当一个事件，**Claude API 流式响应解析全失败**。改成 `split(/\r?\n\r?\n/)` + `split(/\r?\n/)`，POSIX 端因 normalize 过的 `\n` 同样命中。
+  - **P0-5 `lib/git-diff.js:129` git log block `split('\n')`**：git on Win piped stdout 是 CRLF，split 完每行末尾留 `\r`，文件路径直接含 `\r` → 前端展示乱码。改 `split(/\r?\n/)`。
+  - **P0-6 `lib/log-watcher.js:23` 日志条目 `split('\n---\n')`**：interceptor 在 Win 写时若用 `os.EOL`，分隔符变 `\r\n---\r\n`，硬切完全失效**所有条目拼一起或漏**。改 `split(/\r?\n---\r?\n/)`。
+  - **P1-13/14 `server.js:421` + `:4214` `/tmp/cc-viewer-uploads` 硬编码**：Win 无 `/tmp`，上传 mkdir ENOENT 直接挂。修法：platform 分支 —— Win 走 `join(tmpdir(), 'cc-viewer-uploads')`，POSIX 继续 `/tmp/cc-viewer-uploads/` 保留 1.6.245 PR #81 macOS allowlist 修复（`/private/tmp` realpath）；image 同步校验 endpoint 同时认 win/posix/macOS-realpath 三种前缀。
+  - **测试**：新增 `test/windows-compat.test.js` 12 case ——`win32.isAbsolute('C:\\..')`/`posix.isAbsolute`/CRLF log 条目（LF / CRLF / 混合 EOL）/getUnpushedCommits 文件路径不带 `\r` 守卫 /protectedDirs `\` + `.GIT` case bypass / 普通路径放行。1872/1872 全过 + build 通过。
+  - **批 2/3 入 backlog**：剩余 P1（信号 SIGWINCH / SIGTERM / 文件锁 rename retry / case-insensitive workspace / multipart 保留名 CON/PRN / `which` vs `where` / cli URL quote / explorer /select / windowsHide / cli hook 混合 EOL / FileExplorer.jsx 5 处 Modal.confirm fetch-fail silent-close UX 同 #84 同款 BUG 在 lines 411/432/572/593/669 / delete-handler TOCTOU statSync→rmSync 跟随 symlink race / git-restore 多 tab 并发 race）+ P2/P3（chokidar 轮询 / 剪贴板 backslash / Electron 签名 / UAC 防火墙 UX 文档 / `## Unreleased` 段 publish 时手动 rename 流程文档）逐条单独 PR 修。32 条审计完整清单在 `/Users/sky/.claude/plans/imperative-imagining-ullman.md`。
+
 ## 1.6.256 (2026-05-11)
 
 - feat(ui): GitChanges 面板新增"文件夹折叠/展开"+ 按项目 sessionStorage 持久化
