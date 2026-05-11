@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.6.259 (2026-05-11)
+
+- fix(mobile): 移动端开启 Terminal 后权限审批 modal 飞出屏幕根治
+  - **症状**：mobile 视图（窄屏 < 768px、非 pad-mode）下，用户点击 Terminal 切到终端视图后，工具调用触发的「权限审批」浮层（`ToolApprovalPanel` `.panelGlobal`）位置跳到屏幕外几乎看不见；未切 Terminal 时 modal 位置正常。
+  - **根因**：`src/components/ChatInputBar.jsx` 内 `useLayoutEffect` 依赖数组为 `[]`，仅 mount 时跑一次并捕获闭包内的 `el = rootRef.current`。ChatInputBar 在 `terminalVisible=true` 时短路 `return null`（line 201-209），`<div ref={rootRef}>` 不再渲染，React 把 `rootRef.current` 置 null 卸载旧 DOM。但 `[]` 依赖让 cleanup 不触发，已注册的 `ResizeObserver(el)` + `visualViewport.resize` + `window.resize` 三个监听仍持闭包旧 `el` 引用。开 Terminal 时 `.mobileChatOverlay` 的 `transform: translateX(0)` transition / iOS 软键盘 / 浏览器工具栏抖动均触发 `visualViewport.resize`，setVar 对脱离 DOM 的 el 调 `getBoundingClientRect()` 返回 `{top:0,...}`（HTML spec：detached 节点无 layout box，rect 全 0），让 `distFromBottom = vh - 0 = vh`（≈800px），写入 `--chat-input-bar-height: 800px`，`.panelGlobal` 的 `bottom: max(calc(800+12), 56) = 812px` 把 modal 顶到视口顶部外 800px → 看不见。**经典 React effect stale closure + DOM 卸载竞态**，与 `mobileChatOverlay.transform` 创建 stacking context 无关（modal 已主动渲染在 `mobileCLIBody` 之外避开 transform 影响）。
+  - **修复（src/components/ChatInputBar.jsx:56-106，仅 1 文件）**：
+    1. effect 依赖 `[]` → `[terminalVisible]`，切换 Terminal 时旧 ResizeObserver / vv listener / window listener 正确 cleanup，新 effect 拿到当前 `rootRef.current`。**注意**：真正 unmount（ChatView 离开 / workspace 切换）走的还是 React 标准 cleanup 路径，旧的「unmount 时保留 var 最后值不清除」FOUC 防护（v1.6.176 引入）依然保留；新加的 removeProperty 只发生在 `el === null` 的 toggle 分支，即输入栏确实不在 DOM 的时刻——此时 fallback 200px 才是「正确」位置，不是 FOUC。
+    2. `el` 为 null 时（terminal 模式 ChatInputBar return null/chip）主动 `document.documentElement.style.removeProperty('--chat-input-bar-height')`，让 `.panelGlobal` 回退 fallback 200px（max() 兜底 56px），Terminal 模式下 modal 自然贴底 212px，正好让出 60px 虚拟键盘条 + 35px 工具栏 + ~117px 缓冲。
+    3. `setVar` 内新增双重防御：`!el.isConnected` 兜底 detached 节点；`rect.width === 0 && rect.height === 0` 兜底 display:none 祖先（attached 但无 layout box）—— 极端情况 RO / vv callback 在 el 卸载或祖先隐藏后的下一轮派发仍触发也不写脏值。
+    4. 顶部注释完整记录 stale-closure 根因与修复意图，留 trace 给后人（项目历史多次反复重构这块定位逻辑：v1.6.172 引入 var、v1.6.176 改 unmount 保留、v1.6.246 加 zoom 折算 + max() 兜底，trace 价值高于行数）。
+  - **测试**：`npm run build` 通过；`npm run test` 1891/1891 全绿；手动验证：chat 模式 modal 紧贴输入栏 12px，切 Terminal 后 modal 回到底部 212px 位置稳定，多次切换无累积错误，iPad/pad-mode 不受影响（pad-mode 用 `.panel` 非 `.panelGlobal`）。
+  - **5-人 UltraReview 采纳**：P2 (hooks-reviewer) display:none 祖先防御已加 rect w=h=0 check；P2 (quality-reviewer) setVar 内注释精简为 2 行，根因 trace 保留在顶部段；P3 (quality-reviewer) 措辞「microtask」改「下一轮派发」（ResizeObserver callback 实际在 sync layout 阶段，非 microtask；vv.resize 是普通 task）。**P1 (mobile-ux-reviewer) 不采纳，记 backlog**：切 Terminal 时如有 modal 存在会跳 ~130px（从贴输入栏 80px → fallback 212px）。两种 mitigation——加 `.panelGlobal { transition: bottom 0.3s }` 或 terminal 模式隐藏 modal——前者会破坏 iOS 键盘高频升降时 modal 即时跟随响应性（vv.resize 频率远高于 terminal 切换），后者改 modal 可见性策略影响面太大。当前从「飞出屏幕 800px 不可用」改善到「跳到 212px 可见且可操作」已是绝对改善，离散切换时的视觉跳跃属低频可接受 trade-off。
+
 ## 1.6.258 (2026-05-11)
 
 - fix(windows): 广义 Windows 适配批 2 —— 4 安全洞 + FileExplorer 5 处 UX + 14 项杂项 + 5-agent UltraReview 采纳 P0/P1 单 PR 3 logical commit 落地

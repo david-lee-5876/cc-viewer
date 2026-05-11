@@ -52,10 +52,23 @@ function ChatInputBar({ inputRef, inputEmpty, inputSuggestion, terminalVisible, 
   //
   // useLayoutEffect 同步首次写入避免首帧竞态；只监听 visualViewport.resize（iOS 键盘升降），
   // 不监听 scroll —— scroll 在 iOS 动量滚动期间每帧触发，会让面板随惯性抖动。
-  // unmount 时保留最后值不清除，避免卸载瞬间回退 fallback 覆盖。
+  //
+  // 依赖 [terminalVisible]：terminalVisible=true 时本组件早期 return null/chip，
+  // <div ref={rootRef}> 不再渲染，rootRef.current 变成 null。若依赖留空 []，
+  // 旧 effect 的 cleanup 不会触发，闭包里的 el 仍指向已脱离 DOM 的旧元素；后续
+  // visualViewport.resize（开 Terminal 时 transform transition / iOS 键盘 / 浏览器
+  // 工具栏抖动均会触发）调用 setVar，对脱离 DOM 的元素 getBoundingClientRect() 返回
+  // {top:0,...}，让 distFromBottom = vh（≈ 800px），写入 --chat-input-bar-height: 800px，
+  // 把 .panelGlobal 的 bottom 顶到 812px 飞出屏幕。改为 [terminalVisible] 后，切换时
+  // 旧 listener 正确 disconnect，新 effect 拿到当前 rootRef；null 时清除 CSS 变量让
+  // .panelGlobal 回退 fallback 200px（max() 兜底 56px），即 Terminal 模式下 modal
+  // 自然贴底 212px。
   useLayoutEffect(() => {
     const el = rootRef.current;
-    if (!el) return;
+    if (!el) {
+      document.documentElement.style.removeProperty('--chat-input-bar-height');
+      return;
+    }
     // 折算祖先 zoom：Android WebView 在 zoom 容器内 getBoundingClientRect() 给的是 zoom 前 layout
     // 坐标，乘 parentZoom 才是视觉坐标；Chrome/Safari/iPad（zoom=1 或 pad-mode 覆盖回 1）天然
     // parentZoom=1，乘 1 等价于不动。每次 setVar 重读，支持运行时 mobile↔pad 切换。
@@ -69,7 +82,11 @@ function ChatInputBar({ inputRef, inputEmpty, inputSuggestion, terminalVisible, 
       return 1;
     };
     const setVar = () => {
+      // 防御 stale el：极端情况下 RO / vv callback 可能在 el 卸载后的下一轮派发仍触发。
+      // isConnected 兜底 detached 节点；w=h=0 兜底 display:none 祖先（attached 但无 layout box）。
+      if (!el.isConnected) return;
       const rect = el.getBoundingClientRect();
+      if (rect.width === 0 && rect.height === 0) return;
       const vh = window.visualViewport?.height ?? window.innerHeight;
       const visualTop = rect.top * findParentZoom();
       const distFromBottom = vh - visualTop;
@@ -95,7 +112,7 @@ function ChatInputBar({ inputRef, inputEmpty, inputSuggestion, terminalVisible, 
       }
       window.removeEventListener('resize', setVar);
     };
-  }, []);
+  }, [terminalVisible]);
 
   useEffect(() => {
     if (terminalVisible && recRef.current) {
