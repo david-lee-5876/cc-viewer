@@ -89,9 +89,12 @@ jobs:
         run: find artifacts -type f | head -20
 
       - name: Create GitHub Release
+        # NOTE: 用 PAT(RELEASE_PAT) 而非默认 GITHUB_TOKEN 创建 Release。
+        # GitHub 防递归限制：由 GITHUB_TOKEN 触发的 release:published 事件不会触发其他 workflow，
+        # 会导致 bump-homebrew.yml 不被触发。换成 PAT 后下游 workflow 才能正常被触发。
+        # 若 RELEASE_PAT 未配置，回退到 GITHUB_TOKEN(此时需要手动触发 bump-homebrew)。
         uses: softprops/action-gh-release@v2
         with:
           files: artifacts/*
           generate_release_notes: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
