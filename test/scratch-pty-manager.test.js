@@ -160,8 +160,10 @@ describe('scratch-pty-manager: embedded shell env', () => {
 });
 
 describe('scratch-pty-manager: Windows shell fallback', () => {
-  it('spawns cmd.exe when SHELL is unset on Windows', async () => {
-    if (process.platform !== 'win32') return;
+  it('spawns cmd.exe when SHELL is unset on Windows', async (t) => {
+    if (process.platform !== 'win32') {
+      t.skip('Windows only');
+    }
     const prevShell = process.env.SHELL;
     const prevComSpec = process.env.ComSpec;
     const spawned = [];
@@ -198,8 +200,10 @@ describe('scratch-pty-manager: Windows shell fallback', () => {
     }
   });
 
-  it('getScratchShellBasename returns cmd.exe when SHELL is unset on Windows', () => {
-    if (process.platform !== 'win32') return;
+  it('getScratchShellBasename returns cmd.exe when SHELL is unset on Windows', (t) => {
+    if (process.platform !== 'win32') {
+      t.skip('Windows only');
+    }
     const prevShell = process.env.SHELL;
     delete process.env.SHELL;
     try {
