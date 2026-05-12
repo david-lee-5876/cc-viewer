@@ -343,7 +343,7 @@ export async function spawnShell() {
 
   fixSpawnHelperPermissions();
 
-  const shell = process.env.SHELL || '/bin/sh';
+  const shell = process.env.SHELL || (process.platform === 'win32' ? (process.env.ComSpec || 'cmd.exe') : '/bin/sh');
 
   lastExitCode = null;
   currentWorkspacePath = cwd;
