@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.6.262 (2026-05-12)
+
+- fix(test): Windows-only test 在非 Windows 平台 t.skip() 后早退
+  - 背景：PR #88 合并后，`test/scratch-pty-manager.test.js` 的两个 Windows-only 用例使用 `if (!win32) { t.skip('Windows only'); }` 写法，但 Node test runner 的 `t.skip()` 只是给当前测试打 skipped 标签，**不会终止函数执行**——后续 mock + `spawnScratch` + assert 仍照常运行。
+  - 在非 Windows CI 上（macOS/Linux），fallback 取到 `/bin/sh`，断言 `command === 'cmd.exe'` 会失败，结果是"既 skipped 又 fail"的混乱状态（行为依赖 Node 版本，不可靠）。
+  - 改法：两处 `t.skip(...)` 之后各加 `return;` 显式早退；测试现在在非 Windows 平台正确显示为 skipped（2 skipped），Windows 平台正常跑断言。
+
+- feat(chat-render): web_search_tool_result 卡片化 + server_tool_use→results→synthesis 分组容器
+  - **背景**：旧逻辑 `ChatMessage.renderAssistantContent` 只识别 `thinking` / `text` / `tool_use` 三种 block，导致 Anthropic server-side web_search 工具返回的两类块 `server_tool_use` 和 `web_search_tool_result` 被静默丢弃——用户在「对话」标签看到模型基于搜索结果输出的文字总结，却完全看不到模型搜了什么、用了哪些来源。
+  - **新 utils**：`src/utils/webSearchGrouping.js`
+    - `extractWebSearchGroups(content)`：单遍扫描 content 数组，按 `server_tool_use → web_search_tool_result → 连续 text` 子序列识别 group；thinking 不归入 group；按 content 全局 index 标记 consumedIndices。
+    - `safeHref(url)`：URL 协议白名单仅放行 `http:` / `https:`，防 `javascript:` / `data:` / `file://`（Electron 环境的 RCE 风险）。
+    - `getHostname(url)`：try/catch 包装 `new URL(...).hostname`。
+  - **新组件**：`src/components/WebSearchResultsView.{jsx,module.css}` —— 卡片列表，title 是 `safeHref` 通过的外链（`<a target="_blank" rel="noopener noreferrer">` + aria-label "在新标签页打开"）、域名小灰字、page_age 小角标；`encrypted_content` 完全不渲染（如需查看 raw payload 请用「查看请求」按钮）；移动端 (`isMobile`) 自动折叠为前 3 张 + "查看更多 N 条"按钮。
+  - **`ChatMessage.jsx::renderAssistantContent` 重构**：双分支派发——`groups.length === 0` 走原 filter-then-render 路径（抽到 `_renderAssistantContentLegacy`，行为完全不变），`>0` 切换到新 `_renderAssistantContentInOrder` 按 content 原始 index 顺序遍历，避免 mix 场景顺序错乱；流式光标按 content 全局最后非空 text 块对齐。
+  - **sub-agent 同样启用**：sub-agent 渲染（Task/Agent 工具触发的子代理）也走分组容器——这是用户最常见的 web_search 场景（主 agent 通过 Task 调 haiku 子代理做 web_search），不能 opt-out。视觉上 sub-agent bubble + 内嵌左色条 group 是单层结构（不是双层 bubble），无冲突。`enableWebSearchGrouping` 形参保留，方便未来按需关闭。
+  - **CSS**（`ChatMessage.module.css` 尾部新增）：`.webSearchGroup` 左侧 3px 主色色条 + 透明背景（不与 `.bubbleAssistant` 同底色），`.webSearchGroupStreaming` 流式期间 `min-height: 120px` 避免 Virtuoso `atBottom` 因高度跳变误判离底；header 用 antd `<SearchOutlined />` 替代 emoji（屏幕阅读器友好）；`@media (max-width: 768px)` 适配。零 `!important`。
+  - **i18n**：新增 7 key × 18 locale（全语言覆盖，遵循 CLAUDE.md "必要时更新所有 i18n 支持的语言版本"）—— `ui.webSearchQuery` / `ui.webSearchResultCount` / `ui.webSearchShowMore` / `ui.webSearchShowLess` / `ui.openInNewTab` / `ui.webSearchSearching` / `ui.webSearchCitedHint`。
+  - **`toolResultBuilder.js`** 顶部加注释，明确 `server_tool_use` 不入 `toolUseMap`、由 ChatMessage 直接渲染（防未来误改）。
+  - **单测**：`test/web-search-grouping.test.js` 21 个测试覆盖 extractWebSearchGroups（8 场景含 thinking 插入、未配对孤儿、mix tool_use）/ safeHref（6 协议）/ getHostname（3 边界）。
+  - **3 轮 5 perspective review 反馈采纳**：(1) extractWebSearchGroups 拆到纯 .js 让 Node test runner 能 import；(2) sub-agent enableWebSearchGrouping 形参 opt-out 防嵌套；(3) URL 协议白名单；(4) renderAssistantContent 双分支替代之前含糊的 filter-skip；(5) 流式光标按 content 全局 index 重算；(6) consumedIndices 全用全局 index；(7) thinking 不归 group；(8) i18n 全 18 locale；(9) 🔍 emoji → antd icon；(10) aria-label 宣告新标签页；(11) 移动端折叠 3 张 + 字号反向放大；(12) 长 URL ellipsis；(13) Virtuoso atBottom min-height 占位；(14) bubble 套 bubble 改透明背景 + border-left；(15) 未配对 fallback；(16) citations hint 折中；(17) history "(未发布)" 块累积说明。
+  - **已知 backlog（不在本批）**：citations 字段细粒度高亮（v1 仅显示集合 hint）；普通 tool_use → tool_result → 下条 assistant message text 的跨 message 分组（数据形态完全不同，需另立设计）；sub-agent 内 web_search 渲染。
+
 ## 1.6.261 (2026-05-12)
 
 - review(adopt): 5-agent code review 采纳（P1 + P2 全部）

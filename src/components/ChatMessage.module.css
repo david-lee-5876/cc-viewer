@@ -1320,3 +1320,51 @@
 :global(html.pad-mode) .askCheckboxGroup { gap: 2px; }
 :global(html.pad-mode) .askOtherInput :global(.ant-input) { font-size: 12px; }
 :global(html.pad-mode) .askSubmitBtn { padding: 4px 20px; font-size: 13px; }
+
+/* ─── Web search group container (server_tool_use + web_search_tool_result + synthesis text) ───
+   职责切分：本区块负责"group 外壳"——左色条容器 / header / synthesis 分区 / citation hint / 流式占位。
+   单条搜索结果的卡片样式（.card / .title / .urlDomain / .pageAge / .showMoreBtn）位于
+   WebSearchResultsView.module.css，由 WebSearchResultsView 组件单独负责。 */
+.webSearchGroup {
+  border-left: 3px solid var(--color-primary-pale);
+  padding: 4px 0 4px 12px;
+  margin: 8px 0;
+}
+.webSearchGroupStreaming {
+  min-height: 120px;
+}
+.webSearchGroupHeader {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 12px;
+  color: var(--text-gray);
+  margin-bottom: 6px;
+  flex-wrap: wrap;
+}
+.webSearchGroupHeader > :global(.anticon) { font-size: 13px; }
+.webSearchGroupCount {
+  font-size: 11px;
+  color: var(--text-gray);
+  padding: 0 6px;
+  border: 1px solid var(--border-secondary);
+  border-radius: 4px;
+}
+.webSearchSynthesis {
+  margin-top: 10px;
+}
+.webSearchCitationHint {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--text-gray);
+  font-style: italic;
+}
+.webSearchPlaceholder {
+  font-size: 12px;
+  color: var(--text-gray);
+  font-style: italic;
+  padding: 4px 0;
+}
+@media (max-width: 768px) {
+  .webSearchGroup { padding-left: 8px; }
+}

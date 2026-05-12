@@ -1,7 +1,10 @@
 import React from 'react';
 import ReactDOM from 'react-dom';
 import { Collapse, Typography, Radio, Checkbox, Input, Button, Tooltip, Popover, message } from 'antd';
+import { SearchOutlined } from '@ant-design/icons';
 import { escapeHtml, truncateText, getSvgAvatar } from '../utils/helpers';
+import { extractWebSearchGroups } from '../utils/webSearchGrouping';
+import WebSearchResultsView from './WebSearchResultsView';
 import MarkdownBlock from './MarkdownBlock';
 import { getTeammateAvatar } from '../utils/teammateAvatars';
 import { renderAssistantText } from '../utils/systemTags';
@@ -950,7 +953,18 @@ class ChatMessage extends React.Component {
     );
   }
 
-  renderAssistantContent(content, toolResultMap = {}) {
+  renderAssistantContent(content, toolResultMap = {}, opts = {}) {
+    const enableWebSearchGrouping = opts.enableWebSearchGrouping ?? true;
+    if (enableWebSearchGrouping && Array.isArray(content)) {
+      const { groups, consumedIndices } = extractWebSearchGroups(content);
+      if (groups.length > 0) {
+        return this._renderAssistantContentInOrder(content, toolResultMap, groups, consumedIndices);
+      }
+    }
+    return this._renderAssistantContentLegacy(content, toolResultMap);
+  }
+
+  _renderAssistantContentLegacy(content, toolResultMap = {}) {
     const thinkingBlocks = content.filter(b => b.type === 'thinking');
     const textBlocks = content.filter(b => b.type === 'text');
     const toolUseBlocks = content.filter(b => b.type === 'tool_use');
@@ -1120,6 +1134,269 @@ class ChatMessage extends React.Component {
     });
 
     return innerContent;
+  }
+
+  _renderAssistantContentInOrder(content, toolResultMap, groups, consumedIndices) {
+    const showTC = !!this.props.showTrailingCursor;
+    const innerContent = [];
+
+    // 光标：找 content 全局最后一个非空 text 块（含 group 内 synthesis），用 global index 对齐
+    let lastTextGlobalIdx = -1;
+    let hasTextWithContent = false;
+    for (let i = 0; i < content.length; i++) {
+      const b = content[i];
+      if (b && b.type === 'text' && typeof b.text === 'string' && b.text.trim()) {
+        hasTextWithContent = true;
+        if (showTC) lastTextGlobalIdx = i;
+      }
+    }
+    let lastThinkingGlobalIdx = -1;
+    if (showTC && !hasTextWithContent) {
+      for (let i = 0; i < content.length; i++) {
+        const b = content[i];
+        if (b && b.type === 'thinking' && typeof b.thinking === 'string' && b.thinking.trim()) {
+          lastThinkingGlobalIdx = i;
+        }
+      }
+    }
+    const streamThinkingExpanded = !hasTextWithContent || !!this.props.expandThinking;
+
+    // 1. thinking 顶部独立渲染（与 legacy 一致；thinking 永远不在 consumedIndices 里）
+    let thinkingRenderIdx = 0;
+    for (let i = 0; i < content.length; i++) {
+      const tb = content[i];
+      if (!tb || tb.type !== 'thinking') continue;
+      const thinkingText = tb.thinking || '';
+      const isEmpty = !thinkingText.trim();
+      const isCursorTarget = i === lastThinkingGlobalIdx;
+      const tIdx = thinkingRenderIdx++;
+      const collapseProps = showTC
+        ? { key: `think-stream-${tIdx}`, activeKey: streamThinkingExpanded ? ['1'] : [] }
+        : { key: `think-${tIdx}-${this.props.expandThinking ? 'e' : 'c'}`, defaultActiveKey: this.props.expandThinking ? ['1'] : [] };
+      innerContent.push(
+        <Collapse
+          {...collapseProps}
+          ghost
+          size="small"
+          items={[{
+            key: '1',
+            label: <Text type="secondary" className={styles.thinkingLabel}>{t('ui.thinking')}</Text>,
+            children: isEmpty ? (
+              <div className={styles.thinkingEmptyHint}>
+                <Text type="secondary" className={styles.thinkingEmptyText}>{t('ui.thinkingEmpty')}</Text>
+                {!this.props.showThinkingSummaries && (
+                  <Tooltip title={tc('ui.enableThinkingSummariesTip')}>
+                    <Button
+                      size="small"
+                      type="primary"
+                      ghost
+                      className={styles.enableThinkingBtn}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        this.context.updateClaudeSettings({ showThinkingSummaries: true })
+                          .then(data => {
+                            if (data) message.success(tc('ui.enableThinkingSummariesTip'));
+                            else message.error('Failed to save setting');
+                          });
+                      }}
+                    >
+                      {t('ui.enableThinkingSummaries')}
+                    </Button>
+                  </Tooltip>
+                )}
+              </div>
+            ) : (
+              <MarkdownBlock text={thinkingText} trailingCursor={isCursorTarget} />
+            ),
+          }]}
+          className={`${styles.collapseMargin}${showTC ? ' ' + styles.collapseStream : ''}`}
+        />
+      );
+    }
+
+    // 2. 工具调用辅助：维护非 consumed 的 tool_use 列表，用于 isFirstPendingTool 判断
+    const toolUseGlobalIndices = [];
+    for (let i = 0; i < content.length; i++) {
+      if (content[i] && content[i].type === 'tool_use' && !consumedIndices.has(i)) {
+        toolUseGlobalIndices.push(i);
+      }
+    }
+    const simplify = !this.props.showFullToolContent;
+    let simplifiedLabelAdded = false;
+
+    // 3. groups 索引：globalIndex → group object（按 serverToolUseIndex 或 webSearchResultIndex）
+    const groupStartMap = new Map();
+    for (const g of groups) {
+      const startIdx = g.serverToolUseIndex >= 0 ? g.serverToolUseIndex : g.webSearchResultIndex;
+      groupStartMap.set(startIdx, g);
+    }
+
+    // 4. 按 content 原始顺序遍历
+    for (let i = 0; i < content.length; i++) {
+      const block = content[i];
+      if (!block) continue;
+      if (block.type === 'thinking') continue; // 已在第 1 步渲染
+
+      if (groupStartMap.has(i)) {
+        const g = groupStartMap.get(i);
+        innerContent.push(this._renderWebSearchGroup(g, content, lastTextGlobalIdx, showTC, `wsg-${i}`));
+        continue;
+      }
+
+      if (consumedIndices.has(i)) continue; // group 内部块，已包含在 group 中
+
+      if (block.type === 'text') {
+        if (!block.text) continue;
+        const { segments } = renderAssistantText(block.text);
+        const isCursorTarget = i === lastTextGlobalIdx;
+        innerContent.push(
+          <div key={`text-${i}`} className="chat-boxer">{this.renderSegments(segments, isCursorTarget)}</div>
+        );
+        continue;
+      }
+
+      if (block.type === 'tool_use') {
+        const tu = block;
+        const tuIdxInList = toolUseGlobalIndices.indexOf(i);
+        const isFullDisplayTool = tu.name === 'Edit' || tu.name === 'Write' || tu.name === 'EnterPlanMode' || tu.name === 'ExitPlanMode' || tu.name === 'AskUserQuestion' || tu.name === 'Agent' || tu.name === 'TaskCreate' || tu.name === 'SendMessage';
+        if (simplify && !isFullDisplayTool) {
+          if (!simplifiedLabelAdded) {
+            simplifiedLabelAdded = true;
+            innerContent.push(
+              <span key={`stag-label-${i}`} className={styles.simplifiedToolLabel}>{t('ui.toolsUsed')}</span>
+            );
+          }
+          innerContent.push(
+            <Popover
+              key={`stag-${tu.id}`}
+              placement="top"
+              overlayClassName="simplifiedToolPopover"
+              overlayInnerStyle={{ background: 'var(--bg-elevated)', border: '1px solid var(--border-hover)', borderRadius: 8, padding: 0 }}
+              content={<div className={styles.simplifiedToolPopoverContent}>{this.renderToolCall(tu)}</div>}
+              mouseEnterDelay={0.3}
+              {...((isMobile && !isPad) ? { trigger: 'click', ...(!isIOS && { getPopupContainer: (node) => node.parentElement }) } : {})}
+            >
+              <span className={styles.simplifiedToolTag}>{tu.name}</span>
+            </Popover>
+          );
+        } else {
+          simplifiedLabelAdded = false;
+          innerContent.push(this.renderToolCall(tu));
+        }
+
+        const tr = toolResultMap[tu.id];
+        const isFirstPendingTool = !tr && tuIdxInList >= 0 && !toolUseGlobalIndices.slice(0, tuIdxInList).some(gi => !toolResultMap[content[gi].id]);
+        if (isFirstPendingTool && this.props.activeDangerousPrompt && this.props.cliMode) {
+          const dp = this.props.activeDangerousPrompt;
+          innerContent.push(this.renderDangerApproval(tu.id, dp));
+        }
+
+        if (tr) {
+          const planApprovalMap = this.props.planApprovalMap || {};
+          const approval = planApprovalMap[tu.id];
+          if (tu.name === 'ExitPlanMode' && approval && approval.status === 'approved' && approval.planContent) {
+            // skip
+          } else if (simplify) {
+            if (tr.isPermissionDenied) {
+              innerContent.push(
+                <React.Fragment key={`tr-denied-${tu.id}`}>
+                  {tr.isUltraplan ? (
+                    <div className={styles.ultraplanBadge}>◇ UltraPlan</div>
+                  ) : (
+                    <div className={`${styles.dangerApprovalBox} ${styles.dangerApprovalBoxDenied}`}>
+                      <span className={styles.dangerDeniedBadge}>✗ {t('ui.dangerDenied')}</span>
+                    </div>
+                  )}
+                </React.Fragment>
+              );
+            }
+          } else {
+            if (tr.isPermissionDenied) {
+              innerContent.push(
+                <React.Fragment key={`tr-denied-${tu.id}`}>
+                  {tr.isUltraplan ? (
+                    <div className={styles.ultraplanBadge}>◇ UltraPlan</div>
+                  ) : (
+                    <div className={`${styles.dangerApprovalBox} ${styles.dangerApprovalBoxDenied}`}>
+                      <span className={styles.dangerDeniedBadge}>✗ {t('ui.dangerDenied')}</span>
+                    </div>
+                  )}
+                </React.Fragment>
+              );
+            } else {
+              innerContent.push(
+                <React.Fragment key={`tr-${tu.id}`}>{this.renderToolResult(tr)}</React.Fragment>
+              );
+            }
+          }
+        }
+        continue;
+      }
+
+      // 其他未知 block type：忽略（保持与 legacy 一致的静默丢弃行为，仅 web_search 被特化）
+    }
+
+    return innerContent;
+  }
+
+  _renderWebSearchGroup(group, content, lastTextGlobalIdx, showTC, keyPrefix) {
+    const { serverToolUse, webSearchResult, synthesisTextIndices } = group;
+    const query = serverToolUse?.input?.query || '';
+    const results = (webSearchResult && Array.isArray(webSearchResult.content))
+      ? webSearchResult.content.filter(r => r && r.type === 'web_search_result')
+      : [];
+
+    const hasCitations = synthesisTextIndices.some(gi => {
+      const tb = content[gi];
+      return tb && Array.isArray(tb.citations) && tb.citations.length > 0;
+    });
+
+    const synthesisNodes = [];
+    for (const gi of synthesisTextIndices) {
+      const tb = content[gi];
+      if (!tb || !tb.text) continue;
+      const { segments } = renderAssistantText(tb.text);
+      const isCursorTarget = gi === lastTextGlobalIdx;
+      synthesisNodes.push(
+        <div key={`syn-${gi}`} className="chat-boxer">{this.renderSegments(segments, isCursorTarget)}</div>
+      );
+    }
+
+    const isStreamingPlaceholder = showTC && !webSearchResult && synthesisNodes.length === 0;
+    const containerCls = `${styles.webSearchGroup}${isStreamingPlaceholder ? ' ' + styles.webSearchGroupStreaming : ''}`;
+
+    return (
+      <div key={keyPrefix} className={containerCls}>
+        <div className={styles.webSearchGroupHeader}>
+          <SearchOutlined aria-hidden="true" />
+          <span>
+            {serverToolUse
+              ? t('ui.webSearchQuery', { query: query || '...' })
+              : t('ui.webSearchResultCount', { count: results.length })}
+          </span>
+          {serverToolUse && webSearchResult && (
+            <span className={styles.webSearchGroupCount}>
+              {t('ui.webSearchResultCount', { count: results.length })}
+            </span>
+          )}
+        </div>
+        {webSearchResult ? (
+          <WebSearchResultsView results={results} />
+        ) : serverToolUse ? (
+          <div className={styles.webSearchPlaceholder}>{t('ui.webSearchSearching')}</div>
+        ) : null}
+        {synthesisNodes.length > 0 && (
+          <div className={styles.webSearchSynthesis}>
+            {synthesisNodes}
+            {hasCitations && (
+              <div className={styles.webSearchCitationHint}>
+                {t('ui.webSearchCitedHint')}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
   }
 
   renderAssistantMessage() {

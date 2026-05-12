@@ -1,6 +1,10 @@
 /**
  * Incremental tool result state builder.
  * Processes assistant tool_use and user tool_result blocks into lookup maps.
+ *
+ * NOTE: server_tool_use（如 Anthropic 的 web_search）和 web_search_tool_result 不入此 map，
+ * 它们由 ChatMessage.renderAssistantContent 直接从 assistant content 数组渲染。
+ * 详见 src/utils/webSearchGrouping.js 与 src/components/WebSearchResultsView.jsx。
  */
 
 import { extractToolResultText } from './helpers';
