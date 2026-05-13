@@ -3862,6 +3862,7 @@ class ChatView extends React.Component {
         currentFile: resolved,
         currentGitDiff: null,
         scrollToLine: null,
+        gitChangesOpen: false,
         fileExplorerExpandedPaths: newSet,
       };
     });

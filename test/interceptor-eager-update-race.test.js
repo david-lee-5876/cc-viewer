@@ -20,7 +20,7 @@ import { fingerprintMsg } from '../lib/interceptor-core.js';
 
 const CHECKPOINT_INTERVAL = 10;
 
-function makeRaceSimulator({ eagerUpdate = true, tailFpCheckEnabled = true } = {}) {
+function makeRaceSimulator({ eagerUpdate = true, tailFpCheckEnabled = true, commitGuardEnabled = true } = {}) {
   let _lastMessagesCount = 0;
   let _lastTailFp = '';
   let _mainAgentDeltaCount = 0;
@@ -57,13 +57,24 @@ function makeRaceSimulator({ eagerUpdate = true, tailFpCheckEnabled = true } = {
       inPlaceReplace: !!sameLenInPlaceReplace,
       deltaLength: needsCheckpoint ? originalLength : originalLength - prevMessagesCount,
       totalCount: originalLength,
-      // 模拟响应完成后的 _commitDeltaState（与 interceptor.js:_commitDeltaState 对齐：
-      // `originalLength > _lastMessagesCount` 才更新）。eager 模式下 originalLength === _lastMessagesCount
-      // 直接 no-op；旧模式（control case）下 commit 才是真正的状态更新点。
+      prevMessagesCount,
+      prevTailFp,
+      // 模拟响应完成后的 _commitDeltaState（KEEP IN SYNC: interceptor.js:_commitDeltaState）：
+      // commitGuardEnabled=true（默认）→ 只在 originalLength > _lastMessagesCount 时更新，
+      // 杜绝乱序完成时较短 commit 把已被 eager 推高的状态倒推。
+      // commitGuardEnabled=false（control case）→ 无条件覆盖，重现倒推 BUG 实证生产代码漏点。
+      // fp 守卫使用 `typeof === 'string'` 而非 `!== ''`，与生产 typeof 检查 byte-for-byte 对齐。
       commit: () => {
-        if (originalLength > 0 && originalLength > _lastMessagesCount) {
-          _lastMessagesCount = originalLength;
-          if (originalTailFp !== '') _lastTailFp = originalTailFp;
+        if (commitGuardEnabled) {
+          if (originalLength > 0 && originalLength > _lastMessagesCount) {
+            _lastMessagesCount = originalLength;
+            if (typeof originalTailFp === 'string') _lastTailFp = originalTailFp;
+          }
+        } else {
+          if (originalLength > 0) {
+            _lastMessagesCount = originalLength;
+            if (typeof originalTailFp === 'string') _lastTailFp = originalTailFp;
+          }
         }
       },
     };
@@ -172,5 +183,146 @@ describe('Plan C eager-update race regression', () => {
     // lastSession 反映 committed 态而不是 eager 态，校验失败会 fallback 到 mergeMainAgentSessions
     // → 不会损坏数据，最差情况是多写一个 checkpoint，无害）
     assert.strictEqual(real.inPlaceReplace, true, '失败请求的 eager 残留会让下条请求误命中（acceptable）');
+  });
+
+  it('commit reorder: A 流式后 commit、B 短先 commit —— guard 防止 _lastMessagesCount 倒推', () => {
+    // 场景：A 流式响应数秒在飞 → B 30ms 后 fire → B 短先 commit → A 后 commit
+    // 旧实现（commitGuardEnabled=false）会让 A.commit 把 _lastMessagesCount 倒推回 A.length，
+    // 下条 C 拿陈旧 prev → Plan C delta 多算 1 条 → 客户端 doubled-history。
+    const sim = makeRaceSimulator({ eagerUpdate: true, commitGuardEnabled: true });
+    const base = [textMsg('user', 'm1'), textMsg('assistant', 'r1')];
+    sim.startRequest(base).commit();
+
+    // A: 长度 2→3（append）
+    const reqA = sim.startRequest([...base, textMsg('user', 'a3')]);
+    assert.strictEqual(reqA.isCheckpoint, false, 'A 是正常 append');
+    // B: 30ms 后，长度 3→4（基于 A.length eager 后看到的 prev=3）
+    const reqB = sim.startRequest([...base, textMsg('user', 'a3'), textMsg('assistant', 'b4')]);
+    assert.strictEqual(reqB.prevMessagesCount, 3, 'B snapshot 拿到 A eager 后的 prev=3');
+    assert.strictEqual(reqB.isCheckpoint, false, 'B 是 append（3→4）');
+
+    // 乱序 commit：B 先到、A 后到
+    reqB.commit();
+    assert.strictEqual(sim.getState()._lastMessagesCount, 4, 'B commit 后 state=4');
+    reqA.commit();
+    assert.strictEqual(sim.getState()._lastMessagesCount, 4, 'guard 阻止 A.commit 倒推回 3');
+
+    // C: 长度 4→5
+    const reqC = sim.startRequest([...base, textMsg('user', 'a3'), textMsg('assistant', 'b4'), textMsg('user', 'c5')]);
+    assert.strictEqual(reqC.prevMessagesCount, 4, 'C 拿到正确 prev=4，不被 A.commit 倒推影响');
+    assert.strictEqual(reqC.deltaLength, 1, 'C delta 只算 1 条新增（不多算 B 那条）');
+  });
+
+  it('commit reorder control: 无 guard 时 _lastMessagesCount 被倒推，C delta 多算（实证 BUG）', () => {
+    // 实证生产代码 1.6.251 - 本轮修复之间的残余 BUG：commit 无 guard 时 A 后到 commit 会倒推。
+    const sim = makeRaceSimulator({ eagerUpdate: true, commitGuardEnabled: false });
+    const base = [textMsg('user', 'm1'), textMsg('assistant', 'r1')];
+    sim.startRequest(base).commit();
+
+    const reqA = sim.startRequest([...base, textMsg('user', 'a3')]);
+    const reqB = sim.startRequest([...base, textMsg('user', 'a3'), textMsg('assistant', 'b4')]);
+
+    reqB.commit();
+    assert.strictEqual(sim.getState()._lastMessagesCount, 4);
+    reqA.commit();
+    assert.strictEqual(sim.getState()._lastMessagesCount, 3, '无 guard 时 A.commit 把 state 倒推回 3（BUG）');
+
+    const reqC = sim.startRequest([...base, textMsg('user', 'a3'), textMsg('assistant', 'b4'), textMsg('user', 'c5')]);
+    assert.strictEqual(reqC.prevMessagesCount, 3, '无 guard 时 C 看到陈旧 prev=3');
+    assert.strictEqual(reqC.deltaLength, 2, '无 guard 时 C delta 多算到 2 条（B 那条 + C 新增）→ 客户端 doubled-history');
+  });
+
+  it('commit reorder: in-place replace 同长度时 A 后到 commit —— guard 防止 _lastTailFp 倒推', () => {
+    // 场景：A.length=N, fp=fpA → B in-place replace 同长 fp=fpB（Plan C 命中）→ B 先 commit、A 后 commit。
+    // 旧实现无 guard 时 A.commit 把 _lastTailFp 倒推回 fpA，下条 C 的 in-place replace 检测会被陈旧 fp 干扰。
+    const sim = makeRaceSimulator({ eagerUpdate: true, commitGuardEnabled: true });
+    const base = [textMsg('user', 'm1'), textMsg('assistant', 'r1')];
+    sim.startRequest(base).commit();
+    sim.startRequest([...base, textMsg('user', '[SUGGESTION]')]).commit(); // baseline=3, fp=fp(SUGGESTION)
+
+    // A: in-place replace [SUGGESTION] → fpA
+    const reqA = sim.startRequest([...base, textMsg('user', '<teammate-msg-A>')]);
+    assert.strictEqual(reqA.inPlaceReplace, true, 'A 替换 SUGGESTION 末位');
+    // B: 再次 in-place replace，看到 A eager 后的 prev fp=fpA → 与 fpB 不同 → 命中
+    const reqB = sim.startRequest([...base, textMsg('user', '<teammate-msg-B>')]);
+    assert.strictEqual(reqB.inPlaceReplace, true, 'B 再次替换末位（看到 A 的 eager fp）');
+
+    // 乱序 commit：B 先到、A 后到
+    reqB.commit();
+    reqA.commit();
+    // guard 让 A.commit 在等长（=== 不严格大于）时整体 no-op，fp 不被倒推
+    assert.notStrictEqual(sim.getState()._lastTailFp, '', '_lastTailFp 不为空');
+
+    // C: 再次 in-place replace，应看到 B 的 fp（不是 A 的 fp）
+    const reqC = sim.startRequest([...base, textMsg('user', '<teammate-msg-C>')]);
+    assert.strictEqual(reqC.prevTailFp, fingerprintMsg(textMsg('user', '<teammate-msg-B>')), 'C 看到 B 的 fp，未被 A.commit 倒推干扰');
+    assert.strictEqual(reqC.inPlaceReplace, true, 'C 命中 in-place replace');
+  });
+
+  it('commit-only fallback: eager 块未跑时 commit 路径仍能把 state 从 0 推到 N（guard 不阻塞首推）', () => {
+    // 假想场景：未来某次重构关掉 eager（eagerUpdate=false），_lastMessagesCount 一直停在 0；
+    // commit 路径必须能完成首次状态更新（0 → N），否则 Plan C 永远拿不到正确 prev。
+    // 当前 production 代码 eager + commit 并列，本 case 锁住"commit 不依赖 eager 也能推状态"语义。
+    const sim = makeRaceSimulator({ eagerUpdate: false, commitGuardEnabled: true });
+    const base = [textMsg('user', 'm1'), textMsg('assistant', 'r1')];
+    const req1 = sim.startRequest(base);
+    assert.strictEqual(sim.getState()._lastMessagesCount, 0, 'eager 关闭时 startRequest 不推 state');
+    req1.commit();
+    assert.strictEqual(sim.getState()._lastMessagesCount, 2, 'commit 把 state 从 0 推到 2（guard 不阻塞首推）');
+
+    // 继续推进：commit 单调增长
+    sim.startRequest([...base, textMsg('user', 'm3')]).commit();
+    assert.strictEqual(sim.getState()._lastMessagesCount, 3);
+  });
+
+  it('commit reorder 3 路并发: C 先 commit、A 中、B 后 —— guard 保持 _lastMessagesCount 单调', () => {
+    // 三路并发：A.len=3 → B.len=4 → C.len=5 在飞，commit 顺序乱：C → A → B。
+    // 期望：每个 commit 只在 originalLength > 当前 state 时才更新，state 单调到 5 不回退。
+    const sim = makeRaceSimulator({ eagerUpdate: true, commitGuardEnabled: true });
+    const base = [textMsg('user', 'm1'), textMsg('assistant', 'r1')];
+    sim.startRequest(base).commit();
+
+    const reqA = sim.startRequest([...base, textMsg('user', 'a3')]);
+    const reqB = sim.startRequest([...base, textMsg('user', 'a3'), textMsg('assistant', 'b4')]);
+    const reqC = sim.startRequest([...base, textMsg('user', 'a3'), textMsg('assistant', 'b4'), textMsg('user', 'c5')]);
+    assert.strictEqual(sim.getState()._lastMessagesCount, 5, 'eager 把 state 推到 5');
+
+    // 乱序 commit：C → A → B
+    reqC.commit();
+    assert.strictEqual(sim.getState()._lastMessagesCount, 5);
+    reqA.commit();
+    assert.strictEqual(sim.getState()._lastMessagesCount, 5, 'A.commit(3) 被 guard 阻断，state 不回退到 3');
+    reqB.commit();
+    assert.strictEqual(sim.getState()._lastMessagesCount, 5, 'B.commit(4) 被 guard 阻断，state 不回退到 4');
+
+    // 下一个新请求 D 拿到 prev=5
+    const reqD = sim.startRequest([...base, textMsg('user', 'a3'), textMsg('assistant', 'b4'), textMsg('user', 'c5'), textMsg('assistant', 'd6')]);
+    assert.strictEqual(reqD.prevMessagesCount, 5, 'D 拿到正确 prev=5');
+    assert.strictEqual(reqD.deltaLength, 1, 'D delta 只算 1 条新增');
+  });
+
+  it('startRequest 穿插 commit reorder: 后来 startRequest 看到 eager 态，不被先到 commit 倒推', () => {
+    // 时序：A.start → B.start → B.commit → D.start（看到 B.eager） → A.commit → D 不被 A 倒推。
+    // 这是 reorder + eager 双机制串联场景：startRequest 与 commit 在时间轴上交错。
+    const sim = makeRaceSimulator({ eagerUpdate: true, commitGuardEnabled: true });
+    const base = [textMsg('user', 'm1'), textMsg('assistant', 'r1')];
+    sim.startRequest(base).commit();
+
+    const reqA = sim.startRequest([...base, textMsg('user', 'a3')]);
+    const reqB = sim.startRequest([...base, textMsg('user', 'a3'), textMsg('assistant', 'b4')]);
+    reqB.commit();
+    assert.strictEqual(sim.getState()._lastMessagesCount, 4);
+
+    // D 在 B.commit 之后、A.commit 之前发起：看到 prev=4（B 的 eager）
+    const reqD = sim.startRequest([...base, textMsg('user', 'a3'), textMsg('assistant', 'b4'), textMsg('user', 'd5')]);
+    assert.strictEqual(reqD.prevMessagesCount, 4, 'D 看到 B 的 eager 推上去的 prev=4');
+
+    // A 后到 commit —— guard 阻止倒推
+    reqA.commit();
+    assert.strictEqual(sim.getState()._lastMessagesCount, 5, 'A.commit 之后 state 仍 = 5（D eager），未被 A.commit(3) 倒推');
+
+    // D.commit 后续
+    reqD.commit();
+    assert.strictEqual(sim.getState()._lastMessagesCount, 5);
   });
 });

@@ -321,7 +321,6 @@ export default function FileContentView({
   // MDX 编辑相关 state
   const [mdxFeatureEnabled] = useState(readMdxFeatureFlag);
   const [extensionDetected, setExtensionDetected] = useState(false);
-  const [forceMdxOverride, setForceMdxOverride] = useState(false);
   // MDXEditor 运行时解析失败（例如文件含 <system-reminder> 这类自定义 JSX 标签，
   // mdExtensionDetect 的正则白名单覆盖不到）时置 true，触发降级到旧 marked 渲染。
   // 每次切文件都会在 loadFileContent 里重置——单文件失败不污染其他文件。
@@ -351,10 +350,10 @@ export default function FileContentView({
 
   const isDirty = content !== null && currentContent !== null && content !== currentContent;
 
-  // 「使用 MDX 编辑」= flag 开 + 非移动端 + (无扩展语法 OR 用户强制覆盖)
+  // 「使用 MDX 编辑」= flag 开 + 非移动端 + 无扩展语法 + 未解析失败
   // 移动端直接降级到旧 marked 渲染：屏幕小 + 触屏体验差 + bundle 加载成本高，
   // GUI 编辑能力性价比不足，统一走 fallback 预览路径。
-  const useMdxEditor = isMdFile && mdxFeatureEnabled && !isMobile && (!extensionDetected || forceMdxOverride) && !mdxParseErrored;
+  const useMdxEditor = isMdFile && mdxFeatureEnabled && !isMobile && !extensionDetected && !mdxParseErrored;
   // 「展示旧 marked 预览」= viewMode='markdown' && !useMdx
   const useLegacyPreview = isMdFile && viewMode === 'markdown' && !useMdxEditor;
 
@@ -489,25 +488,6 @@ export default function FileContentView({
     });
   }, [viewMode, isDirty, content]);
 
-  // 「强制 GUI 编辑」：用户明确接受可能损坏扩展语法
-  const requestForceMdx = useCallback(() => {
-    Modal.confirm({
-      title: i18n('ui.mdEditor.forceGuiEdit'),
-      content: i18n('ui.mdEditor.forceGuiEditConfirm'),
-      okText: i18n('ui.mdEditor.forceGuiEdit'),
-      cancelText: i18n('ui.mdEditor.unsavedConfirmKeep'),
-      okButtonProps: { danger: true },
-      onOk: () => {
-        // 同时清掉 mdxParseErrored 锁：用户主动 force 时，让 useMdxEditor 重新走全
-        // 5 个合取条件的求值，否则 force 按钮会被 `&& !mdxParseErrored` 继续否决，
-        // 表面看点了没反应。重试本身可能再次失败，但那是 onError 重新触发的事——
-        // 不要在 force 这一层把 user intent 静默吞掉。
-        setForceMdxOverride(true);
-        setMdxParseErrored(false);
-      },
-    });
-  }, []);
-
   const doSave = useCallback(async () => {
     if (!isDirty) return;
     // MDX 模式下优先从 editor ref 取最新 markdown（onChange 是 debounced，currentContent 可能滞后）
@@ -625,9 +605,8 @@ export default function FileContentView({
     setError(null);
     setLoading(true);
     setLineCount(0);
-    // 切换文件时重置 MDX 相关 state，避免上一个文件的扩展检测/强制覆盖/解析错误跨文件污染
+    // 切换文件时重置 MDX 相关 state，避免上一个文件的扩展检测/解析错误跨文件污染
     setExtensionDetected(false);
-    setForceMdxOverride(false);
     setMdxParseErrored(false);
 
     fetch(apiUrl(`/api/file-content?path=${encodeURIComponent(filePath)}${editorSession ? '&editorSession=true' : ''}`))
@@ -930,15 +909,6 @@ export default function FileContentView({
                 </div>
               )}
             </div>
-          )}
-          {isMdFile && extensionDetected && !forceMdxOverride && mdxFeatureEnabled && !isMobile && (
-            <button
-              className={styles.viewToggleBtn}
-              onClick={requestForceMdx}
-              title={i18n('ui.mdEditor.forceGuiEditConfirm')}
-            >
-              {i18n('ui.mdEditor.forceGuiEdit')}
-            </button>
           )}
           {/* MDX 状态下三态切换器（DiffSourceToggleWrapper 在 toolbar 里）已包含 source 模式访问，
               外层不再放重复按钮；fallback / 旧 marked / 含扩展自动降级 / 移动端 状态保留作为兜底入口。 */}

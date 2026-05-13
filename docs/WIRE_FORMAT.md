@@ -188,6 +188,7 @@ CLI idle 时注入 SUGGESTION MODE 占位符到末位，用户实际输入到达
 | 1.6.250 | 服务端 `_inPlaceReplaceDetected` 信号 + 客户端 `applyInPlaceLastMsgReplace` 短路 | SUGGESTION MODE 末位替换 doubled-history |
 | 1.6.251 | Plan C eager-update race 修复（snapshot 前置） | 30ms 内连续 firing 漏检 race |
 | 1.6.252 | （proxy zstd / GitChanges UI；非 wire 协议改动） | — |
-| 本轮 | 反向锚点对齐 + fp 三元组（length+first32+last32）+ 诊断挂钩 + 本文档 | K 条尾部重叠 + 共 64-char 头部碰撞 / 单一真理源 |
+| 1.6.253 | 反向锚点对齐 + fp 三元组（length+first32+last32）+ 诊断挂钩 + 本文档 | K 条尾部重叠 + 共 64-char 头部碰撞 / 单一真理源 |
+| 本轮 | `_commitDeltaState` 加幂等守卫（严格大于才更新；等长不动 fp） | 1.6.251 eager-update 遗留的 commit 乱序倒推 race |
 
 > **协议兼容性声明**：本轮改动**无 wire 字段名 / 触发条件 / 客户端消费契约的变更**。算法升级（反向锚点 + fp 三元组）是客户端内存运算优化，旧 jsonl 日志可正常解析；服务端 `_inPlaceReplaceDetected` / `_isCheckpoint` / `_deltaFormat` / `_totalMessageCount` 信号字段及触发条件全部保持。

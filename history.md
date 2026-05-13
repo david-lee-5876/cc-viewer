@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.6.265 (2026-05-13)
+
+- fix(interceptor): `_commitDeltaState` 加幂等守卫，防止 mainAgent 请求乱序完成时较短 commit 倒推 eager-updated 状态导致 doubled-history 残余
+- fix(ui): GitChanges 标题栏刷新图标垂直对齐（headerTitle 改 inline-flex + align-items:center）
+- refactor(file-viewer): 移除 MDX 「强制 GUI 编辑」入口与 forceMdxOverride state；扩展检测命中或解析失败时只走旧 marked 预览
+
 ## 1.6.264 (2026-05-13)
 
 - feat(voice-pack): Approval Settings 新增「语音包」面板，可为 4 类生命周期事件绑定音频（plan 审批 / askUserQuestion / 60min 超时预警 5min+60s 双段 / Claude turn 结束）

@@ -310,8 +310,8 @@ export default function GitChanges({ style, onClose, onFileClick, onOpenFile, re
           )}
           {(totalInsertions > 0 || totalDeletions > 0) && (
             <>
-              {' '}<span className={`${styles.statBadge} ${styles.statInsert}`}>+{totalInsertions}</span>
-              {' '}<span className={`${styles.statBadge} ${styles.statDelete}`}>-{totalDeletions}</span>
+              <span className={`${styles.statBadge} ${styles.statInsert}`}>+{totalInsertions}</span>
+              <span className={`${styles.statBadge} ${styles.statDelete}`}>-{totalDeletions}</span>
             </>
           )}
         </span>

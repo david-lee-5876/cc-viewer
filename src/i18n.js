@@ -8941,35 +8941,6 @@ const i18nData = {
     "tr": "MDXEditor ayrıştırması başarısız — uyumlu oluşturucuya geçiliyor",
     "uk": "Помилка аналізу MDXEditor — переключення на сумісний рендерер"
   },
-  "ui.mdEditor.forceGuiEdit": {
-    "zh": "强制 GUI 编辑", "en": "Force GUI edit", "zh-TW": "強制 GUI 編輯",
-    "ko": "GUI 편집 강제 사용", "ja": "GUI 編集を強制", "de": "GUI-Bearbeitung erzwingen",
-    "es": "Forzar edición GUI", "fr": "Forcer l'édition GUI", "it": "Forza modifica GUI",
-    "da": "Tving GUI-redigering", "pl": "Wymuś edycję GUI", "ru": "Принудительно использовать GUI-редактор",
-    "ar": "فرض التحرير الرسومي", "no": "Tving GUI-redigering",
-    "pt-BR": "Forçar edição GUI", "th": "บังคับใช้การแก้ไขแบบ GUI",
-    "tr": "GUI düzenlemeyi zorla", "uk": "Примусово увімкнути GUI-редагування"
-  },
-  "ui.mdEditor.forceGuiEditConfirm": {
-    "zh": "GUI 编辑模式不支持 mermaid / 数学公式 / 指令块，强制编辑可能会损坏这些内容。继续？",
-    "en": "GUI mode does not support mermaid / math / directives. Forcing edit may corrupt them. Continue?",
-    "zh-TW": "GUI 編輯模式不支援 mermaid / 數學公式 / 指令區塊，強制編輯可能會損壞這些內容。繼續？",
-    "ko": "GUI 편집 모드는 mermaid / 수식 / 디렉티브를 지원하지 않습니다. 강제 편집 시 내용이 손상될 수 있습니다. 계속하시겠습니까?",
-    "ja": "GUI 編集モードは mermaid / 数式 / ディレクティブに対応していません。強制編集すると内容が破損する可能性があります。続けますか？",
-    "de": "Der GUI-Modus unterstützt mermaid / Mathematik / Direktiven nicht. Bearbeiten kann diese beschädigen. Fortfahren?",
-    "es": "El modo GUI no admite mermaid / matemáticas / directivas. Forzar la edición puede dañar el contenido. ¿Continuar?",
-    "fr": "Le mode GUI ne prend pas en charge mermaid / maths / directives. Forcer l'édition peut endommager le contenu. Continuer ?",
-    "it": "La modalità GUI non supporta mermaid / matematica / direttive. Forzare la modifica può danneggiarne il contenuto. Continuare?",
-    "da": "GUI-tilstand understøtter ikke mermaid / matematik / direktiver. Tvunget redigering kan beskadige indholdet. Fortsæt?",
-    "pl": "Tryb GUI nie obsługuje mermaid / matematyki / dyrektyw. Wymuszona edycja może uszkodzić treść. Kontynuować?",
-    "ru": "Режим GUI не поддерживает mermaid / математику / директивы. Принудительное редактирование может повредить содержимое. Продолжить?",
-    "ar": "لا يدعم وضع GUI mermaid / الرياضيات / التوجيهات. قد يؤدي التحرير القسري إلى إتلاف المحتوى. هل تريد المتابعة؟",
-    "no": "GUI-modus støtter ikke mermaid / matematikk / direktiver. Tvungen redigering kan ødelegge innholdet. Fortsett?",
-    "pt-BR": "O modo GUI não suporta mermaid / matemática / diretivas. Forçar a edição pode corromper o conteúdo. Continuar?",
-    "th": "โหมด GUI ไม่รองรับ mermaid / สูตรคณิตศาสตร์ / directives การบังคับแก้ไขอาจทำให้เนื้อหาเสียหาย ดำเนินการต่อหรือไม่?",
-    "tr": "GUI modu mermaid / matematik / direktifleri desteklemez. Düzenlemeyi zorlamak içeriği bozabilir. Devam edilsin mi?",
-    "uk": "Режим GUI не підтримує mermaid / математику / директиви. Примусове редагування може пошкодити вміст. Продовжити?"
-  },
   "ui.openCachePanel": {
     "zh": "查看项目详情",
     "en": "View project details",

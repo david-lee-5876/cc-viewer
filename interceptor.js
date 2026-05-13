@@ -260,13 +260,26 @@ const CHECKPOINT_INTERVAL = 10; // 每 N 条 mainAgent 请求写一个 checkpoin
 
 /**
  * Delta storage: completed 写入成功后更新状态。
- * eager-update 已在请求开始时把 _lastMessagesCount/_lastTailFp 推到本次值，本函数对同
- * originalLength 的 commit 实际是 no-op（`originalLength > _lastMessagesCount` 判等返回 false）。
- * 保留为防御层：处理 eager 块未跑到的早期 return / throw（例如 _deltaStorageEnabled=false
- * 或 messages 不是数组时不会进入 eager 块），让 commit 路径仍能在 completed 时把状态推上去。
+ *
+ * 幂等守卫（`originalLength > _lastMessagesCount`）：eager-update 已在请求开始时把
+ * _lastMessagesCount/_lastTailFp 推到本次值；本函数对同 originalLength 的 commit no-op，
+ * 且必须严格大于才更新——防止两条 mainAgent 请求乱序完成时，先到的较短 commit 把
+ * 已被 eager 推高的状态倒推回去（A 流式数秒、B 短先 commit、A 后 commit 时 _lastMessagesCount
+ * 与 _lastTailFp 都会被 A.length/fp 覆盖，下条 C 拿陈旧 prev → Plan C 漏/误检 → doubled-history
+ * 残余）。等长情况下也不动 fp：等长 in-place replace 的 _lastTailFp 已被 eager 推到 latest 值，
+ * commit 倒推会让下条请求的 Plan C 误判 in-place。
+ *
+ * 作用域纠正（不是真的兜底）：本函数与 eager 块共享 "可写入" 前置条件——caller 传
+ * `_deltaOriginalMessagesLength`，该值只有在 `_deltaStorageEnabled && mainAgent &&
+ * Array.isArray(messages) && messages.length>0` 时才非 0；其它分支传 0 进来这里就
+ * short-circuit。即 `_deltaStorageEnabled=false / messages 非数组` 等 eager 跳过的分支
+ * 本函数同样跳过，不能视作异常路径的兜底。保留本函数是为了首次启动 / 定期 checkpoint
+ * 后的快路径回写（与 eager 等价但解耦 commit 时序），让未来 eager 块若重构调用顺序时
+ * commit 仍能把状态推上去。请求失败 / 服务端不发送时永远不调本函数；状态由 eager 残留，
+ * 下个成功请求覆盖即可，不会永久错位。
  */
 function _commitDeltaState(originalLength, originalTailFp) {
-  if (_deltaStorageEnabled && originalLength > 0) {
+  if (_deltaStorageEnabled && originalLength > 0 && originalLength > _lastMessagesCount) {
     _lastMessagesCount = originalLength;
     if (typeof originalTailFp === 'string') {
       _lastTailFp = originalTailFp;

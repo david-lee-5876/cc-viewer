@@ -22,6 +22,11 @@
   color: var(--text-tertiary);
   text-transform: uppercase;
   letter-spacing: 0.5px;
+  /* inline-flex + align-items:center 让 RefreshIcon(inline-flex 16×16) 与文字基线对齐，
+     避免默认 baseline 对齐时 icon 视觉上推（同 FileExplorer headerTitle 风格） */
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
 }
 
 .collapseBtn {
