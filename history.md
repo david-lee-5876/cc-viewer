@@ -1,9 +1,9 @@
 # Changelog
 
-## (未发布)
+## 1.6.263 (2026-05-13)
 
-- feat(ask-timeout): AskUserQuestion 超时改 60min（原 5min），等价 terminal 无超时体验；问题卡片底部新增倒计时显示（wall-clock 校准 + visibility 触发即时刷新 + unmount/0 双闸内存回收）；ask-hook-pending / sdk-ask-pending 广播附 startedAt + timeoutMs
-- feat(ask-cancel): AskUserQuestion 支持 web 端取消 + 输入框打字打断（等价 terminal Esc / 打字打断），双 SDK + Hook 模式：SDK 走 cancelApproval sentinel → canUseTool deny；Hook 走 ask-bridge cancelled 分支 → PreToolUse deny；新增 ask-cancel WS 协议 + ack 防 race；ChatMessage 新增 isCancelled 第四态；老协议 msg.id fallback 改 WARN 防串答；5 i18n key × 18 lang
+- feat(ask-timeout): AskUserQuestion 超时改 60min（原 5min），等价 terminal 无超时体验；问题卡片底部新增倒计时显示（wall-clock 校准 + visibility 触发即时刷新 + unmount/0 双闸内存回收）；ask-hook-pending / sdk-ask-pending 广播附 startedAt + timeoutMs；WS 重连后 server replay pending ask 含剩余 timeoutMs 倒计时连续不重置；倒计时 ≤60s 切 warning 色 + a11y role=timer aria-live；6 i18n key × 18 lang
+- feat(ask-cancel): AskUserQuestion 支持 web 端取消 + 输入框打字打断（等价 terminal Esc / 打字打断），双 SDK + Hook 模式：SDK 走 cancelApproval sentinel → canUseTool deny；Hook 走 ask-bridge cancelled 分支 → PreToolUse deny；新增 ask-cancel WS 协议 + ack 防 race；ChatMessage 新增 isCancelled 第四态；协议级 [cc-viewer:cancel] sentinel 前缀替代脆弱文案匹配；老协议 msg.id fallback 改 WARN 防串答；_waitForApproval kind tag 防 cancel 撞 plan/perm；ESC 加 preventDefault + stopPropagation 防冒泡误触发 PTY 副作用；handleAskQuestionSubmit 路由兜底 pendingAsk 仍在时优先 hook bridge 不再无谓走 PTY；server ask-hook-answer entry 缺失改为 ack ask-hook-cancelled 给发起方
 - feat(chat-render): web_search synthesis 多 text 块合并为单 markdown，块间 `\n\n---\n\n` 让 marked 渲染成 `<hr>`；`.chat-boxer .chat-md hr` 用 `--border-light` 避开渐变两端色 + margin 12→8px 适配
 - fix(diff-minimap): 给右侧色条加 `onWheel` 转发 `deltaY` 给 scrollRef，让滚轮事件穿透到底层 scroll 容器
 
