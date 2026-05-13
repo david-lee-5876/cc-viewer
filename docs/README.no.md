@@ -1,13 +1,13 @@
 # CC-Viewer
 
-Et Vibe Coding-verktøysett destillert fra praktisk utviklingserfaring, bygget på toppen av Claude Code:
+Et Vibe Coding-verktøysett destillert fra egen utviklingserfaring og bygget på Claude Code:
 
-1. Hev kapasitetstaket — kjør /ultraPlan og /ultraReview lokalt, slik at prosjektkoden din aldri trenger å være fullt eksponert for Claudes sky;
-2. Multi-enhet-tilpasning — kod fra mobile enheter over ditt lokale nettverk, web-versjonen tilpasser seg alle scenarier for innebygging i nettleserutvidelser eller delt skjerm i operativsystemet, og en innebygd installasjonspakke er også tilgjengelig;
-3. Komplett revisjonsspor — full avskjæring og analyse av Claude Codes nyttelast, perfekt for logging, feilsøking, læring og reversing;
-4. Kunnskapsdeling — leveres med akkumulerte studienotater og praktisk erfaring (se etter "?"-ikonene rundt om i appen);
-5. Innebygd opplevelse bevart — utvider kun Claude Codes muligheter uten noen vesentlige endringer i kjernen, slik at den innebygde opplevelsen forblir intakt;
-6. Tredjeparts modellstøtte — fungerer med deepseek-v4-*, GLM 5.1, Kimi K2.6, med innebygd cc-switch-funksjonalitet for hot-swapping av tredjepartsverktøy når som helst.
+1. Hev evnetaket: Kjør /ultraPlan og /ultraReview lokalt, slik at prosjektkoden din aldri er fullt eksponert for Claudes sky;
+2. Flerplattform-støtte: Muliggjør mobil programmering (i det lokale nettverket); webversjonen tilpasser seg ulike scenarier, kan enkelt bygges inn i nettleserutvidelser og operativsystemets delte skjerm, og leveres med en native installasjonspakke;
+3. Fullstendig logging: Tilbyr omfattende opphenting og analyse av Claude Code-payloads — ideelt for logging, feilsøking, læring, inspirasjon og reverse-engineering;
+4. Læring og erfaringsdeling: En rekke studiemateriell og utviklingserfaringer er samlet (se „?"-symbolene rundt om i systemet);
+5. Native opplevelse bevart: Utvider kun Claude Codes evner uten vesentlige endringer i kjernen — den native opplevelsen er bevart;
+6. Tredjepartsmodeller støttet: Kompatibel med deepseek-v4-\*, GLM 5.1, Kimi K2.6, med innebygd cc-switch-evne for hot-switching mellom tredjepartsverktøy når som helst;
 
 [English](../README.md) | [简体中文](./README.zh.md) | [繁體中文](./README.zh-TW.md) | [한국어](./README.ko.md) | [日本語](./README.ja.md) | [Deutsch](./README.de.md) | [Español](./README.es.md) | [Français](./README.fr.md) | [Italiano](./README.it.md) | [Dansk](./README.da.md) | [Polski](./README.pl.md) | [Русский](./README.ru.md) | [العربية](./README.ar.md) | Norsk | [Português (Brasil)](./README.pt-BR.md) | [ไทย](./README.th.md) | [Türkçe](./README.tr.md) | [Українська](./README.uk.md)
 
@@ -15,80 +15,83 @@ Et Vibe Coding-verktøysett destillert fra praktisk utviklingserfaring, bygget p
 
 ### Forutsetninger
 
-- Sørg for at Node.js 22.0.0+ er installert; [last ned og installer](https://nodejs.org)
-- Sørg for at Claude Code er installert; [installasjonsveiledning](https://github.com/anthropics/claude-code)
+* Sørg for at Node.js 20.0.0+ er installert; [Last ned og installer](https://nodejs.org)
+* Sørg for at Claude Code er installert; [Installasjonsveiledning](https://github.com/anthropics/claude-code)
 
 ### Installer ccv
 
-#### Installer via npm
+#### Installasjon via npm
 
 ```bash
 npm install -g cc-viewer --registry=https://registry.npmjs.org
 ```
 
-#### Installer via Homebrew (anbefales for macOS / Linux)
+#### Installasjon via Homebrew (anbefalt for macOS / Linux)
 
 ```bash
 brew tap weiesky/cc-viewer
 brew install cc-viewer
-brew upgrade cc-viewer   # for oppdateringer — ikke bruk npm install -g for brew-installasjoner
+brew upgrade cc-viewer   # bruk denne for oppgradering — bruk IKKE npm install -g for ccv installert via brew
 ```
 
-### Oppstart
+### Slik starter du
 
-ccv er en direkte erstatter for claude — alle argumenter sendes videre til claude mens Web Viewer startes.
+ccv er en direkte erstatning for claude — alle argumenter sendes videre til claude, samtidig som Web Viewer startes.
 
 ```bash
-ccv                    # == claude (interactive mode)
+ccv                    # == claude (interaktiv modus)
 ```
 
-Forfatterens MEST brukte kommando er:
+Kommandoen forfatteren bruker mest er:
+
 ```
 ccv -c --d             # == claude --continue --dangerously-skip-permissions
-                       # ccv sender videre alle Claude Code oppstartsargumenter — kombiner dem akkurat som du vil
+                       # ccv sender videre alle Claude Codes oppstartsparametere — du kan kombinere dem som du vil
 ```
 
-Etter start i programmeringsmodus åpnes en nettside automatisk.
+Etter at programmeringsmodusen er startet, åpnes en nettside automatisk.
 
-CC-Viewer leveres også som en innebygd skrivebordsapp: [Nedlastingsside](https://github.com/weiesky/cc-viewer/releases)
-
+cc-viewer kommer også som native desktop-app: [Nedlastingsside](https://github.com/weiesky/cc-viewer/releases)
 
 ### Logger-modus
 
-Hvis du fremdeles foretrekker det innebygde claude-verktøyet eller VS Code-utvidelsen, bruk denne modusen.
+Hvis du fortsatt foretrekker det native claude-verktøyet eller VS Code-utvidelsen, bruker du denne modusen.
 
-I denne modusen vil start av `claude` automatisk starte en loggeprosess som registrerer forespørselslogger til ~/.claude/cc-viewer/*yourproject*/date.jsonl
+I denne modusen starter `claude`
 
-Aktiver logger-modus:
+automatisk en loggprosess som registrerer forespørselslogger til \~/.claude/cc-viewer/*yourproject*/date.jsonl
+
+Start logger-modus:
+
 ```bash
 ccv -logger
 ```
 
-Når konsollen ikke kan skrive ut den spesifikke porten, er standard første port 127.0.0.1:7008. Flere instanser bruker sekvensielle porter som 7009, 7010.
+Når konsollet ikke kan skrive ut den spesifikke porten, er den første standardporten 127.0.0.1:7008. Ved flere samtidige instanser brukes fortløpende porter som 7009, 7010.
 
 Avinstaller logger-modus:
+
 ```bash
 ccv --uninstall
 ```
 
-### Feilsøking
+### Feilsøking (Troubleshooting)
 
-Hvis du støter på problemer med å starte cc-viewer, er her den ultimate feilsøkingstilnærmingen:
-
-Steg 1: Åpne Claude Code i hvilken som helst mappe.
-
-Steg 2: Gi Claude Code følgende instruksjon:
+Hvis du støter på oppstartsproblemer, er her den ultimate feilsøkingstilnærmingen:
+Trinn 1: Åpne Claude Code i en hvilken som helst mappe;
+Trinn 2: Gi Claude Code følgende instruks:
 
 ```
-I have installed the cc-viewer npm package, but after running ccv it still doesn't work properly. Please check cc-viewer's cli.js and findcc.js, and adapt them to the local Claude Code deployment based on the specific environment. Keep the scope of changes as constrained as possible within findcc.js.
+Jeg har installert npm-pakken cc-viewer, men etter å ha kjørt ccv fungerer det fortsatt ikke som det skal. Sjekk cli.js og findcc.js i cc-viewer og tilpass dem til den lokale Claude Code-utrullingen basert på det spesifikke miljøet. Hold endringene så begrenset som mulig til findcc.js.
 ```
 
 Å la Claude Code diagnostisere problemet selv er mer effektivt enn å spørre noen eller lese dokumentasjon!
 
-Etter at instruksjonen ovenfor er fullført, vil `findcc.js` bli oppdatert. Hvis prosjektet ditt ofte krever lokal utrulling, eller hvis forket kode ofte trenger å løse installasjonsproblemer, lar det å beholde denne filen deg ganske enkelt kopiere den neste gang. På dette stadiet distribuerer mange prosjekter og selskaper som bruker Claude Code ikke på Mac, men snarere på serverside-vertsbaserte miljøer, så forfatteren har separert `findcc.js` for å gjøre det enklere å spore cc-viewer-kildekodeoppdateringer fremover.
+Når instruksjonen ovenfor er fullført, oppdateres findcc.js. Hvis prosjektet ditt ofte krever lokal utrulling eller forket kode ofte må løse installasjonsproblemer, bare behold denne filen. Neste gang kan du bare kopiere den. I dag er det mange prosjekter og selskaper som bruker Claude Code som ikke ruller ut på Mac, men i serverhostede miljøer, så forfatteren har separert findcc.js for å gjøre det lettere å spore cc-viewers kildekodeoppdateringer fremover.
 
+Merk: Denne applikasjonen er i konflikt med claude-code-switch og claude-code-router, da det er et proxy-konkurranseproblem, så sørg for å deaktivere claude-code-switch og claude-code-router når du bruker cc-viewer — inne i cc-viewer leveres en proxy-hot-update-funksjon som tilsvarende erstatning.
 
-### Andre kommandoer
+### Andre hjelpekommandoer
 
 Se:
 
@@ -96,102 +99,100 @@ Se:
 ccv -h
 ```
 
-### Stille modus
+### Silent-modus (Silent Mode)
 
-Som standard kjører `ccv` i stille modus når den pakker `claude`, og holder terminalutdataene rene og konsistente med den innebygde opplevelsen. Alle logger fanges opp i bakgrunnen og kan vises på `http://localhost:7008`.
+Som standard kjører `ccv` i silent-modus når den pakker inn `claude`, og holder terminalutgangen din ren og i samsvar med den native opplevelsen. Alle logger fanges opp i bakgrunnen og kan ses på `http://localhost:7008`.
 
-Når konfigurert, bruk `claude`-kommandoen som vanlig. Besøk `http://localhost:7008` for å få tilgang til overvåkingsgrensesnittet.
-
+Etter konfigurasjon bruker du `claude`-kommandoen som normalt. Besøk `http://localhost:7008` for å få tilgang til overvåkingsgrensesnittet.
 
 ## Funksjoner
 
-
 ### Programmeringsmodus
 
-Etter start med ccv kan du se:
+Etter oppstart med ccv kan du se:
 
-<img width="1500" height="765" alt="image" src="https://github.com/user-attachments/assets/ab353a2b-f101-409d-a28c-6a4e41571ea2" />
+<img height="765" width="1500" alt="image" src="https://github.com/user-attachments/assets/ab353a2b-f101-409d-a28c-6a4e41571ea2" />
 
+Du kan se code diffs direkte etter redigering:
 
-Du kan vise kodediffs direkte etter redigering:
+<img height="728" width="1500" alt="image" src="https://github.com/user-attachments/assets/2a4acdaa-fc5f-4dc0-9e5f-f3273f0849b2" />
 
-<img width="1500" height="728" alt="image" src="https://github.com/user-attachments/assets/2a4acdaa-fc5f-4dc0-9e5f-f3273f0849b2" />
+Selv om du manuelt kan åpne filer og kode, anbefales ikke manuell programmering — det er gammeldags koding!
 
-Selv om du kan åpne filer og kode manuelt, anbefales ikke manuell koding — det er koding fra den gamle skolen!
+### Mobil programmering
 
-### Mobilprogrammering
+Du kan til og med skanne en QR-kode for å programmere fra mobilenheten din:
 
-Du kan til og med skanne en QR-kode for å kode fra mobilenheten din:
+<img height="1460" width="3018" alt="image" src="https://github.com/user-attachments/assets/8debf48e-daec-420c-b37a-609f8b81cd20" />
 
-<img width="3018" height="1460" alt="image" src="https://github.com/user-attachments/assets/8debf48e-daec-420c-b37a-609f8b81cd20" />
-<img width="1700" height="790" alt="image" src="https://github.com/user-attachments/assets/da3e519f-ff66-4cd2-81d1-f4e131215f6c" />
+<img height="790" width="1700" alt="image" src="https://github.com/user-attachments/assets/da3e519f-ff66-4cd2-81d1-f4e131215f6c" />
 
-Oppfyll fantasien din om mobilprogrammering. Det finnes også en plugin-mekanisme — hvis du trenger å tilpasse for kodevanene dine, følg med på oppdateringer av plugin-kroker.
+Oppfyll din forestilling om mobil programmering. Det finnes også en plugin-mekanisme — hvis du trenger tilpasninger til programmeringsvanene dine, kan du holde deg oppdatert om kommende plugin-hook-oppdateringer.
 
+### Logger-modus (Se komplette Claude Code-økter)
 
-### Logger-modus (vis komplette Claude Code-økter)
+<img height="768" width="1500" alt="image" src="https://github.com/user-attachments/assets/a8a9f3f7-d876-4f6b-a64d-f323a05c4d21" />
 
-<img width="1500" height="768" alt="image" src="https://github.com/user-attachments/assets/a8a9f3f7-d876-4f6b-a64d-f323a05c4d21" />
-
-
-- Fanger opp alle API-forespørsler fra Claude Code i sanntid, og sikrer rå tekst — ikke redigerte logger (dette er viktig!!!)
-- Identifiserer og merker automatisk Main Agent- og Sub Agent-forespørsler (undertyper: Plan, Search, Bash)
-- MainAgent-forespørsler støtter Body Diff JSON, og viser sammenklappede forskjeller fra den forrige MainAgent-forespørselen (kun endrede/nye felt)
-- Hver forespørsel viser innlinje Token-bruksstatistikk (input/output-tokens, cache-opprettelse/lesing, treffrate)
-- Kompatibel med Claude Code Router (CCR) og andre proxy-scenarier — faller tilbake til mønstermatching av API-sti
+* Fanger alle API-forespørsler fra Claude Code i sanntid og sikrer råtekst — ikke redigerte logger (dette er viktig!!!)
+* Identifiserer og merker automatisk Main Agent- og Sub Agent-forespørsler (undertyper: Plan, Search, Bash)
+* MainAgent-forespørsler støtter Body Diff JSON og viser sammenklappede forskjeller fra forrige MainAgent-forespørsel (kun endrede/nye felter)
+* Hver forespørsel viser inline Token-bruksstatistikk (input/output-Tokens, cache-opprettelse/-lesing, treffrate)
+* Kompatibel med Claude Code Router (CCR) og andre proxy-scenarier — faller tilbake til mønstermatching av API-stier
 
 ### Samtalemodus
 
-Klikk på "Conversation Mode"-knappen øverst til høyre for å parse Main Agents komplette samtalehistorikk til et chatgrensesnitt:
+Klikk på „Samtalemodus"-knappen øverst til høyre for å parse Main Agents fulle samtalehistorikk til et chat-grensesnitt:
 
-<img width="1500" height="764" alt="image" src="https://github.com/user-attachments/assets/725b57c8-6128-4225-b157-7dba2738b1c6" />
+<img height="764" width="1500" alt="image" src="https://github.com/user-attachments/assets/725b57c8-6128-4225-b157-7dba2738b1c6" />
 
-- Agent Team-visning støttes ikke ennå
-- Brukermeldinger er høyrejustert (blå bobler), Main Agent-svar er venstrejustert (mørke bobler)
-- `thinking`-blokker er sammenklappet som standard, gjengitt som Markdown — klikk for å utvide og se tenkeprosessen; ett-klikks oversettelse støttes (funksjonen er fortsatt ustabil)
-- Brukervalgmeldinger (AskUserQuestion) vises i Q&A-format
-- Toveis modussynk: bytte til samtalemodus ruller automatisk til samtalen som tilsvarer den valgte forespørselen; bytte tilbake til rå modus ruller automatisk til den valgte forespørselen
-- Innstillingspanel: veksle standard sammenklappingstilstand for verktøyresultater og thinking-blokker
-- Mobilsamtalebrowsing: i mobil CLI-modus, trykk på "Conversation Browse"-knappen i topplinjen for å skyve ut en skrivebeskyttet samtalevisning for å bla gjennom den komplette samtalehistorikken på mobil
+* Agent Team-visning støttes ennå ikke
+* Brukermeldinger er høyrejustert (blå bobler), Main Agent-svar er venstrejustert (mørke bobler)
+* `thinking`-blokker er sammenklappede som standard og rendres som Markdown — klikk for å utvide og se tankeprosessen; ettrykk-oversettelse støttes (funksjonen er ennå ustabil)
+* Brukervalgsmeldinger (AskUserQuestion) vises i Q&A-format
+* Toveis modussynkronisering: Bytte til samtalemodus ruller automatisk til samtalen som tilsvarer den valgte forespørselen; bytte tilbake til råmodus ruller automatisk til den valgte forespørselen
+* Innstillingspanel: Bytt standard-sammenklappingstilstand for verktøyresultater og thinking-blokker
+* Mobil samtalegjennomgang: I mobil CLI-modus, trykk på „Samtalegjennomgang"-knappen i topplinjen for å folde ut en skrivebeskyttet samtalevisning for å gjennomgå den fulle samtalehistorikken på mobil
 
-### Loggadministrasjon
+### Logghåndtering
 
-Via CC-Viewer rullegardinmenyen øverst til venstre:
+Via CC-Viewer-rullegardinmenyen øverst til venstre:
 
-<img width="1500" height="760" alt="image" src="https://github.com/user-attachments/assets/33295e2b-f2e0-4968-a6f1-6f3d1404454e" />
+<img height="760" width="1500" alt="image" src="https://github.com/user-attachments/assets/33295e2b-f2e0-4968-a6f1-6f3d1404454e" />
 
-**Loggkompresjon**
-Når det gjelder logger, ønsker forfatteren å presisere at de offisielle Anthropic-definisjonene ikke er endret, noe som sikrer loggintegriteten. Men siden individuelle loggoppføringer fra 1M Opus-modellen kan bli ekstremt store i senere faser, takket være visse loggoptimaliseringer for MainAgent, oppnås minst 66% størrelsesreduksjon uten gzip. Parsingmetoden for disse komprimerte loggene kan hentes fra det nåværende repoet.
+**Loggkomprimering**
+Når det gjelder logger, vil forfatteren presisere at de offisielle Anthropic-definisjonene ikke er endret, for å sikre loggintegritet.
+Siden enkelte loggoppføringer fra 1M Opus-modellen imidlertid kan bli ekstremt store i senere faser, oppnås takket være visse loggoptimaliseringer for MainAgent en størrelsesreduksjon på minst 66 % uten gzip.
+Parsing-metoden for disse komprimerte loggene kan trekkes ut fra det nåværende repositoriet.
 
-### Flere nyttige funksjoner
+### Flere praktiske og nyttige funksjoner
 
-<img width="1500" height="767" alt="image" src="https://github.com/user-attachments/assets/add558c5-9c4d-468a-ac6f-d8d64759fdbd" />
+<img height="767" width="1500" alt="image" src="https://github.com/user-attachments/assets/add558c5-9c4d-468a-ac6f-d8d64759fdbd" />
 
-Du kan raskt finne promptene dine ved hjelp av sidepanelets verktøy.
+Du kan raskt finne promptene dine via sidebar-verktøyene.
 
----
+***
 
-<img width="1500" height="765" alt="image" src="https://github.com/user-attachments/assets/82b8eb67-82f5-41b1-89d6-341c95a047ed" />
+<img height="765" width="1500" alt="image" src="https://github.com/user-attachments/assets/82b8eb67-82f5-41b1-89d6-341c95a047ed" />
 
 Den interessante KV-Cache-Text-funksjonen lar deg se nøyaktig hva Claude ser.
 
----
+***
 
-<img width="1500" height="765" alt="image" src="https://github.com/user-attachments/assets/54cdfa4e-677c-4aed-a5bb-5fd946600c46" />
+<img height="765" width="1500" alt="image" src="https://github.com/user-attachments/assets/54cdfa4e-677c-4aed-a5bb-5fd946600c46" />
 
-Du kan laste opp bilder og beskrive behovene dine — Claudes bildeforståelse er utrolig kraftig. Og som du vet, kan du lime inn bilder direkte med Ctrl+V, og det komplette innholdet ditt vil vises i samtalen.
+Du kan laste opp bilder og beskrive behovene dine — Claudes bildeforståelse er utrolig kraftig. Og som du vet, kan du lime inn bilder direkte med Ctrl+V, og det fulle innholdet ditt vises i samtalen.
 
----
+***
 
-<img width="600" height="370" alt="image" src="https://github.com/user-attachments/assets/87d332ea-3e34-4957-b442-f9d070211fbf" />
+<img height="370" width="600" alt="image" src="https://github.com/user-attachments/assets/87d332ea-3e34-4957-b442-f9d070211fbf" />
 
-Du kan tilpasse plugins, administrere alle CC-Viewer-prosesser, og CC-Viewer støtter hot-switching til tredjeparts API-er (ja, du kan bruke GLM, Kimi, MiniMax, Qwen, DeepSeek — selv om forfatteren anser dem alle som ganske svake på dette tidspunktet).
+Du kan tilpasse plugins, administrere alle cc-viewer-prosesser, og cc-viewer støtter hot-switching til tredjeparts-API-er (ja, du kan bruke GLM, Kimi, MiniMax, Qwen, DeepSeek — selv om forfatteren mener at de alle er ganske svake for øyeblikket).
 
----
+***
 
-<img width="1500" height="746" alt="image" src="https://github.com/user-attachments/assets/b1f60c7c-1438-4ecc-8c64-193d21ee3445" />
+<img height="746" width="1500" alt="image" src="https://github.com/user-attachments/assets/b1f60c7c-1438-4ecc-8c64-193d21ee3445" />
 
-Flere funksjoner venter på å bli oppdaget... For eksempel: systemet støtter Agent Team, og har en innebygd Code Reviewer. Codex Code Reviewer-integrasjon kommer snart (forfatteren anbefaler sterkt å bruke Codex til å vurdere Claude Codes kode).
+Flere funksjoner venter på å bli oppdaget... For eksempel: Systemet støtter Agent Team og har en innebygd Code Reviewer. Codex Code Reviewer-integrasjon kommer snart (forfatteren anbefaler sterkt å bruke Codex til å gjennomgå Claude Code-kode).
 
 ## Lisens
 

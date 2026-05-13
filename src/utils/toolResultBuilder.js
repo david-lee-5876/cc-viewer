@@ -181,9 +181,21 @@ export function appendToolResultMap(state, messages, startIndex) {
           }
           if (matchedTool && matchedTool.name === 'AskUserQuestion') {
             const parsed = parseAskAnswerText(resultText);
-            // 被拒绝的 AskUserQuestion：标记为 rejected，避免渲染成交互式表单
+            // 被拒绝的 AskUserQuestion：分 cancelled / rejected 两类——
+            //   - cancelled：cc-viewer 主动取消（Cancel 按钮 / 输入框打字打断）。
+            //     ask-bridge.js / sdk-manager.js 注入 reason 时统一加 [cc-viewer:cancel] 前缀
+            //     作为协议级 sentinel，前缀匹配比模糊文案匹配稳定（SDK 升级换文案不影响）。
+            //   - rejected：schema 校验失败 / hook deny 等"未触达"语义。
+            //   ChatMessage 用这两个 sentinel 区分渲染（cancelled 显式带 __cancelReason__ 灰态）。
             if (Object.keys(parsed).length === 0 && isPermissionDenied) {
-              askAnswerMap[block.tool_use_id] = { __rejected__: true };
+              const looksCancelled = /\[cc-viewer:cancel\]/.test(resultText);
+              if (looksCancelled) {
+                // 截掉 [cc-viewer:cancel] 前缀只显示用户可读 reason，再 slice 200 防超长
+                const cleanedReason = resultText.replace(/^\s*\[cc-viewer:cancel\]\s*/, '').slice(0, 200);
+                askAnswerMap[block.tool_use_id] = { __cancelled__: true, __cancelReason__: cleanedReason };
+              } else {
+                askAnswerMap[block.tool_use_id] = { __rejected__: true };
+              }
             } else {
               askAnswerMap[block.tool_use_id] = parsed;
             }

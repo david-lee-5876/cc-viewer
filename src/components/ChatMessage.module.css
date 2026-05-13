@@ -741,7 +741,7 @@
   max-height: min(400px, 50vh);
   overflow-x: hidden;
   overflow-y: auto;
-  border: 1px solid var(--color-primary-dark-bg);
+  border: 1px solid var(--border-primary);
 }
 
 .planFeedback {
@@ -1121,6 +1121,7 @@
 .askSubmitRow {
   display: flex;
   justify-content: flex-end;
+  gap: 8px;
   margin-top: 8px;
 }
 
@@ -1142,6 +1143,50 @@
 .askSubmitBtn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+.askCancelBtn {
+  padding: 4px 16px;
+  border-radius: 4px;
+  border: 1px solid var(--color-border);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.askCancelBtn:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text);
+}
+
+.askCancelledNote {
+  margin-top: 6px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-style: italic;
+}
+
+.askCountdown {
+  margin-top: 8px;
+  text-align: right;
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+  font-variant-numeric: tabular-nums;
+  /* 长译文 (tr/ru/de 等) 在窄屏避免换行挤压 askSubmitRow */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 剩余 ≤60s 切 warning 视觉提示用户即将超时 */
+.askCountdownWarning {
+  color: var(--color-warning, #faad14);
+  font-weight: 500;
 }
 
 .askMarkdownLayout {

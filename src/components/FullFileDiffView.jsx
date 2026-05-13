@@ -91,22 +91,34 @@ function getLanguage(filePath) {
   return LANG_MAP[ext] || null;
 }
 
+function escapeHtml(text) {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
 function highlightLines(content, lang) {
   if (!content) return [];
-  const lines = content.split('\n');
+  // 与 computeDiffLines 保持一致：CRLF 归一化后再切行，
+  // 否则带 \r 的行会跟随 dl.html 渲染到 DOM，复制粘贴会带出 CR。
+  const normalized = content.replace(/\r\n/g, '\n');
+  const lines = normalized.split('\n');
   if (lang) {
     try {
-      const highlighted = hljs.highlight(content, { language: lang });
+      const highlighted = hljs.highlight(normalized, { language: lang });
       return highlighted.value.split('\n');
     } catch {
-      return lines;
+      return lines.map(line => escapeHtml(line));
     }
   }
-  return lines;
+  return lines.map(line => escapeHtml(line));
 }
 
 function computeDiffLines(oldStr, newStr) {
-  const changes = Diff.diffLines(oldStr, newStr);
+  const normalizedOld = (oldStr || '').replace(/\r\n/g, '\n');
+  const normalizedNew = (newStr || '').replace(/\r\n/g, '\n');
+  const changes = Diff.diffLines(normalizedOld, normalizedNew);
   const lines = [];
   let oldLineNum = 1;
   let newLineNum = 1;
@@ -162,14 +174,14 @@ export default function FullFileDiffView({ file_path, old_string, new_string }) 
   const diffLines = useMemo(() => {
     if (isNew) {
       // 新文件：所有行都是 add
-      const lines = (new_string || '').split('\n');
+      const lines = (new_string || '').replace(/\r\n/g, '\n').split('\n');
       return lines.map((text, i) => ({
         type: 'add', oldNum: null, newNum: i + 1, text
       }));
     }
     if (isDeleted) {
       // 删除文件：所有行都是 del
-      const lines = (old_string || '').split('\n');
+      const lines = (old_string || '').replace(/\r\n/g, '\n').split('\n');
       return lines.map((text, i) => ({
         type: 'del', oldNum: i + 1, newNum: null, text
       }));

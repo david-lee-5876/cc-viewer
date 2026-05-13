@@ -1,9 +1,16 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { t } from '../i18n';
 import { ApprovalPortalContext } from './ApprovalPortalContext';
+import { playEvent as playVoiceEvent, playChimeFallback } from '../utils/voicePackPlayer';
 import styles from './ApprovalModal.module.css';
 
 const KIND_PRIORITY = ['ptyPlan', 'ask'];
+// Approval kind → voice-pack eventKey. Lets the voice pack address kinds by
+// stable semantic name even if the modal's internal naming evolves.
+const KIND_TO_VOICE_EVENT = {
+  ptyPlan: 'planApproval',
+  ask: 'askQuestion',
+};
 
 function _idForKind(kind, payload) {
   if (!payload) return null;
@@ -47,6 +54,7 @@ const _tr = (key, params, fallback) => {
 export default function ApprovalModal({
   enabled,
   soundEnabled,
+  voicePackPrefs,
   approvalGlobal,
   dismissedIds,
   onDismiss,
@@ -58,19 +66,25 @@ export default function ApprovalModal({
   const ptyPlanSlotRef = useRef(null);
   const [activeKind, setActiveKind] = useState(null);
   const [slotsReady, setSlotsReady] = useState(false);
-  const lastNotifyKeyRef = useRef('');
-  const audioRef = useRef(null);
+  // Per-kind dedupe: joined keys previously suppressed the second kind when
+  // ptyPlan and ask arrived together. Each kind tracks its own last-fired id now.
+  const lastFiredIdRef = useRef({ ptyPlan: null, ask: null });
 
-  // Visible kinds: present in approvalGlobal AND id not in dismissed set.
-  const visibleKinds = useMemo(() => {
-    if (!enabled || !approvalGlobal) return [];
+  // All approval kinds currently pending (not gated by `enabled`).
+  // Decoupling sound from UI visibility means phone-mode (where Mobile.jsx sets
+  // enabled={isPad && modalEnabled} → false) still gets audio cues —
+  const allKinds = useMemo(() => {
+    if (!approvalGlobal) return [];
     const out = [];
     for (const k of KIND_PRIORITY) {
       const id = _idForKind(k, approvalGlobal);
       if (id != null && !_isDismissed(dismissedIds, k, id)) out.push(k);
     }
     return out;
-  }, [enabled, approvalGlobal, dismissedIds]);
+  }, [approvalGlobal, dismissedIds]);
+
+  // visibleKinds = the subset rendered in the UI (gated by `enabled`).
+  const visibleKinds = useMemo(() => (enabled ? allKinds : []), [enabled, allKinds]);
 
   // Pick the highest-priority visible kind as initial active. If activeKind dropped out
   // (resolved or dismissed), pick the new top.
@@ -102,12 +116,27 @@ export default function ApprovalModal({
     activePtyPlanId: visibleKinds.includes('ptyPlan') ? _idForKind('ptyPlan', approvalGlobal) : null,
   }), [slotsReady, visibleKinds, approvalGlobal]);
 
-  // ESC dismiss — listens globally so it works even when focus is elsewhere.
+  // ESC = minimise（pending 保留）
+  // Cmd/Ctrl+ESC = cancel（仅对 ask 类型生效，等价 terminal Claude Code 的 onAbort）—
+  // 等价路径：ChatView.handleAskCancel 走 ask-cancel WS 协议 + SDK 包内置 ensureToolResultPairing 闭合 transcript。
+  //
+  // preventDefault + stopPropagation 防 ESC 冒泡到下层（textarea / 全局 PTY keydown listener
+  // 等）误触发副作用 — 已观察到的复现：modal 内按 ESC 后 inline 卡片提交报 pty-prompt-invalid。
   const handleEsc = useCallback((e) => {
     if (e.key !== 'Escape') return;
     if (!activeKind) return;
     const id = _idForKind(activeKind, approvalGlobal);
-    if (id != null && onDismiss) onDismiss(activeKind, id);
+    if (id == null) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if ((e.metaKey || e.ctrlKey) && activeKind === 'ask') {
+      const cancelFn = approvalGlobal?.ask?.handlers?.cancel;
+      if (cancelFn) {
+        cancelFn(id, 'User aborted');
+        return;
+      }
+    }
+    if (onDismiss) onDismiss(activeKind, id);
   }, [activeKind, approvalGlobal, onDismiss]);
 
   useEffect(() => {
@@ -116,33 +145,47 @@ export default function ApprovalModal({
     return () => document.removeEventListener('keydown', handleEsc);
   }, [visibleKinds.length, handleEsc]);
 
-  // Sound: play once per (kind,id) tuple becoming visible. Synthesised via Web Audio API
-  // so we don't ship a binary asset — keeps npm package size small and avoids autoplay quirks.
+  // Sound — drives BOTH the voice-pack and the legacy chime.
+  //   • If voicePackPrefs.enabled AND the matching event has a binding → use voice pack
+  //     (player module handles autoplay block / 404 / serial queue, see voicePackPlayer.js).
+  //   • Else if soundEnabled → fall back to the legacy two-tone Web Audio chime.
+  //   • Else: silent.
+  //
+  // Uses `allKinds` (not `visibleKinds`) so phone mode still beeps even when the
+  // modal UI is hidden behind a slide-up sheet(: Mobile.jsx isPad gate).
   useEffect(() => {
-    if (!soundEnabled || visibleKinds.length === 0) return;
-    const key = visibleKinds.map(k => `${k}:${_idForKind(k, approvalGlobal)}`).join('|');
-    if (key === lastNotifyKeyRef.current) return;
-    lastNotifyKeyRef.current = key;
-    try {
-      const Ctx = window.AudioContext || window.webkitAudioContext;
-      if (!Ctx) return;
-      if (!audioRef.current) audioRef.current = new Ctx();
-      const ctx = audioRef.current;
-      // Two-tone soft chime (660Hz → 880Hz over 220ms) — pleasant but unmistakable.
-      const now = ctx.currentTime;
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(660, now);
-      osc.frequency.linearRampToValueAtTime(880, now + 0.18);
-      gain.gain.setValueAtTime(0, now);
-      gain.gain.linearRampToValueAtTime(0.18, now + 0.02);
-      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.24);
-      osc.connect(gain).connect(ctx.destination);
-      osc.start(now);
-      osc.stop(now + 0.26);
-    } catch {}
-  }, [soundEnabled, visibleKinds, approvalGlobal]);
+    if (allKinds.length === 0) return;
+    const vp = voicePackPrefs;
+    const useVoicePack = !!(vp && vp.enabled);
+
+    for (const kind of allKinds) {
+      const id = _idForKind(kind, approvalGlobal);
+      if (id == null) continue;
+      // Per-kind dedupe: don't re-fire when the same kind:id is still present
+      // through a re-render. Clears in the else-branch when the id changes / disappears.
+      if (lastFiredIdRef.current[kind] === id) continue;
+      lastFiredIdRef.current[kind] = id;
+
+      let fired = false;
+      const eventKey = KIND_TO_VOICE_EVENT[kind];
+      if (useVoicePack && eventKey && vp.events && vp.events[eventKey]) {
+        try {
+          fired = playVoiceEvent(eventKey, vp, { dedupeKey: `${eventKey}:${id}` });
+        } catch { fired = false; }
+      }
+      if (!fired && soundEnabled) {
+        // Legacy chime fallback — shared two-tone Web Audio implementation lives
+        // in voicePackPlayer.js (it was duplicated here before).
+        playChimeFallback();
+      }
+    }
+
+    // Clean up dedupe entries for kinds that have left the pending set, so the
+    // *next* arrival of the same kind (different id) fires again.
+    for (const k of KIND_PRIORITY) {
+      if (!allKinds.includes(k)) lastFiredIdRef.current[k] = null;
+    }
+  }, [allKinds, approvalGlobal, soundEnabled, voicePackPrefs]);
 
   const handleBackdropClick = (e) => {
     if (e.target !== e.currentTarget) return;
@@ -204,6 +247,11 @@ export default function ApprovalModal({
             </div>
             <div className={styles.footer}>
               <span>{_tr('ui.approval.modal.dismissHint', null, 'ESC or click outside to minimise (pending stays)')}</span>
+              {activeKind === 'ask' && approvalGlobal?.ask?.handlers?.cancel && (
+                <span className={styles.dismissHintExtra}>
+                  {_tr('ui.approval.modal.cancelHint', null, '⌘/Ctrl+ESC to cancel')}
+                </span>
+              )}
               <button className={styles.dismissBtn} onClick={handleManualDismiss}>
                 {_tr('ui.approval.modal.dismiss', null, 'Minimise')}
               </button>

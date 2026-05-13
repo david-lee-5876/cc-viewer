@@ -468,10 +468,15 @@ async function runSdkMode(extraClaudeArgs = [], cwd, noOpen = false) {
     broadcastWs: (msg) => serverMod.broadcastWsMessage(msg),
     permissionMode,
     runWaterfallHook: (await import('./lib/plugin-loader.js')).runWaterfallHook,
+    // Round-3 P0: SDK mode has no Stop hook (ensureHooks() skipped above), so
+    // the only place we learn a turn ended is the SDK 'result' message. Forward
+    // it to the same SSE channel the Stop hook bridge uses in PTY mode.
+    onTurnEnd: ({ sessionId, ts }) => serverMod.broadcastTurnEnd?.(sessionId, ts),
   });
 
   // 注册 SDK 回调到 server.js（WS 消息路由用）
   serverMod.setSdkResolveApproval(sdkManager.resolveApproval);
+  serverMod.setSdkCancelApproval(sdkManager.cancelApproval);
   serverMod.setSdkSendUserMessage(sdkManager.sendUserMessage);
 
   // 自动打开浏览器

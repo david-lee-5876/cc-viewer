@@ -1,0 +1,34 @@
+{
+  "name": "default-pixel-buddy",
+  "displayName": "Pixel Buddy · 像素小宠物 (默认)",
+  "placeholder": false,
+  "events": {
+    "planApproval": {
+      "file": "planApproval.wav",
+      "size": 16362
+    },
+    "askQuestion": {
+      "file": "askQuestion.wav",
+      "size": 9748
+    },
+    "timeoutWarning5min": {
+      "file": "timeoutWarning5min.wav",
+      "size": 37088
+    },
+    "timeoutWarning60s": {
+      "file": "timeoutWarning60s.wav",
+      "size": 16368
+    },
+    "turnEnd": {
+      "file": "turnEnd.wav",
+      "size": 24744
+    }
+  },
+  "cues": {
+    "planApproval": "Bi-poop?  (短低 + 上扬\"问\"句)",
+    "askQuestion": "Pip pip!  (两短促跳跳)",
+    "timeoutWarning5min": "Boo... boo...  (慢且软)",
+    "timeoutWarning60s": "Beep-beep-beep-beep!  (4 连音紧迫)",
+    "turnEnd": "Wee-doo~ ♪  (下行小调，满足)"
+  }
+}

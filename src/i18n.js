@@ -5700,6 +5700,14 @@ const i18nData = {
     "ar": "ESC أو انقر خارجًا للتصغير", "no": "ESC eller klikk utenfor for å minimere", "pt-BR": "ESC ou clique fora para minimizar",
     "th": "ESC หรือคลิกนอกเพื่อย่อ", "tr": "ESC veya dışarı tıklayarak küçült", "uk": "ESC або клік зовні — згорнути"
   },
+  "ui.approval.modal.cancelHint": {
+    "zh": "⌘/Ctrl+ESC 取消", "en": "⌘/Ctrl+ESC to cancel", "zh-TW": "⌘/Ctrl+ESC 取消",
+    "ko": "⌘/Ctrl+ESC로 취소", "ja": "⌘/Ctrl+ESC でキャンセル", "de": "⌘/Strg+ESC zum Abbrechen",
+    "es": "⌘/Ctrl+ESC para cancelar", "fr": "⌘/Ctrl+ESC pour annuler", "it": "⌘/Ctrl+ESC per annullare",
+    "da": "⌘/Ctrl+ESC for at annullere", "pl": "⌘/Ctrl+ESC aby anulować", "ru": "⌘/Ctrl+ESC — отмена",
+    "ar": "⌘/Ctrl+ESC للإلغاء", "no": "⌘/Ctrl+ESC for å avbryte", "pt-BR": "⌘/Ctrl+ESC para cancelar",
+    "th": "⌘/Ctrl+ESC เพื่อยกเลิก", "tr": "⌘/Ctrl+ESC ile iptal", "uk": "⌘/Ctrl+ESC — скасувати"
+  },
   "ui.approval.bell.reopen": {
     "zh": "重新打开审批弹层", "en": "Reopen approval modal", "zh-TW": "重新開啟審批彈層",
     "ko": "승인 모달 다시 열기", "ja": "承認モーダルを再表示", "de": "Genehmigungs-Modal erneut öffnen",
@@ -5747,6 +5755,186 @@ const i18nData = {
     "da": "Underret kun ved skjult", "pl": "Powiadamiaj tylko gdy ukryte", "ru": "Уведомлять только когда скрыто",
     "ar": "إشعار فقط عند الإخفاء", "no": "Varsle kun ved skjult", "pt-BR": "Notificar apenas se oculto",
     "th": "แจ้งเตือนเฉพาะตอนซ่อน", "tr": "Yalnızca gizliyken bildir", "uk": "Сповіщати лише коли приховано"
+  },
+  "ui.voicePack.title": {
+    "zh": "语音包", "en": "Voice pack", "zh-TW": "語音包",
+    "ko": "음성 팩", "ja": "ボイスパック", "de": "Sprachpaket",
+    "es": "Paquete de voz", "fr": "Pack vocal", "it": "Pacchetto vocale",
+    "da": "Stemmepakke", "pl": "Pakiet głosowy", "ru": "Голосовой пакет",
+    "ar": "حزمة صوتية", "no": "Stemmepakke", "pt-BR": "Pacote de voz",
+    "th": "ชุดเสียง", "tr": "Ses paketi", "uk": "Голосовий пакет"
+  },
+  "ui.voicePack.volume": {
+    "zh": "音量", "en": "Volume", "zh-TW": "音量",
+    "ko": "볼륨", "ja": "音量", "de": "Lautstärke",
+    "es": "Volumen", "fr": "Volume", "it": "Volume",
+    "da": "Lydstyrke", "pl": "Głośność", "ru": "Громкость",
+    "ar": "مستوى الصوت", "no": "Lydstyrke", "pt-BR": "Volume",
+    "th": "ระดับเสียง", "tr": "Ses seviyesi", "uk": "Гучність"
+  },
+  "ui.voicePack.event.planApproval": {
+    "zh": "Plan 审批", "en": "Plan approval", "zh-TW": "Plan 審批",
+    "ko": "플랜 승인", "ja": "プラン承認", "de": "Plan-Genehmigung",
+    "es": "Aprobación del plan", "fr": "Approbation du plan", "it": "Approvazione del piano",
+    "da": "Plangodkendelse", "pl": "Zatwierdzenie planu", "ru": "Утверждение плана",
+    "ar": "موافقة الخطة", "no": "Plangodkjenning", "pt-BR": "Aprovação do plano",
+    "th": "อนุมัติแผน", "tr": "Plan onayı", "uk": "Затвердження плану"
+  },
+  "ui.voicePack.event.askQuestion": {
+    "zh": "用户提问", "en": "Ask user question", "zh-TW": "使用者提問",
+    "ko": "사용자 질문", "ja": "ユーザーへの質問", "de": "Benutzer fragen",
+    "es": "Preguntar al usuario", "fr": "Question utilisateur", "it": "Domanda all'utente",
+    "da": "Spørg bruger", "pl": "Pytanie do użytkownika", "ru": "Вопрос пользователю",
+    "ar": "سؤال المستخدم", "no": "Spør bruker", "pt-BR": "Pergunta ao usuário",
+    "th": "ถามผู้ใช้", "tr": "Kullanıcıya sor", "uk": "Запит до користувача"
+  },
+  "ui.voicePack.event.timeoutWarning5min": {
+    "zh": "超时预警 (剩 5 分钟)", "en": "Timeout warning (5 min left)", "zh-TW": "逾時預警 (剩 5 分鐘)",
+    "ko": "시간 초과 경고 (5분 남음)", "ja": "タイムアウト警告 (残り5分)", "de": "Timeout-Warnung (5 Min)",
+    "es": "Aviso de tiempo (5 min)", "fr": "Alerte délai (5 min)", "it": "Avviso timeout (5 min)",
+    "da": "Timeout-advarsel (5 min)", "pl": "Ostrzeżenie limitu (5 min)", "ru": "Предупреждение (5 мин)",
+    "ar": "تحذير المهلة (٥ دقائق)", "no": "Tidsadvarsel (5 min)", "pt-BR": "Aviso de tempo (5 min)",
+    "th": "เตือนหมดเวลา (5 นาที)", "tr": "Zaman uyarısı (5 dk)", "uk": "Попередження (5 хв)"
+  },
+  "ui.voicePack.event.timeoutWarning60s": {
+    "zh": "超时预警 (剩 60 秒)", "en": "Timeout warning (60 s left)", "zh-TW": "逾時預警 (剩 60 秒)",
+    "ko": "시간 초과 경고 (60초 남음)", "ja": "タイムアウト警告 (残り60秒)", "de": "Timeout-Warnung (60 s)",
+    "es": "Aviso de tiempo (60 s)", "fr": "Alerte délai (60 s)", "it": "Avviso timeout (60 s)",
+    "da": "Timeout-advarsel (60 s)", "pl": "Ostrzeżenie limitu (60 s)", "ru": "Предупреждение (60 с)",
+    "ar": "تحذير المهلة (٦٠ ثانية)", "no": "Tidsadvarsel (60 s)", "pt-BR": "Aviso de tempo (60 s)",
+    "th": "เตือนหมดเวลา (60 วินาที)", "tr": "Zaman uyarısı (60 sn)", "uk": "Попередження (60 с)"
+  },
+  "ui.voicePack.event.turnEnd": {
+    "zh": "回合结束 / 任务完成", "en": "Turn end / task done", "zh-TW": "回合結束 / 任務完成",
+    "ko": "턴 종료 / 작업 완료", "ja": "ターン終了 / タスク完了", "de": "Antwort fertig",
+    "es": "Fin del turno", "fr": "Fin du tour", "it": "Fine turno",
+    "da": "Tur slut", "pl": "Koniec tury", "ru": "Конец хода",
+    "ar": "نهاية الدور", "no": "Tur slutt", "pt-BR": "Fim do turno",
+    "th": "จบเทิร์น", "tr": "Tur sonu", "uk": "Кінець ходу"
+  },
+  "ui.voicePack.binding.default": {
+    "zh": "默认 (内置)", "en": "Default (built-in)", "zh-TW": "預設 (內建)",
+    "ko": "기본 (내장)", "ja": "デフォルト (内蔵)", "de": "Standard (eingebaut)",
+    "es": "Predeterminado", "fr": "Par défaut (intégré)", "it": "Predefinito (incorporato)",
+    "da": "Standard (indbygget)", "pl": "Domyślne (wbudowane)", "ru": "По умолчанию",
+    "ar": "افتراضي (مدمج)", "no": "Standard (innebygd)", "pt-BR": "Padrão (embutido)",
+    "th": "ค่าเริ่มต้น (ในตัว)", "tr": "Varsayılan (yerleşik)", "uk": "За замовчуванням"
+  },
+  "ui.voicePack.binding.placeholder": {
+    "zh": "占位音", "en": "placeholder", "zh-TW": "佔位音",
+    "ko": "임시 음원", "ja": "プレースホルダー", "de": "Platzhalter",
+    "es": "marcador", "fr": "espace réservé", "it": "segnaposto",
+    "da": "pladsholder", "pl": "zastępczy", "ru": "заглушка",
+    "ar": "عنصر نائب", "no": "plassholder", "pt-BR": "espaço reservado",
+    "th": "ตัวอย่าง", "tr": "yer tutucu", "uk": "заповнювач"
+  },
+  "ui.voicePack.eventHint.turnEnd": {
+    "zh": "仅窗口失焦时响，30 秒内最多一次",
+    "en": "Plays only when window unfocused, max once per 30s",
+    "zh-TW": "僅視窗失焦時播放，30 秒內最多一次",
+    "ko": "창이 비활성일 때만 재생, 30초당 최대 1회",
+    "ja": "ウィンドウが非アクティブのみ、30秒ごとに最大1回",
+    "de": "Nur bei unfokussiertem Fenster, max. 1×/30s",
+    "es": "Solo si la ventana no tiene foco, máx 1 por 30 s",
+    "fr": "Uniquement fenêtre non focalisée, max 1 par 30 s",
+    "it": "Solo a finestra non attiva, max 1 ogni 30s",
+    "da": "Kun ved ufokuseret vindue, maks. 1 pr. 30s",
+    "pl": "Tylko gdy okno nieaktywne, maks 1 / 30 s",
+    "ru": "Только при неактивном окне, ≤1 за 30с",
+    "ar": "فقط عند فقدان تركيز النافذة، مرة كل 30 ثانية",
+    "no": "Kun når vinduet er ufokusert, maks 1 per 30s",
+    "pt-BR": "Só com janela desfocada, máx 1 a cada 30s",
+    "th": "เฉพาะตอนหน้าต่างไม่โฟกัส, สูงสุด 1 ครั้งต่อ 30 วิ",
+    "tr": "Yalnızca pencere odakta değilken, 30s'de en fazla 1",
+    "uk": "Лише коли вікно не у фокусі, ≤1 раз/30с"
+  },
+  "ui.voicePack.binding.disabled": {
+    "zh": "禁用", "en": "Disabled", "zh-TW": "停用",
+    "ko": "비활성화", "ja": "無効", "de": "Deaktiviert",
+    "es": "Desactivado", "fr": "Désactivé", "it": "Disabilitato",
+    "da": "Deaktiveret", "pl": "Wyłączone", "ru": "Отключено",
+    "ar": "معطل", "no": "Deaktivert", "pt-BR": "Desativado",
+    "th": "ปิดใช้งาน", "tr": "Devre dışı", "uk": "Вимкнено"
+  },
+  "ui.voicePack.preview": {
+    "zh": "试听", "en": "Preview", "zh-TW": "試聽",
+    "ko": "미리 듣기", "ja": "試聴", "de": "Vorschau",
+    "es": "Vista previa", "fr": "Aperçu", "it": "Anteprima",
+    "da": "Forhåndsvisning", "pl": "Podgląd", "ru": "Прослушать",
+    "ar": "معاينة", "no": "Forhåndsvisning", "pt-BR": "Pré-escutar",
+    "th": "ฟังตัวอย่าง", "tr": "Önizleme", "uk": "Прослухати"
+  },
+  "ui.voicePack.upload": {
+    "zh": "上传音频", "en": "Upload audio", "zh-TW": "上傳音訊",
+    "ko": "오디오 업로드", "ja": "音声をアップロード", "de": "Audio hochladen",
+    "es": "Subir audio", "fr": "Téléverser un audio", "it": "Carica audio",
+    "da": "Upload lyd", "pl": "Prześlij audio", "ru": "Загрузить аудио",
+    "ar": "رفع صوت", "no": "Last opp lyd", "pt-BR": "Enviar áudio",
+    "th": "อัปโหลดเสียง", "tr": "Ses yükle", "uk": "Завантажити аудіо"
+  },
+  "ui.voicePack.uploadHint": {
+    "zh": "mp3 / wav / ogg / m4a · 最大 2MB", "en": "mp3 / wav / ogg / m4a · max 2MB", "zh-TW": "mp3 / wav / ogg / m4a · 最大 2MB",
+    "ko": "mp3 / wav / ogg / m4a · 최대 2MB", "ja": "mp3 / wav / ogg / m4a · 最大 2MB", "de": "mp3 / wav / ogg / m4a · max 2 MB",
+    "es": "mp3 / wav / ogg / m4a · máx 2 MB", "fr": "mp3 / wav / ogg / m4a · max 2 Mo", "it": "mp3 / wav / ogg / m4a · max 2 MB",
+    "da": "mp3 / wav / ogg / m4a · maks 2 MB", "pl": "mp3 / wav / ogg / m4a · maks 2 MB", "ru": "mp3 / wav / ogg / m4a · макс 2 МБ",
+    "ar": "mp3 / wav / ogg / m4a · بحد أقصى 2MB", "no": "mp3 / wav / ogg / m4a · maks 2 MB", "pt-BR": "mp3 / wav / ogg / m4a · máx 2 MB",
+    "th": "mp3 / wav / ogg / m4a · ไม่เกิน 2MB", "tr": "mp3 / wav / ogg / m4a · maks 2 MB", "uk": "mp3 / wav / ogg / m4a · макс 2 МБ"
+  },
+  "ui.voicePack.uploadSuccess": {
+    "zh": "上传成功", "en": "Uploaded", "zh-TW": "上傳成功",
+    "ko": "업로드 완료", "ja": "アップロード完了", "de": "Hochgeladen",
+    "es": "Subido", "fr": "Téléversé", "it": "Caricato",
+    "da": "Uploadet", "pl": "Przesłano", "ru": "Загружено",
+    "ar": "تم الرفع", "no": "Lastet opp", "pt-BR": "Enviado",
+    "th": "อัปโหลดสำเร็จ", "tr": "Yüklendi", "uk": "Завантажено"
+  },
+  "ui.voicePack.uploadFailed": {
+    "zh": "上传失败", "en": "Upload failed", "zh-TW": "上傳失敗",
+    "ko": "업로드 실패", "ja": "アップロード失敗", "de": "Hochladen fehlgeschlagen",
+    "es": "Error al subir", "fr": "Échec de l'envoi", "it": "Caricamento fallito",
+    "da": "Upload mislykkedes", "pl": "Przesyłanie nieudane", "ru": "Не удалось загрузить",
+    "ar": "فشل الرفع", "no": "Opplasting mislyktes", "pt-BR": "Falha ao enviar",
+    "th": "อัปโหลดล้มเหลว", "tr": "Yükleme başarısız", "uk": "Не вдалось завантажити"
+  },
+  "ui.voicePack.uploadTooLarge": {
+    "zh": "文件过大 (最大 2MB)", "en": "File too large (max 2MB)", "zh-TW": "檔案過大 (最大 2MB)",
+    "ko": "파일이 너무 큽니다 (최대 2MB)", "ja": "ファイルが大きすぎます (最大 2MB)", "de": "Datei zu groß (max 2 MB)",
+    "es": "Archivo demasiado grande (máx 2 MB)", "fr": "Fichier trop volumineux (max 2 Mo)", "it": "File troppo grande (max 2 MB)",
+    "da": "Filen er for stor (maks 2 MB)", "pl": "Plik za duży (maks 2 MB)", "ru": "Файл слишком велик (макс 2 МБ)",
+    "ar": "الملف كبير جداً (الحد ٢ ميجابايت)", "no": "Filen er for stor (maks 2 MB)", "pt-BR": "Arquivo muito grande (máx 2 MB)",
+    "th": "ไฟล์ใหญ่เกินไป (สูงสุด 2MB)", "tr": "Dosya çok büyük (maks 2 MB)", "uk": "Файл завеликий (макс 2 МБ)"
+  },
+  "ui.voicePack.uploadBadFormat": {
+    "zh": "不支持的格式 (仅 mp3/wav/ogg/m4a)", "en": "Unsupported format (mp3/wav/ogg/m4a only)", "zh-TW": "不支援的格式",
+    "ko": "지원하지 않는 형식", "ja": "サポートされていない形式", "de": "Format nicht unterstützt",
+    "es": "Formato no compatible", "fr": "Format non pris en charge", "it": "Formato non supportato",
+    "da": "Formatet understøttes ikke", "pl": "Nieobsługiwany format", "ru": "Формат не поддерживается",
+    "ar": "صيغة غير مدعومة", "no": "Formatet støttes ikke", "pt-BR": "Formato não suportado",
+    "th": "รูปแบบไม่รองรับ", "tr": "Desteklenmeyen biçim", "uk": "Формат не підтримується"
+  },
+  "ui.voicePack.reset": {
+    "zh": "恢复默认", "en": "Reset to defaults", "zh-TW": "還原預設",
+    "ko": "기본값 복원", "ja": "デフォルトに戻す", "de": "Auf Standard zurücksetzen",
+    "es": "Restablecer valores", "fr": "Réinitialiser", "it": "Ripristina predefiniti",
+    "da": "Nulstil til standard", "pl": "Przywróć domyślne", "ru": "Сбросить",
+    "ar": "إعادة التعيين", "no": "Tilbakestill", "pt-BR": "Restaurar padrão",
+    "th": "รีเซ็ตเป็นค่าเริ่มต้น", "tr": "Varsayılana sıfırla", "uk": "Скинути"
+  },
+  "ui.voicePack.uploadedTitle": {
+    "zh": "已上传音频", "en": "Uploaded audio", "zh-TW": "已上傳音訊",
+    "ko": "업로드된 오디오", "ja": "アップロード済み音声", "de": "Hochgeladene Audios",
+    "es": "Audio subido", "fr": "Audios téléversés", "it": "Audio caricati",
+    "da": "Uploadet lyd", "pl": "Przesłane pliki audio", "ru": "Загруженные аудио",
+    "ar": "الصوت المرفوع", "no": "Opplastet lyd", "pt-BR": "Áudios enviados",
+    "th": "เสียงที่อัปโหลด", "tr": "Yüklenen sesler", "uk": "Завантажені аудіо"
+  },
+  "ui.voicePack.deleteFailed": {
+    "zh": "删除失败", "en": "Delete failed", "zh-TW": "刪除失敗",
+    "ko": "삭제 실패", "ja": "削除失敗", "de": "Löschen fehlgeschlagen",
+    "es": "Error al eliminar", "fr": "Échec de la suppression", "it": "Eliminazione fallita",
+    "da": "Sletning mislykkedes", "pl": "Usuwanie nieudane", "ru": "Не удалось удалить",
+    "ar": "فشل الحذف", "no": "Sletting mislyktes", "pt-BR": "Falha ao excluir",
+    "th": "ลบไม่สำเร็จ", "tr": "Silme başarısız", "uk": "Не вдалось видалити"
   },
   "ui.dangerApproval": {
     "zh": "操作待审批", "en": "Approval Required", "zh-TW": "操作待審批",
@@ -6721,6 +6909,66 @@ const i18nData = {
     "th": "หลังบันทึกแล้ว คลิกที่นี่เพื่อกลับไปที่เทอร์มินัล",
     "tr": "Kaydettikten sonra Terminal'e dönmek için buraya tıklayın",
     "uk": "Після збереження натисніть тут, щоб повернутися до Терміналу"
+  },
+  "ui.askCancel": {
+    "zh": "取消",
+    "en": "Cancel",
+    "zh-TW": "取消",
+    "ko": "취소",
+    "ja": "キャンセル",
+    "de": "Abbrechen",
+    "es": "Cancelar",
+    "fr": "Annuler",
+    "it": "Annulla",
+    "da": "Annuller",
+    "pl": "Anuluj",
+    "ru": "Отмена",
+    "ar": "إلغاء",
+    "no": "Avbryt",
+    "pt-BR": "Cancelar",
+    "th": "ยกเลิก",
+    "tr": "İptal",
+    "uk": "Скасувати"
+  },
+  "ui.askCountdown": {
+    "zh": "{time} 后自动取消",
+    "en": "Auto-cancel in {time}",
+    "zh-TW": "{time} 後自動取消",
+    "ko": "{time} 후 자동 취소",
+    "ja": "{time} 後に自動キャンセル",
+    "de": "Auto-Abbruch in {time}",
+    "es": "Auto-cancelar en {time}",
+    "fr": "Annulation auto dans {time}",
+    "it": "Auto-annulla in {time}",
+    "da": "Auto-annullér om {time}",
+    "pl": "Auto-anulowanie za {time}",
+    "ru": "Авто-отмена через {time}",
+    "ar": "إلغاء تلقائي خلال {time}",
+    "no": "Auto-avbryt om {time}",
+    "pt-BR": "Auto-cancelar em {time}",
+    "th": "ยกเลิกอัตโนมัติใน {time}",
+    "tr": "{time} sonra otomatik iptal",
+    "uk": "Авто-скасування через {time}"
+  },
+  "ui.askCancelledByUser": {
+    "zh": "已被用户取消",
+    "en": "Cancelled by user",
+    "zh-TW": "已被使用者取消",
+    "ko": "사용자가 취소함",
+    "ja": "ユーザーがキャンセルしました",
+    "de": "Vom Benutzer abgebrochen",
+    "es": "Cancelado por el usuario",
+    "fr": "Annulé par l'utilisateur",
+    "it": "Annullato dall'utente",
+    "da": "Annulleret af brugeren",
+    "pl": "Anulowane przez użytkownika",
+    "ru": "Отменено пользователем",
+    "ar": "ألغاه المستخدم",
+    "no": "Avbrutt av brukeren",
+    "pt-BR": "Cancelado pelo usuário",
+    "th": "ผู้ใช้ยกเลิก",
+    "tr": "Kullanıcı tarafından iptal edildi",
+    "uk": "Скасовано користувачем"
   },
   "ui.askSubmit": {
     "zh": "提交",

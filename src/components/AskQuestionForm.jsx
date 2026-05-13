@@ -2,6 +2,7 @@ import React from 'react';
 import { Checkbox, Input } from 'antd';
 import { t } from '../i18n';
 import { optionAriaLabel, hasOptionDescription } from '../utils/askOptionDesc';
+import AskTimeoutCountdown from './AskTimeoutCountdown';
 import styles from './ChatMessage.module.css';
 
 /**
@@ -251,7 +252,24 @@ export default class AskQuestionForm extends React.Component {
             </div>
           );
         })}
+        <AskTimeoutCountdown startedAt={this.props.startedAt} timeoutMs={this.props.timeoutMs} />
         <div className={styles.askSubmitRow}>
+          {this.props.onCancel && (
+            <button
+              type="button"
+              className={styles.askCancelBtn}
+              disabled={submitting}
+              onClick={() => {
+                // submitting=true 时按钮 disabled — 防 cancel 锁死真实 answer。
+                // answer 已发到 server 后 cancel 会让 first-wins 让 cancel no-op，但前端仍会
+                // 乐观写 cancel sentinel 覆盖 ChatMessage 灰态，与 jsonl 真实 answer 不一致。
+                if (this._submitTimeout) { clearTimeout(this._submitTimeout); this._submitTimeout = null; }
+                this.props.onCancel();
+              }}
+            >
+              {t('ui.askCancel')}
+            </button>
+          )}
           <button
             className={styles.askSubmitBtn}
             disabled={!allValid || submitting}

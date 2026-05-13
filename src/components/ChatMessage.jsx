@@ -180,6 +180,8 @@ class ChatMessage extends React.Component {
       p.onViewRequest !== n.onViewRequest || p.onOpenFile !== n.onOpenFile ||
       p.onPlanApprovalClick !== n.onPlanApprovalClick || p.onPlanFeedbackSubmit !== n.onPlanFeedbackSubmit ||
       p.onDangerousApprovalClick !== n.onDangerousApprovalClick || p.onAskQuestionSubmit !== n.onAskQuestionSubmit ||
+      p.onAskQuestionCancel !== n.onAskQuestionCancel ||
+      p.askMetaMap !== n.askMetaMap ||
       p.taskNotification?.taskId !== n.taskNotification?.taskId;
   }
 
@@ -459,9 +461,13 @@ class ChatMessage extends React.Component {
       const questions = Array.isArray(inp.questions) ? inp.questions : [];
       const { askAnswerMap, toolResultMap } = this.props;
       const selectedAnswers = askAnswerMap?.[tu.id] || {};
-      const isRejected = selectedAnswers.__rejected__ === true;
-      const hasAnswers = !isRejected && Object.keys(selectedAnswers).length > 0;
-      const isPending = !hasAnswers && !isRejected;
+      // 四态：cancelled / rejected / answered / pending
+      // cancelled 是 cancel 按钮 / 输入框打字打断触发的乐观状态（ChatView handleAskCancel 写入），
+      // 与 rejected 区分：rejected 是 server 端 schema 校验或 hook deny 等"未触达"语义。
+      const isCancelled = selectedAnswers.__cancelled__ === true;
+      const isRejected = !isCancelled && selectedAnswers.__rejected__ === true;
+      const hasAnswers = !isRejected && !isCancelled && Object.keys(selectedAnswers).length > 0;
+      const isPending = !hasAnswers && !isRejected && !isCancelled;
       const isInteractive = isPending && this.props.onAskQuestionSubmit && tu.id === this.props.lastPendingAskId;
       const validationError = toolResultMap?.[tu.id]?.isInputValidationError
         ? toolResultMap[tu.id].resultText
@@ -477,11 +483,34 @@ class ChatMessage extends React.Component {
         ) : interactive;
       }
 
+      // Cancelled 终态：渲染问题文本但不交互，并显示一行"已取消"提示
+      // (与 rejected 共用 askQuestionBox 容器，区分点是底部的 askCancelledNote)
+      if (isCancelled) {
+        const reason = typeof selectedAnswers.__cancelReason__ === 'string' && selectedAnswers.__cancelReason__
+          ? selectedAnswers.__cancelReason__
+          : t('ui.askCancelledByUser');
+        return (
+          <div key={tu.id} className={styles.askQuestionBox}>
+            {questions.map((q, qi) => (
+              <div key={qi} className={qi < questions.length - 1 ? styles.questionSpacing : undefined}>
+                {q.header && <span className={styles.askQuestionHeader}>{q.header}</span>}
+                <div className={styles.askQuestionText}>{q.question}</div>
+              </div>
+            ))}
+            <div className={styles.askCancelledNote}>{reason}</div>
+          </div>
+        );
+      }
+
       const checkSvg = (
         <svg className={styles.askCheckSvg} width="1em" height="1em" viewBox="0 0 16 16" fill="none">
           <path d="M3 8.5L6.5 12L13 4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
         </svg>
       );
+      // 队列里非 head 的 ask 是 isPending=true + isInteractive=false（lastPendingAskId 不匹配）。
+      // 给只读卡片加 Skip 按钮让用户能跳过单个排队中的 ask（等价 terminal Esc）；isPending=false
+      // 的（已答 / 已 reject）不显示按钮。
+      const showSkipButton = isPending && !isInteractive && !!this.props.onAskQuestionCancel;
       return (
         <div key={tu.id} className={styles.askQuestionBox}>
           <AskValidationBadge resultText={validationError} />
@@ -526,6 +555,17 @@ class ChatMessage extends React.Component {
               </div>
             );
           })}
+          {showSkipButton && (
+            <div className={styles.askSubmitRow}>
+              <button
+                type="button"
+                className={styles.askCancelBtn}
+                onClick={() => this.props.onAskQuestionCancel(tu.id, 'User aborted')}
+              >
+                {t('ui.askCancel')}
+              </button>
+            </div>
+          )}
         </div>
       );
     }
@@ -815,15 +855,21 @@ class ChatMessage extends React.Component {
   }
 
   renderAskQuestionInteractive(toolId, questions) {
+    const meta = this.props.askMetaMap && this.props.askMetaMap[toolId];
     const node = (
       <AskQuestionForm
         key={toolId}
         questions={questions}
+        startedAt={meta?.startedAt}
+        timeoutMs={meta?.timeoutMs}
         onSubmit={(answers) => {
           if (this.props.onAskQuestionSubmit) {
             this.props.onAskQuestionSubmit(answers, toolId, questions);
           }
         }}
+        onCancel={this.props.onAskQuestionCancel
+          ? () => this.props.onAskQuestionCancel(toolId, 'User aborted')
+          : undefined}
       />
     );
     // The form keeps a single React instance regardless of which DOM mount it lands in.
@@ -1351,14 +1397,22 @@ class ChatMessage extends React.Component {
       return tb && Array.isArray(tb.citations) && tb.citations.length > 0;
     });
 
+    // 合并 synthesis text 为单块 markdown：每段原始 text 之间用 \n\n---\n\n 分隔，
+    // 让 marked 自然渲染成 <hr>（命中 .chat-md hr 全局样式），避免之前多个 chat-boxer 视觉碎片化。
+    // 注：parseSystemTags 正则非块边界依赖，join 不破坏 system-tag 提取。
+    // trade-off：原 citations 数组与具体段落的对应关系丢失（hasCitations bool 仍保留）。
+    const mergedSynthesisText = synthesisTextIndices
+      .map(gi => content[gi]?.text)
+      .filter(t => typeof t === 'string' && t.trim() && t.trim() !== '---')
+      .map(t => t.trim())
+      .join('\n\n---\n\n');
+
     const synthesisNodes = [];
-    for (const gi of synthesisTextIndices) {
-      const tb = content[gi];
-      if (!tb || !tb.text) continue;
-      const { segments } = renderAssistantText(tb.text);
-      const isCursorTarget = gi === lastTextGlobalIdx;
+    if (mergedSynthesisText) {
+      const synthesisIsCursorTarget = synthesisTextIndices.some(gi => gi === lastTextGlobalIdx);
+      const { segments } = renderAssistantText(mergedSynthesisText);
       synthesisNodes.push(
-        <div key={`syn-${gi}`} className="chat-boxer">{this.renderSegments(segments, isCursorTarget)}</div>
+        <div key="syn-merged" className="chat-boxer">{this.renderSegments(segments, synthesisIsCursorTarget)}</div>
       );
     }
 

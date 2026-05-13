@@ -4,6 +4,7 @@ import {
   isSdkAvailable,
   initSdkSession,
   resolveApproval,
+  cancelApproval,
   stopSession,
   getSessionId,
 } from '../lib/sdk-manager.js';
@@ -45,6 +46,27 @@ describe('sdk-manager', () => {
 
     it('returns false for empty string id', () => {
       assert.equal(resolveApproval('', 'allow'), false);
+    });
+  });
+
+  describe('cancelApproval', () => {
+    // 现实场景：ask-cancel WS handler 调 cancelApproval(id, reason)。
+    // 由于 _pendingApprovals 是模块内闭包变量，不暴露 set 入口，这些测试只能验证
+    // 没有 pending 时的行为（match 失败返 false）。完整端到端 cancel sentinel →
+    // canUseTool deny 的链路验证留给 sdk-adapter.test.js 的集成测试。
+    it('returns false when no pending approval matches', () => {
+      assert.equal(cancelApproval('nonexistent-id', 'User aborted'), false);
+    });
+
+    it('returns false for empty string id', () => {
+      assert.equal(cancelApproval('', 'User aborted'), false);
+    });
+
+    it('accepts missing reason (defaults to User aborted)', () => {
+      // 不抛错就算 pass — match 失败时根本不会读 reason，但参数必须容错
+      assert.doesNotThrow(() => cancelApproval('nonexistent-id'));
+      assert.doesNotThrow(() => cancelApproval('nonexistent-id', null));
+      assert.doesNotThrow(() => cancelApproval('nonexistent-id', undefined));
     });
   });
 

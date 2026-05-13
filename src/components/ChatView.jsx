@@ -13,6 +13,7 @@ import { getModelInfo, getEffectiveModel, resolveProducerModelInfo } from '../ut
 import { getTeammateAvatar } from '../utils/teammateAvatars';
 import { isSystemText, classifyUserContent, isMainAgent, isTeammate, resolveTeammateNames } from '../utils/contentFilter';
 import { classifyRequest, formatRequestTag, formatTeammateLabel } from '../utils/requestType';
+import { playEvent as playVoiceEvent } from '../utils/voicePackPlayer';
 import { buildChunksForAnswer, buildBracketPasteSubmitChunks, BRACKET_PASTE_SUBMIT_SETTLE_MS } from '../utils/ptyChunkBuilder';
 import { isPlanApprovalPrompt, isDangerousOperationPrompt, parseToolInfoFromBuffer } from '../utils/promptClassifier';
 import { isImageFile, isMutatingCommand } from '../utils/commandValidator';
@@ -230,6 +231,8 @@ class ChatView extends React.Component {
       pendingPlanApproval: null, // { id, input } — active ExitPlanMode approval in SDK mode
       pendingAsk: null, // { id, questions } — mirrored React state for global modal. _askHookQuestions / _sdkAskId 仍是提交路径权威源（handleAskQuestionSubmit 用于路由 SDK / hook bridge / PTY 三条提交路径）。
       askQueue: [], // queued asks ({ id, questions, kind: ASK_KIND.HOOK|SDK }) when one is already active — mirrors permissionQueue. server.js pendingAskHooks Map 来源；hook bridge 现已 id 多路复用，sub-agent 并发 / 上一轮没答的 ask 不再阻塞下一轮。
+      askMetaMap: {}, // { [askId]: { startedAt, timeoutMs } } — 倒计时元数据。ask-pending 时 add，
+      // ask resolve/cancel/timeout 时 delete，确保内存随 ask 生命周期回收（不会随会话增长无界累积）。
       pendingPtyPlan: null, // { id, prompt } — active plan approval. id 与 ExitPlanMode tool_use id (lastPendingPlanId) 同源，由 componentDidUpdate 从 _currentLastPendingPlanId 派生（cliMode 守卫 + _resolvedPlanIds 短暂窗口守卫）。
       pendingImages: [], // [{ path, source }] — images uploaded/pasted, shown as previews in chat input
       agentTeamEnabled: false,
@@ -636,6 +639,15 @@ class ChatView extends React.Component {
           plan: this.state.pendingPlanApproval,
           handlers: { approve: this.handlePlanApprove, reject: this.handlePlanReject },
         });
+        // SDK ExitPlanMode lives in an inline card, not the global ApprovalModal, so
+        // ApprovalModal's sound effect never fires for this path. Hook the voice pack
+        // here directly( — SDK plan was silent before this).
+        try {
+          const vp = this.props.preferences?.approvalModal?.voicePack;
+          if (vp && vp.enabled && vp.events && vp.events.planApproval) {
+            playVoiceEvent('planApproval', vp, { dedupeKey: `planApproval:${this.state.pendingPlanApproval.id}` });
+          }
+        } catch { /* never throw from componentDidUpdate */ }
       } else {
         this.props.onPendingPlanApproval(null);
       }
@@ -645,7 +657,7 @@ class ChatView extends React.Component {
         if (this.state.pendingAsk) {
           this.props.onPendingAsk({
             ask: this.state.pendingAsk,
-            handlers: { submit: this.handleAskQuestionSubmit },
+            handlers: { submit: this.handleAskQuestionSubmit, cancel: this.handleAskCancel },
           });
         } else {
           this.props.onPendingAsk(null);
@@ -861,6 +873,13 @@ class ChatView extends React.Component {
     if (this._streamingFadeTimer) clearTimeout(this._streamingFadeTimer);
     if (this._hookWaitTimer) clearTimeout(this._hookWaitTimer);
     this._pendingHookAnswers = null;
+    // ask-cancel ack 协议清理：clearTimeout 所有 in-flight 500ms 兜底 timer，
+    // 否则 unmount 后还会 fire → _sendUserMessageImmediate(stale text)，被新 session 收到
+    if (this._pendingFlushQueue) {
+      for (const entry of this._pendingFlushQueue) clearTimeout(entry.tid);
+      this._pendingFlushQueue.length = 0;
+    }
+    if (this._pendingCancelIds) this._pendingCancelIds.clear();
     this._unbindScrollFade();
     // 流式吸底统一清理：dispose 内会卸 RO + scroll listener + document touch + cancel 全部 rAF
     if (this._stickyController) this._stickyController.dispose();
@@ -1340,14 +1359,14 @@ class ChatView extends React.Component {
           // 只在有非系统内容时才渲染
           if (filteredContent.length > 0) {
             renderedMessages.push(
-              <ChatMessage key={`${keyPrefix}-asst-${mi}`} role="assistant" content={filteredContent} toolResultMap={toolResultMap} readContentMap={readContentMap} editSnapshotMap={editSnapshotMap} askAnswerMap={mergedAskAnswerMap} planApprovalMap={planApprovalMap} latestPlanContent={latestPlanContent} planFileContents={this.state.planFileContents} timestamp={ts} displayTs={msg._generatedTs} modelInfo={modelInfo} collapseToolResults={collapseToolResults} expandThinking={expandThinking} showFullToolContent={showFullToolContent} showThinkingSummaries={showThinkingSummaries} ptyPrompt={this.state.ptyPrompt} activePlanPrompt={activePlanPrompt} activePtyPlanId={this.state.pendingPtyPlan?.id ?? null} activeDangerousPrompt={activeDangerousPrompt} lastPendingPlanId={msgLastPlanId} lastPendingAskId={msgLastAskId} onPlanApprovalClick={this.handlePromptOptionClick} onPlanFeedbackSubmit={this.handlePlanFeedbackSubmit} onDangerousApprovalClick={this.handlePromptOptionClick} onAskQuestionSubmit={this.handleAskQuestionSubmit} cliMode={this.props.cliMode} onOpenFile={this.handleOpenToolFilePath} cacheTotalTokens={cacheTotalTokens} requestIndex={hasViewRequest ? reqIdx : undefined} onViewRequest={hasViewRequest ? onViewRequest : undefined} isHistoryLog={isHistoryLog} />
+              <ChatMessage key={`${keyPrefix}-asst-${mi}`} role="assistant" content={filteredContent} toolResultMap={toolResultMap} readContentMap={readContentMap} editSnapshotMap={editSnapshotMap} askAnswerMap={mergedAskAnswerMap} planApprovalMap={planApprovalMap} latestPlanContent={latestPlanContent} planFileContents={this.state.planFileContents} timestamp={ts} displayTs={msg._generatedTs} modelInfo={modelInfo} collapseToolResults={collapseToolResults} expandThinking={expandThinking} showFullToolContent={showFullToolContent} showThinkingSummaries={showThinkingSummaries} ptyPrompt={this.state.ptyPrompt} activePlanPrompt={activePlanPrompt} activePtyPlanId={this.state.pendingPtyPlan?.id ?? null} activeDangerousPrompt={activeDangerousPrompt} lastPendingPlanId={msgLastPlanId} lastPendingAskId={msgLastAskId} onPlanApprovalClick={this.handlePromptOptionClick} onPlanFeedbackSubmit={this.handlePlanFeedbackSubmit} onDangerousApprovalClick={this.handlePromptOptionClick} onAskQuestionSubmit={this.handleAskQuestionSubmit} onAskQuestionCancel={this.handleAskCancel} askMetaMap={this.state.askMetaMap} cliMode={this.props.cliMode} onOpenFile={this.handleOpenToolFilePath} cacheTotalTokens={cacheTotalTokens} requestIndex={hasViewRequest ? reqIdx : undefined} onViewRequest={hasViewRequest ? onViewRequest : undefined} isHistoryLog={isHistoryLog} />
             );
           }
         } else if (typeof content === 'string') {
           // 过滤字符串类型的系统文本
           if (!isSystemText(content)) {
             renderedMessages.push(
-              <ChatMessage key={`${keyPrefix}-asst-${mi}`} role="assistant" content={[{ type: 'text', text: content }]} toolResultMap={toolResultMap} readContentMap={readContentMap} editSnapshotMap={editSnapshotMap} askAnswerMap={mergedAskAnswerMap} planApprovalMap={planApprovalMap} latestPlanContent={latestPlanContent} planFileContents={this.state.planFileContents} timestamp={ts} displayTs={msg._generatedTs} modelInfo={modelInfo} collapseToolResults={collapseToolResults} expandThinking={expandThinking} showFullToolContent={showFullToolContent} showThinkingSummaries={showThinkingSummaries} ptyPrompt={this.state.ptyPrompt} activePlanPrompt={activePlanPrompt} activePtyPlanId={this.state.pendingPtyPlan?.id ?? null} activeDangerousPrompt={activeDangerousPrompt} lastPendingPlanId={msgLastPlanId} lastPendingAskId={msgLastAskId} onPlanApprovalClick={this.handlePromptOptionClick} onPlanFeedbackSubmit={this.handlePlanFeedbackSubmit} onDangerousApprovalClick={this.handlePromptOptionClick} onAskQuestionSubmit={this.handleAskQuestionSubmit} cliMode={this.props.cliMode} onOpenFile={this.handleOpenToolFilePath} cacheTotalTokens={cacheTotalTokens} requestIndex={hasViewRequest ? reqIdx : undefined} onViewRequest={hasViewRequest ? onViewRequest : undefined} isHistoryLog={isHistoryLog} />
+              <ChatMessage key={`${keyPrefix}-asst-${mi}`} role="assistant" content={[{ type: 'text', text: content }]} toolResultMap={toolResultMap} readContentMap={readContentMap} editSnapshotMap={editSnapshotMap} askAnswerMap={mergedAskAnswerMap} planApprovalMap={planApprovalMap} latestPlanContent={latestPlanContent} planFileContents={this.state.planFileContents} timestamp={ts} displayTs={msg._generatedTs} modelInfo={modelInfo} collapseToolResults={collapseToolResults} expandThinking={expandThinking} showFullToolContent={showFullToolContent} showThinkingSummaries={showThinkingSummaries} ptyPrompt={this.state.ptyPrompt} activePlanPrompt={activePlanPrompt} activePtyPlanId={this.state.pendingPtyPlan?.id ?? null} activeDangerousPrompt={activeDangerousPrompt} lastPendingPlanId={msgLastPlanId} lastPendingAskId={msgLastAskId} onPlanApprovalClick={this.handlePromptOptionClick} onPlanFeedbackSubmit={this.handlePlanFeedbackSubmit} onDangerousApprovalClick={this.handlePromptOptionClick} onAskQuestionSubmit={this.handleAskQuestionSubmit} onAskQuestionCancel={this.handleAskCancel} askMetaMap={this.state.askMetaMap} cliMode={this.props.cliMode} onOpenFile={this.handleOpenToolFilePath} cacheTotalTokens={cacheTotalTokens} requestIndex={hasViewRequest ? reqIdx : undefined} onViewRequest={hasViewRequest ? onViewRequest : undefined} isHistoryLog={isHistoryLog} />
             );
           }
         }
@@ -1917,7 +1936,7 @@ class ChatView extends React.Component {
                 <Divider className={styles.lastResponseDivider}>
                   <Text type="secondary" className={styles.lastResponseLabel}>{t('ui.lastResponse')}</Text>
                 </Divider>
-                <ChatMessage key="resp-asst" role="assistant" content={lrContent} timestamp={session.entryTimestamp} modelInfo={globalModelInfo} collapseToolResults={collapseToolResults} expandThinking={expandThinking} showFullToolContent={showFullToolContent} toolResultMap={EMPTY_MAP} askAnswerMap={Object.keys(_localAsk).length > 0 ? _localAsk : EMPTY_MAP} planApprovalMap={planApprovalMap} latestPlanContent={latestPlanContent} planFileContents={this.state.planFileContents} lastPendingAskId={respLastPendingAskId} lastPendingPlanId={respLastPendingPlanId} activePlanPrompt={activePlanPrompt} activePtyPlanId={this.state.pendingPtyPlan?.id ?? null} activeDangerousPrompt={activeDangerousPrompt} ptyPrompt={this.state.ptyPrompt} cacheTotalTokens={entryCacheTotal} onPlanApprovalClick={this.handlePromptOptionClick} onPlanFeedbackSubmit={this.handlePlanFeedbackSubmit} onDangerousApprovalClick={this.handlePromptOptionClick} cliMode={this.props.cliMode} onAskQuestionSubmit={this.handleAskQuestionSubmit} onOpenFile={this.handleOpenToolFilePath} isHistoryLog={isHistoryLog} />
+                <ChatMessage key="resp-asst" role="assistant" content={lrContent} timestamp={session.entryTimestamp} modelInfo={globalModelInfo} collapseToolResults={collapseToolResults} expandThinking={expandThinking} showFullToolContent={showFullToolContent} toolResultMap={EMPTY_MAP} askAnswerMap={Object.keys(_localAsk).length > 0 ? _localAsk : EMPTY_MAP} planApprovalMap={planApprovalMap} latestPlanContent={latestPlanContent} planFileContents={this.state.planFileContents} lastPendingAskId={respLastPendingAskId} lastPendingPlanId={respLastPendingPlanId} activePlanPrompt={activePlanPrompt} activePtyPlanId={this.state.pendingPtyPlan?.id ?? null} activeDangerousPrompt={activeDangerousPrompt} ptyPrompt={this.state.ptyPrompt} cacheTotalTokens={entryCacheTotal} onPlanApprovalClick={this.handlePromptOptionClick} onPlanFeedbackSubmit={this.handlePlanFeedbackSubmit} onDangerousApprovalClick={this.handlePromptOptionClick} cliMode={this.props.cliMode} onAskQuestionSubmit={this.handleAskQuestionSubmit} onAskQuestionCancel={this.handleAskCancel} askMetaMap={this.state.askMetaMap} onOpenFile={this.handleOpenToolFilePath} isHistoryLog={isHistoryLog} />
               </React.Fragment>
             );
           }
@@ -2220,6 +2239,10 @@ class ChatView extends React.Component {
   // are intentional — submit paths read these fields, so they must follow the head.
   // Mirrors the permissionQueue dequeue pattern but additionally re-derives routing kind.
   _promoteNextAskFromQueue = () => {
+    // 清当前 head 的 askMetaMap 条目（内存回收）— ask 结束后 startedAt/timeoutMs 不再需要
+    const prevHeadId = this.state.pendingAsk?.id;
+    if (prevHeadId) this._clearAskMeta(prevHeadId);
+
     const queue = this.state.askQueue;
     const next = queue && queue.length > 0 ? queue[0] : null;
     if (next) {
@@ -2243,6 +2266,21 @@ class ChatView extends React.Component {
     }
   };
 
+  /**
+   * 清 askMetaMap 中指定 askId 的 entry — 内存回收钩子。
+   * 所有 ask 结束路径（promote / queue.filter / unmount）都需调用以防 startedAt/timeoutMs
+   * 随会话长度无界累积。entry 不存在时返 null（setState 不触发 re-render）。
+   */
+  _clearAskMeta = (askId) => {
+    if (!askId) return;
+    this.setState(prev => {
+      if (!prev.askMetaMap || !prev.askMetaMap[askId]) return null;
+      const next = { ...prev.askMetaMap };
+      delete next[askId];
+      return { askMetaMap: next };
+    });
+  };
+
   _onTerminalWsMessage = (msg) => {
     try {
       if (msg.type === 'data') {
@@ -2255,6 +2293,12 @@ class ChatView extends React.Component {
           // Legacy server (no id) → fall back to LEGACY_ASK_PLACEHOLDER_ID placeholder for single-slot semantics.
           if (Array.isArray(msg.questions) && msg.questions.length > 0) {
             const askId = msg.id != null ? String(msg.id) : LEGACY_ASK_PLACEHOLDER_ID;
+            // 记录倒计时 meta（server 60min 起算）— ask 结束时由 timeout/resolved/cancelled 分支 delete
+            if (typeof msg.startedAt === 'number' && typeof msg.timeoutMs === 'number') {
+              this.setState(prev => ({
+                askMetaMap: { ...prev.askMetaMap, [askId]: { startedAt: msg.startedAt, timeoutMs: msg.timeoutMs } },
+              }));
+            }
             // Telemetry：legacy server + 多并发 ask 的 mid-deploy 混合场景下，
             // 第二条 ask 会因 placeholder id 撞库被静默 dedupe 丢弃。warn 让用户至少在
             // Console 里能看到 "为什么有的 ask 没弹出来"，否则零 telemetry 黑盒。
@@ -2289,6 +2333,7 @@ class ChatView extends React.Component {
           if (this.state.pendingAsk?.id === askId) {
             this._promoteNextAskFromQueue();
           } else if (this.state.askQueue.some(a => a.id === askId)) {
+            this._clearAskMeta(askId);
             this.setState(state => ({ askQueue: state.askQueue.filter(a => a.id !== askId) }));
           }
         } else if (msg.type === 'sdk-plan-pending') {
@@ -2305,6 +2350,12 @@ class ChatView extends React.Component {
           }
           if (Array.isArray(msg.questions) && msg.questions.length > 0) {
             const askId = String(msg.id);
+            // 记录倒计时 meta — 同 ask-hook-pending 路径
+            if (typeof msg.startedAt === 'number' && typeof msg.timeoutMs === 'number') {
+              this.setState(prev => ({
+                askMetaMap: { ...prev.askMetaMap, [askId]: { startedAt: msg.startedAt, timeoutMs: msg.timeoutMs } },
+              }));
+            }
             this.setState(state => {
               if (state.pendingAsk) {
                 if (state.pendingAsk.id === askId) return null;
@@ -2326,6 +2377,7 @@ class ChatView extends React.Component {
           if (this.state.pendingAsk?.id === askId) {
             this._promoteNextAskFromQueue();
           } else if (this.state.askQueue.some(a => a.id === askId)) {
+            this._clearAskMeta(askId);
             this.setState(state => ({ askQueue: state.askQueue.filter(a => a.id !== askId) }));
           }
         } else if (msg.type === 'perm-hook-pending') {
@@ -2367,6 +2419,7 @@ class ChatView extends React.Component {
           } else if (this.state.pendingAsk?.id === askId) {
             this._promoteNextAskFromQueue();
           } else if (this.state.askQueue.some(a => a.id === askId)) {
+            this._clearAskMeta(askId);
             this.setState(state => ({ askQueue: state.askQueue.filter(a => a.id !== askId) }));
           }
         } else if (msg.type === 'sdk-ask-resolved') {
@@ -2375,8 +2428,34 @@ class ChatView extends React.Component {
           if (askId != null && this.state.pendingAsk?.id === askId) {
             this._promoteNextAskFromQueue();
           } else if (askId != null && this.state.askQueue.some(a => a.id === askId)) {
+            this._clearAskMeta(askId);
             this.setState(state => ({ askQueue: state.askQueue.filter(a => a.id !== askId) }));
           }
+        } else if (msg.type === 'ask-hook-cancelled') {
+          // server ack 到 — handleAskCancel 发的 ask-cancel 已经被处理（不论是 SDK / Hook / 兜底广播）。
+          // 1) 如果是本端发起 + 在等 ack flush user message → 立即 flush
+          // 2) 兜底清 modal/queue（其他 client 取消的场景：本端 pending 还在但已经被远端 cancel）
+          // 3) 写 localAskAnswers 让 ChatMessage isCancelled 灰态显示（如果还没乐观写过）
+          const askId = msg.id != null ? String(msg.id) : null;
+          if (!askId) return;
+          // 优先 flush 等待中的 user message —— ack 协议核心。
+          // findIndex 默认返回数组**第一个**匹配 = FIFO 取最早入队 entry：连续两次 typed-interrupt
+          // < 500ms 同 askId 时入队 entry1, entry2；server 端 first-wins 后第一次 cancel handled=true
+          // 全广播，第二次 handled=false 仅 ack 发起方 — 同一 ws 仍收两次 ack，FIFO 配对正确。
+          // 找到 entry 表明 ack 来自本端发起的 cancel — handleAskCancel 已 promote head；
+          // 找不到表明远端 cancel（其他 client 触发）— 本端 head 还在 askId，需要 promote。
+          let isLocalAck = false;
+          if (this._pendingFlushQueue && this._pendingFlushQueue.length > 0) {
+            const idx = this._pendingFlushQueue.findIndex(e => e.askId === askId);
+            if (idx >= 0) {
+              const entry = this._pendingFlushQueue.splice(idx, 1)[0];
+              clearTimeout(entry.tid);
+              this._sendUserMessageImmediate(entry.text, null, true);
+              isLocalAck = true;
+            }
+          }
+          // 应用 cancel local state — promoteHead 仅远端场景需要（本端 handleAskCancel 已 promote）
+          this._applyCancelLocal(askId, msg.reason, { promoteHead: !isLocalAck });
         } else if (msg.type === 'sdk-plan-resolved') {
           if (this.state.pendingPlanApproval?.id === msg.id) {
             this.setState({ pendingPlanApproval: null });
@@ -2398,7 +2477,22 @@ class ChatView extends React.Component {
   };
 
   // ws 状态变更监听:close 时清残留审批面板(原 _inputWs.onclose 行为);Provider 内部已自动 2s 重连。
+  // 'open' 时重发 _pendingCancelIds — handleAskCancel 在 WS 不可用时把 cancel 缓存进来，
+  // 重连后必须重发，否则 server 端 5min 后才超时释放，期间用户的新 prompt 会被模型当 follow-up answer。
   _onTerminalWsState = (state) => {
+    if (state === 'open') {
+      // _unmounted guard：极小窗口下 reopen 在 unmount 后到达，此时 _pendingCancelIds 已被
+      // componentWillUnmount clear（line 871），但若 React 调度让 unmount 后还跑一次 callback，
+      // 这里防御一次。
+      if (this._unmounted) return;
+      if (this._pendingCancelIds && this._pendingCancelIds.size > 0 && this._inputWs && this._inputWs.readyState === WebSocket.OPEN) {
+        for (const [askId, reason] of this._pendingCancelIds) {
+          try { this._inputWs.send(JSON.stringify({ type: 'ask-cancel', id: askId, reason })); } catch {}
+        }
+        this._pendingCancelIds.clear();
+      }
+      return;
+    }
     if (state !== 'close') return;
     if (this.state.pendingPtyPlan?.id) {
       this._resolvedPlanIds.add(this.state.pendingPtyPlan.id);
@@ -2419,7 +2513,7 @@ class ChatView extends React.Component {
     } catch {}
     if (this.state.pendingPermission || this.state.pendingPlanApproval || this.state.pendingAsk
         || this.state.pendingPtyPlan || this.state.askQueue?.length) {
-      this.setState({ pendingPermission: null, permissionQueue: [], pendingPlanApproval: null, pendingAsk: null, askQueue: [], pendingPtyPlan: null });
+      this.setState({ pendingPermission: null, permissionQueue: [], pendingPlanApproval: null, pendingAsk: null, askQueue: [], askMetaMap: {}, pendingPtyPlan: null });
     }
     this._sdkAskId = null;
     this._askHookActive = false;
@@ -2810,9 +2904,122 @@ class ChatView extends React.Component {
   }
 
   /**
-   * AskUserQuestion 交互提交
-   * answers: [{ questionIndex, type: 'single'|'multi'|'other', optionIndex, selectedIndices, text }]
+   * 共享 cancel local-state 应用逻辑 — 用于 handleAskCancel（本端触发）和
+   * _onTerminalWsMessage 'ask-hook-cancelled'（远端触发或 ack 兜底）两处调用。
+   *
+   * 两步 setState 原子化（React 18 batched 合并到一个 commit）：
+   *   step 1: 写 __cancelled__ sentinel 到 localAskAnswers — 纯函数 updater
+   *           - hasRealAnswer guard：已有真实 answer 时不覆盖（防 A 端 cancel 把 B 端真实 answer 涂灰态）
+   *           - 幂等：已经 __cancelled__ 也跳过（远端 ack 兜底场景）
+   *   step 2: head 推进（仅当 promoteHead=true）或非 head 过滤 queue
+   *
+   * promoteHead 区分场景：
+   *   - 本端 handleAskCancel：promoteHead=true（cancel 触发时主动推进）
+   *   - 远端 ack：promoteHead=true 仅当本端没在等 ack（!isLocalAck）— 本端已 promote 过避免跳一个
    */
+  _applyCancelLocal = (askId, reason, { promoteHead = true } = {}) => {
+    if (!askId) return;
+    const cancelReason = typeof reason === 'string' && reason ? reason : 'User aborted';
+
+    this.setState(prev => {
+      const existingLocal = prev.localAskAnswers && prev.localAskAnswers[askId];
+      const hasRealAnswer = existingLocal
+        && !existingLocal.__cancelled__
+        && !existingLocal.__rejected__
+        && Object.keys(existingLocal).length > 0;
+      if (hasRealAnswer) return null;
+      if (existingLocal && existingLocal.__cancelled__ === true) return null;
+      return {
+        localAskAnswers: { ...(prev.localAskAnswers || {}), [askId]: { __cancelled__: true, __cancelReason__: cancelReason } },
+      };
+    });
+
+    if (this.state.pendingAsk?.id === askId) {
+      // 内存回收：head 分支无条件清 askMetaMap entry — promoteHead=false（远端 ack 走
+      // isLocalAck=true 分支）时 _promoteNextAskFromQueue 不会被调，head meta 会残留。
+      // 幂等：_clearAskMeta entry 不存在时返 null 不触发 re-render；
+      // promoteHead=true 时 _promoteNextAskFromQueue 内也调 _clearAskMeta(prevHeadId) 是 no-op。
+      this._clearAskMeta(askId);
+      if (promoteHead) this._promoteNextAskFromQueue();
+    } else if (this.state.askQueue.some(a => a.id === askId)) {
+      this._clearAskMeta(askId);
+      this.setState(state => ({ askQueue: state.askQueue.filter(a => a.id !== askId) }));
+    }
+  };
+
+  /**
+   * Cancel a pending AskUserQuestion — triggered by Cancel button or by handleInputSend
+   * detecting a typed-interrupt while an ask is pending.
+   *
+   * 行为近似 terminal Claude Code 的 onAbort + cancelAndAbort（**不完全等价**：
+   *  SDK 模式下 cancel 只走 cancelApproval → canUseTool 返 deny，不 abort 当前 SDK turn；
+   *  terminal onAbort 会 abort 整个 turn 后 enqueue 新输入。差异点：cc-viewer typed-interrupt
+   *  后续 sdk-user-message 会被 SDK 当下一轮 turn 起点，不进当前 turn）：
+   *   - 乐观写 localAskAnswers + 推 head 走 _applyCancelLocal（本端 promoteHead=true）
+   *   - 通知 Electron main 清 dock badge / pendingByTab[tabId].ask
+   *   - 发 WS ask-cancel 让 server 路由到 SDK cancelApproval / Hook bridge cancel
+   *   - WS 不可用时缓存到 _pendingCancelIds，_onTerminalWsState 'open' 时重发
+   */
+  handleAskCancel = (askId, reason) => {
+    if (!askId) return;
+    const cancelReason = typeof reason === 'string' && reason ? reason : 'User aborted';
+
+    this._applyCancelLocal(askId, cancelReason);
+
+    // 通知 Electron main 清 dock badge / pendingByTab[tabId].ask
+    try {
+      if (typeof window !== 'undefined' && window.tabBridge?.notifyAskResolved) {
+        const tabId = this.props.ownTabId ?? null;
+        try { window.tabBridge.notifyAskResolved({ id: askId, tabId, reason: 'cancel' }); } catch {}
+      }
+    } catch {}
+
+    // 发 WS ask-cancel；WS 不可用 → 缓存到 _pendingCancelIds 让 reopen 时重发
+    const ws = this._inputWs;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      try { ws.send(JSON.stringify({ type: 'ask-cancel', id: askId, reason: cancelReason })); } catch {}
+    } else {
+      if (!this._pendingCancelIds) this._pendingCancelIds = new Map();
+      this._pendingCancelIds.set(askId, cancelReason);
+    }
+    return askId;
+  };
+
+  /**
+   * Send queued user message after ack received (or 500ms timeout best effort).
+   * Extracted from handleInputSend so handleInputSend can short-circuit with ack-wait
+   * when there's a pending ask to cancel first.
+   *
+   * skipUiState=true 用于 typed-interrupt 路径 — handleInputSend 已经先 setState pendingInput
+   * 给用户即时反馈，flush 时不再重复 setState 浪费一次 commit + scrollToBottom 双触发。
+   */
+  _sendUserMessageImmediate = (text, textareaToReset, skipUiState) => {
+    if (!text) return;
+    const ws = this._inputWs;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    // /clear 自身不解锁血条 lock（lock 是清空确认后由 AppBase.handleClearContextOptimistic 设置）；
+    // 其他正常用户消息（包括 slash 命令）都视为「新请求」并解锁血条。
+    if (!/^\s*\/clear(\s|$)/.test(text)) this.props.onUserMessageSent?.();
+    if (this.props.sdkMode) {
+      ws.send(JSON.stringify({ type: 'sdk-user-message', text }));
+    } else {
+      ws.send(JSON.stringify({ type: 'input', data: text }));
+      setTimeout(() => {
+        if (this._inputWs && this._inputWs.readyState === WebSocket.OPEN) {
+          this._inputWs.send(JSON.stringify({ type: 'input', data: '\r' }));
+        }
+      }, 50);
+    }
+    if (textareaToReset) {
+      textareaToReset.value = '';
+      textareaToReset.style.height = 'auto';
+    }
+    if (!skipUiState) {
+      this._clearPendingImages();
+      this.setState({ inputEmpty: true, pendingInput: text, inputSuggestion: null }, () => this.scrollToBottom());
+    }
+  };
+
   handleAskQuestionSubmit = (answers, askId, questions) => {
     // 关键：在 _promoteNextAskFromQueue 之前把当前 head 的所有提交上下文整体快照下来。
     // promote 会立刻把 _askHookQuestions / _askHookActive / _sdkAskId 切到下一个 ask，
@@ -2901,8 +3108,21 @@ class ChatView extends React.Component {
       return;
     }
 
+    // _askHookActive=false 但 pendingAsk 仍存在 + ws OPEN → 直接尝试 hook bridge。
+    // 复现：用户在 ApprovalModal 按 ESC 后某副作用清了 _askHookActive 但 pendingAsk 仍在；
+    // inline 卡片提交无谓走 _waitForHookBridge 3s 后 fallback PTY 报 pty-prompt-invalid。
+    // 让 server handled=true/false 兜底语义决定路径：entry 在 → 正常 resolve；
+    // entry 不在 → server 给发起方 ack ask-hook-cancelled（server.js ask-hook-answer 内
+    // !askAnswered 分支已实现），前端走 _pendingFlushQueue 兜底关 modal。
+    if (!submitCtx.wasHookActive && !this._askSubmitting
+        && submitCtx.headAskId
+        && this._inputWs && this._inputWs.readyState === WebSocket.OPEN) {
+      this._submitViaHookBridge(answers, submitCtx.headAskId, submitCtx.hookQuestions);
+      return;
+    }
+
     // Hook bridge 可能尚未就绪（streaming response 先于 hook 触发的时序竞争）：
-    // WebSocket 已连接但 ask-hook-pending 消息还没到 → 短暂等待再决定路径
+    // WebSocket 已连接但 ask-hook-pending 消息还没到 + headAskId 也没有 → 短暂等待
     if (!submitCtx.wasHookActive && !this._askSubmitting
         && this._inputWs && this._inputWs.readyState === WebSocket.OPEN) {
       this._pendingHookAnswers = answers;
@@ -3297,24 +3517,38 @@ class ChatView extends React.Component {
     const imagePaths = this.state.pendingImages.map(img => `"${img.path.replace(/"/g, '')}"`).join(' ');
     const text = imagePaths ? (userText ? `${imagePaths} ${userText}` : imagePaths) : userText;
     if (!text) return;
-    if (this._inputWs && this._inputWs.readyState === WebSocket.OPEN) {
-      if (this.props.sdkMode) {
-        // SDK 模式：发送结构化用户消息
-        this._inputWs.send(JSON.stringify({ type: 'sdk-user-message', text }));
-      } else {
-        // PTY 模式：Claude Code TUI 逐字符处理输入，需要先发文字再单独发回车
-        this._inputWs.send(JSON.stringify({ type: 'input', data: text }));
-        setTimeout(() => {
-          if (this._inputWs && this._inputWs.readyState === WebSocket.OPEN) {
-            this._inputWs.send(JSON.stringify({ type: 'input', data: '\r' }));
-          }
-        }, 50);
-      }
+
+    // 打字打断（typed-interrupt）：检测到当前有 pending AskUserQuestion 时，先发 ask-cancel
+    // + 等 server ack（ask-hook-cancelled，SDK + Hook 双路统一）后再发 user message。
+    // 等价 terminal Claude Code 的 screens/REPL.tsx:2137-2141 + handlePromptSubmit 的 abort+enqueue。
+    // ack 协议防 race：cancel 必须在 user message 之前到 server，否则模型可能把 user message
+    // 当 follow-up answer 处理。500ms 超时兜底（best effort，不卡死用户）。
+    if (this.state.pendingAsk?.id && this._inputWs && this._inputWs.readyState === WebSocket.OPEN) {
+      const askId = this.state.pendingAsk.id;
+      // 先把 textarea 清空 + 收 pending images（与正常路径一致的视觉反馈）
       textarea.value = '';
       textarea.style.height = 'auto';
       this._clearPendingImages();
       this.setState({ inputEmpty: true, pendingInput: userText || imagePaths, inputSuggestion: null }, () => this.scrollToBottom());
+      this.handleAskCancel(askId, 'Interrupted by user');
+      // 数组队列代替 Map[askId] 索引：连续两次 typed-interrupt < 500ms 时（handleAskCancel 内
+      // setState 还没 commit，第二次 handleInputSend 仍读到旧 askId），避免 Map.set(askId, ...)
+      // 把第一条 prompt 静默覆盖。每个 entry 自带 tid 用于精确 clear / 配对 ack。
+      if (!this._pendingFlushQueue) this._pendingFlushQueue = [];
+      const tid = setTimeout(() => {
+        if (this._unmounted) return;
+        // 500ms 兜底：按 tid 找到自己 entry，flush 后移除（不用 askId 因可能已重复）
+        const idx = this._pendingFlushQueue.findIndex(e => e.tid === tid);
+        if (idx >= 0) {
+          const entry = this._pendingFlushQueue.splice(idx, 1)[0];
+          this._sendUserMessageImmediate(entry.text, null, true);
+        }
+      }, 500);
+      this._pendingFlushQueue.push({ askId, text, tid });
+      return;
     }
+
+    this._sendUserMessageImmediate(text, textarea);
   };
 
   handleInputKeyDown = (e) => {

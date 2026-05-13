@@ -108,6 +108,11 @@
   color: var(--text-tertiary, #888);
 }
 
+.dismissHintExtra {
+  color: var(--text-secondary, #b8b8b8);
+  margin-left: -8px;
+}
+
 .dismissBtn {
   background: transparent;
   border: 1px solid var(--border-color, rgba(255, 255, 255, 0.12));

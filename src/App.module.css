@@ -912,7 +912,8 @@
 .mobileSettingsGroup + .mobileSettingsGroup {
   margin-top: 24px;
   padding-top: 16px;
-  border-top: 1px solid var(--border-secondary);
+  /* No border-top — bold section title + 40px gap already separates groups.
+     The horizontal line read as a distracting "title underline" rather than a divider. */
 }
 
 .mobileSettingsGroup .mobileSettingsRow:last-child {
@@ -933,7 +934,8 @@
   justify-content: space-between;
   gap: 12px;
   padding: 12px 0;
-  border-bottom: 1px solid var(--border-primary);
+  /* No row-divider line — 24px vertical padding gives enough breathing room
+     between rows; horizontal lines added noise without helping scan. */
 }
 
 .mobileSettingsLabel {

@@ -15,7 +15,7 @@
 
 ### 前提
 
-* 确保已经安装好nodejs 22.0.0+；[下载安装](https://nodejs.org)
+* 确保已经安装好nodejs 20.0.0+；[下载安装](https://nodejs.org)
 * 确保已经安装好claude code；[安装教程](https://github.com/anthropics/claude-code)
 
 ### 安装ccv
@@ -88,6 +88,8 @@ ccv --uninstall
 让Claude Code自己检查错误是比咨询任何人以及看任何文档更有效的手段！
 
 以上指令完成后，会更新findcc.js。如果你的项目工程经常需要本地部署。或者fork出去的代码要经常解决安装问题，保留这个文件就可以。下次直接copy 文件。现阶段很多项目和公司用claude code都不是mac部署，而是服务端托管部署，所以作者剥离了findcc.js 这个文件，方便后续跟踪cc-viewer的源代码更新。
+
+注意：本应用跟 claude-code-switch、cluade-code-router是冲突的，存在proxy竞争的问题，所以使用的时候务必关闭claude-code-switch、cluade-code-router，在cc-viewer内部有提供代理热更新的更能可以平替。
 
 ### 其他辅助指令
 

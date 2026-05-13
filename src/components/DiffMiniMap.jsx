@@ -56,6 +56,15 @@ export default function DiffMiniMap({ diffLines, scrollRef }) {
     el.scrollTop = ratio * (el.scrollHeight - el.clientHeight);
   }, [scrollRef]);
 
+  // 滚轮穿透到底层 scrollRef：minimap 本身不可滚，
+  // 其父 codeColWrap 又是 overflow:hidden 会把上冒的 wheel 吞掉，
+  // 在此手动把 deltaY 转发给 scrollRef.current 保持滚动手感
+  const handleWheel = useCallback((e) => {
+    const el = scrollRef?.current;
+    if (!el) return;
+    el.scrollTop += e.deltaY;
+  }, [scrollRef]);
+
   if (!visible || !diffLines.length) return null;
 
   const totalLines = diffLines.length;
@@ -71,7 +80,7 @@ export default function DiffMiniMap({ diffLines, scrollRef }) {
   }
 
   return (
-    <div className={styles.miniMap} ref={mapRef} onClick={handleClick}>
+    <div className={styles.miniMap} ref={mapRef} onClick={handleClick} onWheel={handleWheel}>
       {markers.map((m, idx) => {
         const topPct = (m.start / totalLines) * 100;
         const heightPct = ((m.end - m.start + 1) / totalLines) * 100;

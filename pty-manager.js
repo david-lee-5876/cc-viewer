@@ -125,7 +125,7 @@ export function _markThinkingDisplayRejected(claudePath) {
   _thinkingDisplayRejectedPaths.add(claudePath);
 }
 
-export async function spawnClaude(proxyPort, cwd, extraArgs = [], claudePath = null, isNpmVersion = false, serverPort = null, serverProtocol = 'http') {
+export async function spawnClaude(proxyPort, cwd, extraArgs = [], claudePath = null, isNpmVersion = false, serverPort = null, serverProtocol = 'http', internalToken = null) {
   if (ptyProcess) {
     killPty();
   }
@@ -172,6 +172,12 @@ export async function spawnClaude(proxyPort, cwd, extraArgs = [], claudePath = n
     env.CCV_EDITOR_PORT = String(serverPort);
     env.CCVIEWER_PORT = String(serverPort); // For ask-hook bridge
     env.CCVIEWER_PROTOCOL = serverProtocol; // For ask/perm-bridge (http vs https)
+    if (internalToken) {
+      // Anti-CSRF token for bridge → server calls (round-3 P1). Same shared
+      // secret across ask / perm / turn-end bridges so server can route-check
+      // header `X-CCViewer-Internal`. Loopback-only by design.
+      env.CCVIEWER_INTERNAL_TOKEN = internalToken;
+    }
   }
 
   // 禁用 Claude Code CLI 的鼠标事件捕获，保住 xterm 面板原生文本选中（复制粘贴）。
@@ -355,6 +361,7 @@ export async function spawnShell() {
   delete shellEnv.CCVIEWER_PORT;
   delete shellEnv.CCV_EDITOR_PORT;
   delete shellEnv.CCVIEWER_PROTOCOL;
+  delete shellEnv.CCVIEWER_INTERNAL_TOKEN;
   // 交互 shell 里手动敲 claude 时也禁鼠标，理由同 spawnClaude。
   shellEnv.CLAUDE_CODE_DISABLE_MOUSE ??= '1';
   const shellSpawn = prepareEmbeddedShellSpawn(shell, shellEnv);

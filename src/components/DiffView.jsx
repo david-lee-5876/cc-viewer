@@ -7,7 +7,9 @@ import styles from './DiffView.module.css';
 const { Text } = Typography;
 
 function computeDiffLines(oldStr, newStr, startLine) {
-  const changes = Diff.diffLines(oldStr, newStr);
+  const normalizedOld = (oldStr || '').replace(/\r\n/g, '\n');
+  const normalizedNew = (newStr || '').replace(/\r\n/g, '\n');
+  const changes = Diff.diffLines(normalizedOld, normalizedNew);
   const lines = [];
   let oldLineNum = startLine;
   let newLineNum = startLine;

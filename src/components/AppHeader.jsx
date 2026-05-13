@@ -20,6 +20,7 @@ import SkillsManagerModal from './SkillsManagerModal';
 import PluginModal from './PluginModal';
 import ProcessModal from './ProcessModal';
 import ProxyModal from './ProxyModal';
+import VoicePackSettings from './VoicePackSettings';
 import appConfig from '../config.json';
 import { OPTIMISTIC_CLEAR_PERCENT } from '../AppBase';
 const CALIBRATION_MODELS = appConfig.calibrationModels;
@@ -222,6 +223,7 @@ class AppHeader extends React.Component {
       nextProps.terminalVisible !== this.props.terminalVisible ||
       nextProps.contextWindow !== this.props.contextWindow ||
       nextProps.contextBarOptimistic !== this.props.contextBarOptimistic ||
+      nextProps.contextBarLocked !== this.props.contextBarLocked ||
       nextProps.contextBarSlot !== this.props.contextBarSlot ||
       nextProps.serverCachedContent !== this.props.serverCachedContent ||
       nextProps.resumeAutoChoice !== this.props.resumeAutoChoice ||
@@ -992,7 +994,7 @@ class AppHeader extends React.Component {
     const slot = this.props.contextBarSlot;
     if (!slot) return null;
 
-    const { requests = [], isLocalLog, localLogFile, projectName, contextWindow, contextBarOptimistic, serverCachedContent } = this.props;
+    const { requests = [], isLocalLog, localLogFile, projectName, contextWindow, contextBarOptimistic, contextBarLocked, serverCachedContent } = this.props;
 
     // 计算上下文使用率：距离 auto-compact 触发点的进度
     // auto-compact 在 ~83.5% 时触发（扣除 16.5% buffer）
@@ -1028,14 +1030,22 @@ class AppHeader extends React.Component {
         contextPercent = Math.min(100, Math.max(0, Math.round(lastTotalTokens / usable * 100)));
       }
     }
-    if (contextPercent > 0) this._lastContextPercent = contextPercent;
-    if (contextPercent === 0 && this._lastContextPercent > 0) {
-      contextPercent = this._lastContextPercent;
+    // contextBarLocked：/clear 触发后强制血条 0K (0%)，忽略 SSE 与 requests[] 残留的 pre-clear 数据，
+    // 直到用户发出一条非 /clear 消息（AppBase.handleUserMessageSent 解锁）。
+    // 锁定期间同步把 _lastContextPercent 记忆清零，避免解锁瞬间通过 memo 弹回旧值。
+    if (contextBarLocked) {
+      this._lastContextPercent = 0;
+      contextPercent = 0;
+    } else {
+      if (contextPercent > 0) this._lastContextPercent = contextPercent;
+      if (contextPercent === 0 && this._lastContextPercent > 0) {
+        contextPercent = this._lastContextPercent;
+      }
+      // /clear 后立即把血条压到乐观水位；下一次 SSE context_window 推送会取消这个覆盖
+      if (contextBarOptimistic) contextPercent = OPTIMISTIC_CLEAR_PERCENT;
     }
-    // /clear 后立即把血条压到乐观水位；下一次 SSE context_window 推送会取消这个覆盖
-    if (contextBarOptimistic) contextPercent = OPTIMISTIC_CLEAR_PERCENT;
     const ctxColor = contextPercent >= 80 ? 'var(--color-error-light)' : contextPercent >= 60 ? 'var(--color-warning-light)' : 'var(--color-success)';
-    const contextTokens = lastTotalTokens;
+    const contextTokens = contextBarLocked ? 0 : lastTotalTokens;
 
     return createPortal(
       <LiveTagPopover
@@ -1352,7 +1362,7 @@ class AppHeader extends React.Component {
         <Drawer
           title={t('ui.settings')}
           placement="left"
-          width={360}
+          width={420}
           open={this.state.settingsDrawerVisible}
           onClose={() => this.setState({ settingsDrawerVisible: false })}
         >
@@ -1403,6 +1413,12 @@ class AppHeader extends React.Component {
                       onChange={(checked) => this.props.onApprovalPrefsChange({ notifyOnlyWhenHidden: checked })}
                     />
                   </div>
+                )}
+                {this.props.onVoicePackChange && (
+                  <VoicePackSettings
+                    prefs={this.props.approvalPrefs.voicePack}
+                    onChange={this.props.onVoicePackChange}
+                  />
                 )}
               </>
             )}

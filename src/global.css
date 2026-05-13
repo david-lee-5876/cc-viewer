@@ -382,6 +382,10 @@ html, body {
 .chat-md a { color: var(--color-primary-lighter); }
 .chat-md img { cursor: pointer; max-width: 100%; height: auto; border-radius: 6px; }
 .chat-md hr { border: none; border-top: 1px solid var(--border-primary); margin: 12px 0; }
+/* chat-boxer 内的 hr 用 --border-light 避开两端渐变色（--border-primary 与 --border-secondary 都
+   分别匹配 chat-boxer 渐变的一端，dark mode 下不可见）；margin 收紧适配 chat-boxer 极薄 padding。 */
+.chat-md .chat-boxer hr,
+.chat-boxer .chat-md hr { border-top-color: var(--border-light); margin: 8px 0; }
 .chat-md strong { color: var(--text-primary); }
 .chat-md em { color: var(--text-primary); }
 

@@ -116,6 +116,19 @@ describe('getGitDiffs', () => {
     assert.equal(result[0].is_large, true);
     assert.ok(result[0].size > 5 * 1024 * 1024);
   });
+
+  it('normalizes CRLF to LF so diff does not treat line endings as changes', async () => {
+    writeFileSync(join(cwd, 'crlf.txt'), 'line1\nline2\nline3');
+    execSync('git add crlf.txt && git commit -m "add"', { cwd, stdio: 'pipe' });
+    // Overwrite with CRLF — only real change is "line2" → "modified"
+    writeFileSync(join(cwd, 'crlf.txt'), 'line1\r\nmodified\r\nline3');
+    const result = await getGitDiffs(cwd, ['crlf.txt']);
+    assert.equal(result.length, 1);
+    assert.equal(result[0].status, 'M');
+    // Both contents should be normalized to LF
+    assert.equal(result[0].old_content, 'line1\nline2\nline3');
+    assert.equal(result[0].new_content, 'line1\nmodified\nline3');
+  });
 });
 
 describe('countUntrackedLines', () => {

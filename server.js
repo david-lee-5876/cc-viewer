@@ -52,6 +52,21 @@ import { awaitDrainOrClose } from './lib/sse-backpressure.js';
 import { enrichRawIfNeeded } from './lib/enrich-plan-input.js';
 import { buildTeamStatusResponse } from './lib/team-runtime.js';
 import { discoverClaudeMdCandidates, readCandidateById } from './lib/claude-md-discovery.js';
+import {
+  saveAudio as vpSaveAudio,
+  listUserAudio as vpListUserAudio,
+  deleteUserAudio as vpDeleteUserAudio,
+  getUserAudioPath as vpGetUserAudioPath,
+  getDefaultPackPath as vpGetDefaultPackPath,
+  listDefaultPack as vpListDefaultPack,
+  isDefaultPackPlaceholder as vpIsDefaultPackPlaceholder,
+  reconcileVoicePackPrefs as vpReconcile,
+  mimeForFormat as vpMime,
+  isValidId as vpIsValidId,
+  EVENT_KEYS as VP_EVENT_KEYS,
+  MAX_AUDIO_BYTES as VP_MAX_BYTES,
+} from './lib/voice-pack-manager.js';
+import { mergeApprovalModalPrefs as vpMergeAM } from './lib/approval-modal-prefs.js';
 
 
 // 动态获取 getPrefsFile()（LOG_DIR 可能在运行时被 setLogDir 修改）
@@ -158,6 +173,8 @@ function _notifyParentPending(msg) {
     case 'sdk-ask-timeout':
     case 'ask-hook-resolved':
     case 'sdk-ask-resolved':
+    case 'ask-hook-cancelled':
+      // 注：ask-cancel handler 统一发 ask-hook-cancelled（不论 SDK / Hook 路径）。
       event = { type: 'pending-remove', kind: 'ask', id: msg.id != null ? String(msg.id) : '__ask__' };
       break;
     default:
@@ -219,6 +236,10 @@ const HOST = '0.0.0.0';
 
 // 局域网访问 token（本地 127.0.0.1 免验证）
 const ACCESS_TOKEN = randomBytes(16).toString('hex');
+// Internal token used ONLY for bridge → server calls (env-leaked to the spawned
+// claude process via pty-manager). Separate from ACCESS_TOKEN so the LAN URL
+// token can't double as a bridge auth bypass for same-host CSRF (round-3 P1).
+const INTERNAL_TOKEN = randomBytes(16).toString('hex');
 
 let clients = [];
 let server;
@@ -647,6 +668,11 @@ async function handleRequest(req, res) {
     // join() 而非字符串拼接，避免 Windows 分隔符不匹配导致比较失败
     const _cDir = getClaudeConfigDir();
     prefs.claudeConfigDir = _cDir === join(homedir(), '.claude') ? '~/.claude' : _cDir;
+    // voice-pack id reconcile — strip references to audio files that no longer exist
+    // so the client never tries to play a 404. Read-only here; client save path also runs this.
+    if (prefs.approvalModal?.voicePack) {
+      prefs.approvalModal.voicePack = vpReconcile(LOG_DIR, prefs.approvalModal.voicePack);
+    }
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(prefs));
     return;
@@ -664,7 +690,15 @@ async function handleRequest(req, res) {
         }
         let prefs = {};
         try { if (existsSync(getPrefsFile())) prefs = JSON.parse(readFileSync(getPrefsFile(), 'utf-8')); } catch { }
-        Object.assign(prefs, incoming);
+        // Deep-merge approvalModal so partial updates (e.g. `{ voicePack: { events: { askQuestion: id } } }`)
+        // don't blow away unrelated approval prefs. Shallow Object.assign for everything else.
+        const { approvalModal: incAM, ...incRest } = incoming;
+        Object.assign(prefs, incRest);
+        if (incAM && typeof incAM === 'object') {
+          prefs.approvalModal = vpMergeAM(prefs.approvalModal, incAM, {
+            reconcile: (vp) => vpReconcile(LOG_DIR, vp),
+          });
+        }
         // 确保目录存在
         const prefsFile = getPrefsFile();
         const prefsDir = dirname(prefsFile);
@@ -701,6 +735,249 @@ async function handleRequest(req, res) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: 'Invalid JSON' }));
       }
+    });
+    return;
+  }
+
+  // ── Voice Pack API ────────────────────────────────────────────────────────
+  // Manages user-uploaded audio + serves the bundled "皇上系列" default pack.
+  // Uploads are loopback-only — LAN clients can play but not write.
+  if (url === '/api/voice-pack/list' && method === 'GET') {
+    try {
+      const userAudio = vpListUserAudio(LOG_DIR);
+      const defaultPack = vpListDefaultPack();
+      // defaultPackPlaceholder lets Settings UI label the Default option as
+      // "(placeholder)" until real recordings replace the bundled sine-wave WAVs.
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        userAudio,
+        defaultPack,
+        defaultPackPlaceholder: vpIsDefaultPackPlaceholder(),
+        eventKeys: VP_EVENT_KEYS,
+        maxBytes: VP_MAX_BYTES,
+      }));
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'list failed', detail: err?.message }));
+    }
+    return;
+  }
+
+  if (url === '/api/voice-pack/upload' && method === 'POST') {
+    // Loopback-only — refuse LAN clients even if they hold a valid token.
+    // The token already gates LAN access but voice-pack writes touch the local FS
+    // and end up reachable from every client; keep the write side strictly local.
+    if (!isLocal) {
+      res.writeHead(403, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Upload allowed from loopback only' }));
+      return;
+    }
+    const contentType = req.headers['content-type'] || '';
+    const boundaryMatch = contentType.match(/boundary=(.+)/);
+    if (!boundaryMatch) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Missing boundary' }));
+      return;
+    }
+    const contentLength = parseInt(req.headers['content-length'] || '0', 10);
+    if (contentLength > VP_MAX_BYTES + 4096) {
+      res.writeHead(413, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: `File too large (max ${VP_MAX_BYTES} bytes)` }));
+      return;
+    }
+    const boundary = boundaryMatch[1];
+    const chunks = [];
+    let totalSize = 0;
+    let aborted = false;
+    req.on('data', chunk => {
+      totalSize += chunk.length;
+      if (totalSize > VP_MAX_BYTES + 4096) {
+        aborted = true;
+        res.writeHead(413, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: `File too large (max ${VP_MAX_BYTES} bytes)` }));
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on('end', () => {
+      if (aborted) return;
+      try {
+        const buf = Buffer.concat(chunks);
+        const headerEnd = buf.indexOf('\r\n\r\n');
+        if (headerEnd === -1) throw new Error('Malformed multipart');
+        const headerStr = buf.slice(0, headerEnd).toString();
+        const nameMatch = headerStr.match(/filename="([^"]+)"/);
+        const originalName = nameMatch ? nameMatch[1].replace(/[\x00-\x1f/\\]/g, '_') : 'upload';
+        const bodyStart = headerEnd + 4;
+        const closingBoundary = Buffer.from('\r\n--' + boundary);
+        const bodyEnd = buf.indexOf(closingBoundary, bodyStart);
+        const fileData = bodyEnd !== -1 ? buf.slice(bodyStart, bodyEnd) : buf.slice(bodyStart);
+        const result = vpSaveAudio(LOG_DIR, originalName, fileData, { isLoopback: true });
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, ...result }));
+      } catch (err) {
+        const status = err?.code === 'TOO_LARGE' ? 413 : err?.code === 'BAD_FORMAT' ? 415 : 400;
+        res.writeHead(status, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err?.message || 'Upload failed' }));
+      }
+    });
+    return;
+  }
+
+  if (url.startsWith('/api/voice-pack/delete/') && method === 'DELETE') {
+    if (!isLocal) {
+      res.writeHead(403, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Delete allowed from loopback only' }));
+      return;
+    }
+    const id = url.slice('/api/voice-pack/delete/'.length);
+    if (!vpIsValidId(id)) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Invalid id' }));
+      return;
+    }
+    const ok = vpDeleteUserAudio(LOG_DIR, id);
+    res.writeHead(ok ? 200 : 404, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok }));
+    return;
+  }
+
+  // Serve audio — supports HTTP Range so iOS Safari / mobile players can seek mp3
+  // (Safari refuses to start playback when the server returns 200 without Accept-Ranges).
+  // Path forms:
+  //   /api/voice-pack/audio/default/<eventKey>   — bundled default pack
+  //   /api/voice-pack/audio/<uuid>               — user-uploaded file
+  if (url.startsWith('/api/voice-pack/audio/') && method === 'GET') {
+    const tail = url.slice('/api/voice-pack/audio/'.length);
+    let resolved = null;
+    let isDefault = false;
+    if (tail.startsWith('default/')) {
+      const eventKey = tail.slice('default/'.length);
+      resolved = vpGetDefaultPackPath(eventKey);
+      isDefault = true;
+    } else {
+      resolved = vpGetUserAudioPath(LOG_DIR, tail);
+    }
+    if (!resolved) {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Not found' }));
+      return;
+    }
+    // Cache strategy:
+    //   - default-pack: short max-age + must-revalidate, no `immutable` — the on-disk
+    //     file *can* change when a placeholder is replaced by a real recording at the
+    //     same path. `must-revalidate` keeps the file out of the stale bucket once
+    //     max-age expires. Paired with the ETag below, this lets browsers
+    //     conditional-request and pick up regenerated audio after a `gen-default-voicepack`
+    //     run — without an ETag they'd silently serve cached stale content.
+    //   - user audio: content-addressed by UUID (delete + re-upload always mints a
+    //     new id), so safe to mark immutable for a full day. Loopback-only writes,
+    //     so the LAN audience cannot mutate.
+    const cacheControl = isDefault
+      ? 'public, max-age=300, must-revalidate'
+      : 'private, max-age=86400, immutable';
+    try {
+      // Symlink hardening: refuse to serve symlinks even though the routing layer
+      // already enforces the id whitelist. A local attacker who can write to
+      // LOG_DIR/voice-packs/ could otherwise drop `<uuid>.mp3 → /etc/passwd` and
+      // have it streamed over LAN. Same family as the file-access-policy realpath
+      // check used elsewhere in server.js for /api/read-file.
+      const ls = lstatSync(resolved.path);
+      if (ls.isSymbolicLink()) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Not found' }));
+        return;
+      }
+      const stat = statSync(resolved.path);
+      const fileSize = stat.size;
+      // ETag = "<size>-<mtime ms>" — cheap, stable across restarts, changes whenever
+      // the file is rewritten. Honors If-None-Match → 304 so a regenerated default
+      // pack actually reaches the browser instead of being silently served stale.
+      const etag = `"${fileSize.toString(16)}-${Math.floor(stat.mtimeMs).toString(16)}"`;
+      if (req.headers['if-none-match'] === etag) {
+        res.writeHead(304, { ETag: etag, 'Cache-Control': cacheControl });
+        res.end();
+        return;
+      }
+      const mime = vpMime(resolved.format);
+      const range = req.headers.range;
+      if (range) {
+        const m = range.match(/bytes=(\d+)-(\d*)/);
+        if (m) {
+          const start = parseInt(m[1], 10);
+          const end = m[2] ? parseInt(m[2], 10) : fileSize - 1;
+          if (Number.isFinite(start) && Number.isFinite(end) && start >= 0 && end < fileSize && start <= end) {
+            res.writeHead(206, {
+              'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+              'Accept-Ranges': 'bytes',
+              'Content-Length': end - start + 1,
+              'Content-Type': mime,
+              'Cache-Control': cacheControl,
+              ETag: etag,
+            });
+            createReadStream(resolved.path, { start, end }).pipe(res);
+            return;
+          }
+        }
+        res.writeHead(416, { 'Content-Range': `bytes */${fileSize}` });
+        res.end();
+        return;
+      }
+      res.writeHead(200, {
+        'Content-Length': fileSize,
+        'Content-Type': mime,
+        'Accept-Ranges': 'bytes',
+        'Cache-Control': cacheControl,
+        ETag: etag,
+      });
+      createReadStream(resolved.path).pipe(res);
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Read failed', detail: err?.message }));
+    }
+    return;
+  }
+  // ──────────────────────────────────────────────────────────────────────────
+
+  // Turn-end notification — POSTed by lib/turn-end-bridge.js when Claude Code's
+  // Stop hook fires (CLI/PTY mode) AND directly by lib/sdk-manager.js's
+  // onTurnEnd callback (SDK mode — Stop hooks don't exist there, so cli.js
+  // wires the SDK 'result' event to broadcastTurnEnd() instead). Broadcasts a
+  // `turn_end` SSE so all connected tabs play voice-pack turnEnd at the real
+  // end of a user-prompt turn.
+  //
+  // Auth: loopback IP + X-CCViewer-Internal header matching INTERNAL_TOKEN.
+  // Defense-in-depth against a same-host malicious page POSTing fake turn_end
+  // events (round-3 P1). Internal-only POST → in-process SDK callback skips
+  // this endpoint and calls `_broadcastTurnEnd` directly below.
+  if (url === '/api/turn-end-notify' && method === 'POST') {
+    if (!isLocal) {
+      res.writeHead(403, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Loopback only' }));
+      return;
+    }
+    if (req.headers['x-ccviewer-internal'] !== INTERNAL_TOKEN) {
+      res.writeHead(403, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Invalid bridge token' }));
+      return;
+    }
+    let body = '';
+    let truncated = false;
+    req.on('data', chunk => {
+      body += chunk;
+      if (body.length > 16384) { truncated = true; req.destroy(); }
+    });
+    req.on('end', () => {
+      if (truncated) {
+        console.warn('[turn-end-notify] body exceeded 16KB cap — request destroyed');
+        return; // socket already closed by destroy()
+      }
+      let payload = {};
+      try { payload = JSON.parse(body); } catch { /* tolerate empty / malformed */ }
+      _broadcastTurnEnd(payload.sessionId || null, payload.ts || Date.now());
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true }));
     });
     return;
   }
@@ -868,7 +1145,7 @@ async function handleRequest(req, res) {
         if (proxyPort) {
           const { spawnClaude } = await import('./pty-manager.js');
           const mergedArgs = [..._workspaceClaudeArgs, ...(Array.isArray(launchExtraArgs) ? launchExtraArgs : [])];
-          await spawnClaude(parseInt(proxyPort), wsPath, mergedArgs, _workspaceClaudePath, _workspaceIsNpmVersion, actualPort, serverProtocol);
+          await spawnClaude(parseInt(proxyPort), wsPath, mergedArgs, _workspaceClaudePath, _workspaceIsNpmVersion, actualPort, serverProtocol, INTERNAL_TOKEN);
         }
 
         _workspaceLaunched = true;
@@ -2420,7 +2697,8 @@ async function handleRequest(req, res) {
           }
         }
 
-        const HOOK_TIMEOUT = 5 * 60 * 1000; // 5 minutes
+        const HOOK_TIMEOUT = 60 * 60 * 1000; // 60 minutes — 等价 terminal Claude Code 的"无超时"体验
+        // (terminal interactiveHandler 本身无 timeout，hook 子进程层 10min；这里 60min 远超人类响应时间)
         // toolUseId 路由策略：
         //  - char whitelist + ≤256 长度 防恶意 1MB key 撑大 Map
         //  - 已存在同 id 但旧 res 已断（writableEnded/destroyed）→ 复用槽位（ask-bridge 重试场景）
@@ -2505,11 +2783,12 @@ async function handleRequest(req, res) {
           }
         }, HOOK_TIMEOUT);
 
-        pendingAskHooks.set(id, { questions, res, timer, createdAt: Date.now() });
+        const askStartedAt = Date.now();
+        pendingAskHooks.set(id, { questions, res, timer, createdAt: askStartedAt });
 
-        // Broadcast to all terminal WS clients
+        // Broadcast to all terminal WS clients — 附 startedAt + timeoutMs 让前端渲染倒计时
         if (terminalWss) {
-          const pmsg = JSON.stringify({ type: 'ask-hook-pending', id, questions });
+          const pmsg = JSON.stringify({ type: 'ask-hook-pending', id, questions, startedAt: askStartedAt, timeoutMs: HOOK_TIMEOUT });
           terminalWss.clients.forEach((client) => {
             if (client.readyState === 1) {
               try { client.send(pmsg); } catch {}
@@ -4103,6 +4382,27 @@ async function setupTerminalWebSocket(httpServer) {
         ws.send(JSON.stringify({ type: 'data', data: buffer }));
       }
 
+      // Replay pending ask-hook 请求：浏览器关 tab 再开（或 ws 重连）时，
+      // 让新 ws 立即收到当前 server-side 仍 long-poll 的 ask 列表 + startedAt + 剩余 timeoutMs，
+      // 否则前端 askMetaMap 空 → 倒计时不渲染 + lastPendingAskId 派生错。
+      // ASK_HOOK_TIMEOUT 在闭包外（line 2425 const HOOK_TIMEOUT），不直接可见 — 用 60min 字面量同源。
+      const REPLAY_HOOK_TIMEOUT = 60 * 60 * 1000;
+      const now = Date.now();
+      for (const [id, entry] of pendingAskHooks) {
+        const elapsed = now - (entry.createdAt || now);
+        const remaining = Math.max(0, REPLAY_HOOK_TIMEOUT - elapsed);
+        if (remaining <= 0) continue;
+        try {
+          ws.send(JSON.stringify({
+            type: 'ask-hook-pending',
+            id,
+            questions: entry.questions,
+            startedAt: now,        // 让前端按"还剩 remaining"起算（不是原 createdAt）
+            timeoutMs: remaining,  // 剩余可用时间
+          }));
+        } catch {}
+      }
+
       // 兜底重绘标记：claude TUI 在 alternate-screen 下只在收到 SIGWINCH 时重绘整屏。
       // 若前端首次 resize 与 PTY 当前尺寸恰好相等，pty.resize noop 不发 SIGWINCH → 前端空白。
       // 该 ws 收到第一条 resize 时（见 ws.on('message')），抖动 (rows+1) → (rows) 触发 SIGWINCH。
@@ -4189,18 +4489,15 @@ async function setupTerminalWebSocket(httpServer) {
           } else if (msg.type === 'ask-hook-answer') {
             // Client answered AskUserQuestion via hook bridge.
             // New protocol: msg.id required to address one of multiple pending asks.
-            // Legacy fallback: no id → resolve the oldest pending ask (preserves pre-Map client behavior).
+            // 老协议 fallback（取最老）已废弃 — 多 pending 时会"答错对象"造成串答；
+            // 缺 id 直接 WARN 并丢弃，让前端在 console 里看到为什么答案没生效。
             let askAnswered = false;
             let askId = msg.id;
             let askEntry = null;
             if (askId) {
               askEntry = pendingAskHooks.get(askId);
             } else {
-              const firstId = pendingAskHooks.keys().next().value;
-              if (firstId) {
-                askId = firstId;
-                askEntry = pendingAskHooks.get(firstId);
-              }
+              console.warn('[server] ask-hook-answer missing id — legacy fallback removed to prevent cross-question mis-routing; ignoring');
             }
             if (askEntry) {
               const { res: hookRes, timer } = askEntry;
@@ -4222,6 +4519,21 @@ async function setupTerminalWebSocket(httpServer) {
               });
             }
             if (askAnswered) _notifyParentPending({ type: 'ask-hook-resolved', id: askId });
+            // entry 不在（LRU evicted / 已答 / 跨 client race / 60min 超时）— 给发起方 ack
+            // ask-hook-cancelled 让前端关 modal + _pendingFlushQueue 兜底处理（如有 user
+            // message 等 ack 待 flush）。行为对齐 ask-cancel handler handled=false 分支语义。
+            // 不广播给其他 client（与 ack-cancel handled=false 一致），防误覆盖真实 answer。
+            if (!askAnswered && askId) {
+              try {
+                if (ws && ws.readyState === 1) {
+                  ws.send(JSON.stringify({
+                    type: 'ask-hook-cancelled',
+                    id: askId,
+                    reason: 'Ask entry no longer exists (timeout / evicted / already resolved)',
+                  }));
+                }
+              } catch {}
+            }
           } else if (msg.type === 'perm-hook-answer') {
             // Permission approval — SDK mode (canUseTool) or PTY mode (hook bridge)
             let permAnswered = false;
@@ -4261,6 +4573,61 @@ async function setupTerminalWebSocket(httpServer) {
               });
             }
             if (msg.id) _notifyParentPending({ type: 'sdk-ask-resolved', id: msg.id });
+          } else if (msg.type === 'ask-cancel') {
+            // 用户主动取消 AskUserQuestion（或 ChatInputBar 提交新 prompt 时打断 pending ask）。
+            // 双模式分流：先查 SDK _pendingApprovals → 再查 Hook pendingAskHooks → 都没有也广播 ack
+            // (LRU evicted / plugin-already-resolved / WS 重发等场景兜底，让所有 client modal 同步关掉)。
+            // cancelId/Reason 校验：与 toolUseId 同套白名单（≤256 字符 + [a-zA-Z0-9_-]）+ reason ≤500
+            // 防恶意/buggy client 塞超长 key 撑大 _pendingApprovals 或塞 1MB reason 打爆 broadcast。
+            const rawId = msg.id != null ? String(msg.id) : null;
+            const cancelId = rawId && rawId.length > 0 && rawId.length <= 256 && /^[a-zA-Z0-9_-]+$/.test(rawId) ? rawId : null;
+            if (rawId && !cancelId) {
+              console.warn('[server] ask-cancel rejected: invalid id format');
+              return;
+            }
+            const cancelReason = (typeof msg.reason === 'string' ? msg.reason : 'User aborted').slice(0, 500);
+            let handled = false;
+            // SDK 路径：调 cancelApproval 让 _waitForApproval resolve cancel sentinel
+            // (sdk-manager.js canUseTool 检测 sentinel 后返回 { behavior: 'deny', message: cancelReason }
+            //  → SDK 包内置 ensureToolResultPairing 兜住 transcript)
+            if (cancelId && _sdkCancelApproval) {
+              try { handled = _sdkCancelApproval(cancelId, cancelReason) === true; } catch {}
+            }
+            // Hook 路径：给对应 res 回 200 + { cancelled: true, reason }
+            // ask-bridge.js 检测 cancelled 字段后输出 { hookSpecificOutput: { permissionDecision: 'deny', ... } }
+            if (!handled && cancelId) {
+              const askEntry = pendingAskHooks.get(cancelId);
+              if (askEntry) {
+                const { res: hookRes, timer } = askEntry;
+                if (timer) clearTimeout(timer);
+                pendingAskHooks.delete(cancelId);
+                handled = true;
+                try {
+                  if (hookRes && !hookRes.headersSent) {
+                    hookRes.writeHead(200, { 'Content-Type': 'application/json' });
+                    hookRes.end(JSON.stringify({ cancelled: true, reason: cancelReason }));
+                  }
+                } catch {}
+              }
+            }
+            // ack 广播分两档：
+            //   - handled=true（真的取消了 SDK 或 Hook entry）→ 广播给所有 client + 通知 parent
+            //   - handled=false（LRU evicted / plugin 已答 / 重发等）→ 只 ack 给发起方，不广播
+            //     原因：那些场景下其他 client 看到的是 answered 而非 cancelled，广播会让前端
+            //     localAskAnswers 误覆盖真实 answer 涂成灰态。发起方自身已经乐观写过，此时
+            //     server 的 ack 实际只起"sync 错过的 ack"作用。
+            if (cancelId) {
+              const cmsg = JSON.stringify({ type: 'ask-hook-cancelled', id: cancelId, reason: cancelReason });
+              if (handled && terminalWss) {
+                terminalWss.clients.forEach((c) => {
+                  if (c.readyState === 1) try { c.send(cmsg); } catch {}
+                });
+                _notifyParentPending({ type: 'ask-hook-cancelled', id: cancelId });
+              } else if (!handled && ws && ws.readyState === 1) {
+                // 仅 ack 给发起方，让其前端 _waitingCancelAck flush user message
+                try { ws.send(cmsg); } catch {}
+              }
+            }
           } else if (msg.type === 'sdk-plan-answer') {
             // Plan approval in SDK mode
             if (_sdkResolveApproval) {
@@ -4368,6 +4735,33 @@ export function getAccessToken() {
   return ACCESS_TOKEN;
 }
 
+export function getInternalToken() {
+  return INTERNAL_TOKEN;
+}
+
+// In-process broadcast helper for the `turn_end` SSE event. Two callers:
+//   1. /api/turn-end-notify POST handler (PTY/CLI mode via Stop hook bridge)
+//   2. cli.js runSdkMode → sdkManager.initSdkSession({ onTurnEnd }) (SDK mode —
+//      ensureHooks() isn't called so Stop hook isn't installed; emit the event
+//      directly when SDK's 'result' message fires).
+// Same SSE payload shape regardless of source so the frontend listener doesn't
+// care which path produced it.
+function _broadcastTurnEnd(sessionId, ts) {
+  try {
+    if (clients.length > 0 && sendEventToClients) {
+      sendEventToClients(clients, 'turn_end', {
+        sessionId: sessionId || null,
+        ts: ts || Date.now(),
+      });
+    }
+  } catch (err) {
+    console.warn('[turn-end] broadcast failed:', err.message);
+  }
+}
+export function broadcastTurnEnd(sessionId = null, ts = Date.now()) {
+  _broadcastTurnEnd(sessionId, ts);
+}
+
 // 流式状态 SSE 推送定时器：检测 streamingState 变化并广播给所有客户端
 let _streamingStatusTimer = null;
 let _lastStreamingActive = false;
@@ -4465,7 +4859,8 @@ export function broadcastWsMessage(msg) {
   // 显式调用 _notifyParentPending 的分支（ask-hook-resolved 等）走 ws.send 不进这里，无重复触发。
   if (msg && typeof msg === 'object' && typeof msg.type === 'string'
       && (msg.type === 'sdk-ask-pending' || msg.type === 'sdk-ask-resolved' || msg.type === 'sdk-ask-timeout'
-          || msg.type === 'ask-hook-pending' || msg.type === 'ask-hook-resolved' || msg.type === 'ask-hook-timeout')) {
+          || msg.type === 'ask-hook-pending' || msg.type === 'ask-hook-resolved' || msg.type === 'ask-hook-timeout'
+          || msg.type === 'ask-hook-cancelled')) {
     _notifyParentPending(msg);
   }
 }
@@ -4473,6 +4868,12 @@ export function broadcastWsMessage(msg) {
 /** Reference to sdk-manager's resolveApproval (set by cli.js after import). */
 let _sdkResolveApproval = null;
 export function setSdkResolveApproval(fn) { _sdkResolveApproval = fn; }
+
+/** Reference to sdk-manager's cancelApproval (set by cli.js after import). */
+// 与 _sdkResolveApproval 平行——但语义不同：cancelApproval 让 _waitForApproval resolve
+// 一个 cancel sentinel，让 canUseTool 走 deny 分支（而非 allow）。
+let _sdkCancelApproval = null;
+export function setSdkCancelApproval(fn) { _sdkCancelApproval = fn; }
 
 /** Reference to sdk-manager's sendUserMessage (set by cli.js after import). */
 let _sdkSendUserMessage = null;

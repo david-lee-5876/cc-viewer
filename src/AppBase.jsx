@@ -10,6 +10,9 @@ import { SettingsContext } from './contexts/SettingsContext';
 import { formatTokenCount, filterRelevantRequests, isRelevantRequest, appendCacheLossMap, extractCachedContent } from './utils/helpers';
 import { isMainAgent, isPostClearCheckpoint } from './utils/contentFilter';
 import { apiUrl } from './utils/apiUrl';
+import { playEvent as playVoiceEvent } from './utils/voicePackPlayer';
+import { DEFAULT_BINDINGS as VP_DEFAULT_BINDINGS } from '../lib/voice-pack-events';
+import { mergeVoicePackInto } from '../lib/approval-modal-prefs';
 import { saveEntries, loadEntries, clearEntries, getCacheMeta, saveSessionEntries, loadSessionEntries, saveSessionIndex } from './utils/entryCache';
 import { buildSessionIndex, splitHotCold, mergeSessionIndices, HOT_SESSION_COUNT, assignMessageTimestamps, applyInPlaceLastMsgReplace } from './utils/sessionManager';
 import { mergeMainAgentSessions as _mergeMainAgentSessions } from './utils/sessionMerge';
@@ -115,6 +118,7 @@ class AppBase extends React.Component {
       pendingUploadPaths: [],
       contextWindow: null,
       contextBarOptimistic: false, // /clear 后的乐观水位重置，下一次 context_window SSE 自动清除
+      contextBarLocked: false, // /clear 触发后强制血条 0K (0%)，到用户发出非 /clear 消息时解锁
       isStreaming: false,
       streamingLatest: null, // { timestamp, url, content, model } — Live typewriter overlay for latest assistant message
       hasMoreHistory: false,
@@ -140,7 +144,18 @@ class AppBase extends React.Component {
       // ownTabId: numeric tab id pushed by main once on view init (electron only). null in pure web mode.
       ownTabId: null,
       // approvalPrefs: user toggles persisted to /api/preferences (defaults sized for least surprise).
-      approvalPrefs: { modalEnabled: true, soundEnabled: false, notifyOnlyWhenHidden: true },
+      // voicePack — opt-in; default OFF so the existing chime / silent behaviour is preserved on first run.
+      // events.turnEnd defaults to null (disabled) — DEFAULT_BINDINGS is the single source of truth.
+      approvalPrefs: {
+        modalEnabled: true,
+        soundEnabled: false,
+        notifyOnlyWhenHidden: true,
+        voicePack: {
+          enabled: false,
+          volume: 0.3,
+          events: { ...VP_DEFAULT_BINDINGS },
+        },
+      },
     };
     this.eventSource = null;
     this._currentSessionId = null;
@@ -366,14 +381,22 @@ class AppBase extends React.Component {
       // Approval modal preferences (defaults already in initial state — only override when persisted).
       if (data.approvalModal && typeof data.approvalModal === 'object') {
         this.setState(prev => {
+          // Single source of truth for voicePack deep-merge — same helper as server.js
+          // POST handler and handleVoicePackChange below( dedup).
+          const mergedVP = mergeVoicePackInto(prev.approvalPrefs.voicePack, data.approvalModal.voicePack);
           const next = {
             modalEnabled: data.approvalModal.modalEnabled !== undefined ? !!data.approvalModal.modalEnabled : prev.approvalPrefs.modalEnabled,
             soundEnabled: data.approvalModal.soundEnabled !== undefined ? !!data.approvalModal.soundEnabled : prev.approvalPrefs.soundEnabled,
             notifyOnlyWhenHidden: data.approvalModal.notifyOnlyWhenHidden !== undefined ? !!data.approvalModal.notifyOnlyWhenHidden : prev.approvalPrefs.notifyOnlyWhenHidden,
+            voicePack: mergedVP,
           };
           // 同步给 electron main 进程,让 maybeNotify 用最新的 notifyOnlyWhenHidden 决策。
           // 非 electron 环境下 tabBridge 不存在,可选链跳过。
-          try { window.tabBridge?.setApprovalPref?.(next); } catch (e) { console.warn('[approvalPref IPC] hydrate sync failed:', e); }
+          // voicePack 字段不发给 main —— 播放发生在 renderer，main 只需要知道通知策略。
+          try {
+            const { voicePack: _omit, ...forIpc } = next;
+            window.tabBridge?.setApprovalPref?.(forIpc);
+          } catch (e) { console.warn('[approvalPref IPC] hydrate sync failed:', e); }
           return { approvalPrefs: next };
         });
       }
@@ -520,6 +543,10 @@ class AppBase extends React.Component {
     if (cs && !!cs.showThinkingSummaries !== !!this.state.showThinkingSummaries) {
       this.setState({ showThinkingSummaries: !!cs.showThinkingSummaries });
     }
+    // Voice-pack turnEnd is now driven by the `turn_end` SSE event (broadcast when
+    // Claude Code's Stop hook fires), not by isStreaming falling-edge. The streaming
+    // signal resets per-API-call so it mis-fired between slow tool calls. See the
+    // SSE listener registered in componentDidMount and lib/turn-end-bridge.js.
   }
 
   componentWillUnmount() {
@@ -602,7 +629,7 @@ class AppBase extends React.Component {
     }
 
     this._teardownTransientLiveState();
-    this.setState({ isStreaming: false });
+    this.setState({ isStreaming: false, contextBarLocked: false });
     if (this._sseReconnectTimer) clearTimeout(this._sseReconnectTimer);
     this._sseReconnectTimer = setTimeout(() => { this.initSSE(); }, 2000);
   }
@@ -958,6 +985,10 @@ class AppBase extends React.Component {
           }
           this._rebuildRequestIndex([]);
           if (data.projectName) document.title = `${data.projectName} - CC Viewer`;
+          // Reset isStreaming alongside streamingLatest — workspace switches happen
+          // between user prompts and shouldn't leave streaming flags stuck. (turnEnd
+          // false-fire on this transition is no longer a concern since we hook
+          // turnEnd to the Stop SSE event, not to isStreaming falling-edge.)
           this.setState({
             workspaceMode: false,
             projectName: data.projectName || '',
@@ -967,6 +998,7 @@ class AppBase extends React.Component {
             mainAgentSessions: [],
             selectedIndex: null,
             streamingLatest: null,
+            isStreaming: false,
           });
           if (isMobile) clearEntries();
         } catch {}
@@ -982,6 +1014,8 @@ class AppBase extends React.Component {
           projectName: '',
           selectedIndex: null,
           streamingLatest: null,
+          contextBarLocked: false,
+          isStreaming: false,
         });
       });
       this.eventSource.addEventListener('context_window', (event) => {
@@ -1018,6 +1052,32 @@ class AppBase extends React.Component {
         } catch { }
       });
       this.eventSource.addEventListener('ping', () => { this._resetSSETimeout(); });
+      // turn_end SSE — broadcast by /api/turn-end-notify whenever Claude Code's Stop hook
+      // fires (real end of a user-prompt turn). This is the **authoritative** turnEnd
+      // signal — far more accurate than isStreaming falling-edge, which resets per-API-call
+      // and would mis-fire during slow tool execution. focusGate keeps it quiet while the
+      // user is looking at the window; 30s cooldown lives in voicePackPlayer.
+      this.eventSource.addEventListener('turn_end', (event) => {
+        // Guard against a teardown race: SSE chunks in flight when _reconnectSSE
+        // closes the current EventSource can still fire here before the listener
+        // unbinds (round-3 quality P1).
+        if (!this.eventSource) return;
+        this._resetSSETimeout();
+        const vp = this.state.approvalPrefs && this.state.approvalPrefs.voicePack;
+        if (vp && vp.enabled && vp.events && vp.events.turnEnd) {
+          let serverTs = null;
+          try { serverTs = (JSON.parse(event?.data || '{}'))?.ts || null; } catch { /* fine */ }
+          try {
+            playVoiceEvent('turnEnd', vp, {
+              focusGate: true,
+              // Prefer the server-supplied ts so a re-broadcast (server bug, two
+              // SSE delivery paths) is deduped by the player. Falls back to a
+              // unique key if absent — relies on COOLDOWN_MS.turnEnd to suppress.
+              dedupeKey: `turnEnd:${serverTs || Date.now()}`,
+            });
+          } catch { /* never propagate */ }
+        }
+      });
       this.eventSource.addEventListener('streaming_status', (e) => {
         this._resetSSETimeout();
         try {
@@ -1405,13 +1465,20 @@ class AppBase extends React.Component {
   // 用户点 /clear 时立即把 Header 上下文血条降到 OPTIMISTIC_CLEAR_PERCENT 水位；
   // 正常路径下一次 context_window SSE 推送会自动取消。
   // 30s 兜底：SSE 没及时来（PTY 未连接、后端没推、CLI 崩了）时自动清掉，避免血条卡在低位。
+  // 同时进入 locked 状态：忽略 SSE / 其他 re-render，强制血条 0K (0%)，直到用户
+  // 通过 _sendUserMessageImmediate 发出一条非 /clear 消息（见 handleUserMessageSent）。
   handleClearContextOptimistic = () => {
-    this.setState({ contextBarOptimistic: true });
+    this.setState({ contextBarOptimistic: true, contextBarLocked: true });
     if (this._clearOptimisticTimer) clearTimeout(this._clearOptimisticTimer);
     this._clearOptimisticTimer = setTimeout(() => {
       this.setState({ contextBarOptimistic: false });
       this._clearOptimisticTimer = null;
     }, 30000);
+  };
+
+  // ChatView 在 _sendUserMessageImmediate 里对非 /clear 文本调用本方法解锁血条。
+  handleUserMessageSent = () => {
+    if (this.state.contextBarLocked) this.setState({ contextBarLocked: false });
   };
 
   // ─── 模式切换 ──────────────────────────────────────────
@@ -1425,6 +1492,7 @@ class AppBase extends React.Component {
       viewMode: 'chat',
       cliMode: true,
       terminalVisible: false,
+      contextBarLocked: false,
     });
   };
 
@@ -1440,6 +1508,8 @@ class AppBase extends React.Component {
           projectName: '',
           selectedIndex: null,
           streamingLatest: null,
+          contextBarLocked: false,
+          isStreaming: false,
         });
       })
       .catch(() => {});
@@ -1552,8 +1622,26 @@ class AppBase extends React.Component {
     const next = { ...this.state.approvalPrefs, ...patch };
     this.setState({ approvalPrefs: next });
     // 同步给 electron main 进程,maybeNotify 立即用新 notifyOnlyWhenHidden 决策。
-    try { window.tabBridge?.setApprovalPref?.(next); } catch (e) { console.warn('[approvalPref IPC] onChange sync failed:', e); }
+    // voicePack 不发给 main —— renderer 自己播放，main 只关心 OS notification。
+    try {
+      const { voicePack: _omit, ...forIpc } = next;
+      window.tabBridge?.setApprovalPref?.(forIpc);
+    } catch (e) { console.warn('[approvalPref IPC] onChange sync failed:', e); }
     this.context.updatePreferences({ approvalModal: next });
+  };
+
+  // Deep-merge change handler for the voicePack subtree — patches `events` field-by-field
+  // so e.g. updating only `events.askQuestion` doesn't drop the bindings for other events.
+  // Uses the shared mergeVoicePackInto helper (single source of truth across hydrate /
+  // server POST / this handler — review dedup).
+  handleVoicePackChange = (patch) => {
+    if (!patch || typeof patch !== 'object') return;
+    const nextVP = mergeVoicePackInto(this.state.approvalPrefs?.voicePack, patch);
+    const nextPrefs = { ...this.state.approvalPrefs, voicePack: nextVP };
+    this.setState({ approvalPrefs: nextPrefs });
+    // Persist only the voicePack subtree — server.js will deep-merge it into approvalModal,
+    // leaving modalEnabled / soundEnabled / notifyOnlyWhenHidden untouched.
+    this.context.updatePreferences({ approvalModal: { voicePack: nextVP } });
   };
 
   /**

@@ -172,5 +172,49 @@ describe('ask-bridge.js', () => {
       const output = JSON.parse(stdout.trim());
       assert.equal(output.continue, true);
     });
+
+    it('outputs PreToolUse deny when server returns cancelled=true (web user cancelled the ask)', async () => {
+      // 用户在 cc-viewer web UI 点 Cancel 或在输入框打字打断 → server.js ask-cancel handler
+      // 给 hook res 回 200 + { cancelled: true, reason }。ask-bridge 必须把这个翻成 PreToolUse
+      // hook deny，让 Claude Code 走兜底链：toolExecution.ts 把 deny.message 包装成
+      // tool_result.is_error=true，配对完整后下一轮 API 不会 400。
+      server.on('request', (_req, res) => {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ cancelled: true, reason: 'User aborted' }));
+      });
+
+      const input = JSON.stringify({
+        tool_input: {
+          questions: [{ question: 'Q?', header: 'H', options: [{ label: 'A' }], multiSelect: false }],
+        },
+      });
+      const { code, stdout } = await runBridge(input, { CCVIEWER_PORT: String(port) });
+      assert.equal(code, 0);
+      const output = JSON.parse(stdout.trim());
+      assert.equal(output.hookSpecificOutput.hookEventName, 'PreToolUse');
+      assert.equal(output.hookSpecificOutput.permissionDecision, 'deny');
+      // [cc-viewer:cancel] 前缀是协议级 sentinel，toolResultBuilder 用它区分 cancelled vs rejected
+      assert.equal(output.hookSpecificOutput.permissionDecisionReason, '[cc-viewer:cancel] User aborted');
+    });
+
+    it('cancelled=true with no reason falls back to default reason text', async () => {
+      // server 端 reason 字段缺失 / 空 → 用默认文案 "User aborted by cc-viewer"
+      server.on('request', (_req, res) => {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ cancelled: true }));
+      });
+
+      const input = JSON.stringify({
+        tool_input: {
+          questions: [{ question: 'Q?', header: 'H', options: [{ label: 'A' }], multiSelect: false }],
+        },
+      });
+      const { code, stdout } = await runBridge(input, { CCVIEWER_PORT: String(port) });
+      assert.equal(code, 0);
+      const output = JSON.parse(stdout.trim());
+      assert.equal(output.hookSpecificOutput.permissionDecision, 'deny');
+      assert.match(output.hookSpecificOutput.permissionDecisionReason, /^\[cc-viewer:cancel\]/);
+      assert.match(output.hookSpecificOutput.permissionDecisionReason, /cc-viewer/i);
+    });
   });
 });

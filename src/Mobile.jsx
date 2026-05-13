@@ -13,6 +13,7 @@ import ApprovalModal from './components/ApprovalModal';
 import MobileGitDiff from './components/MobileGitDiff';
 import MobileFileExplorer from './components/MobileFileExplorer';
 import MobileStats from './components/MobileStats';
+import VoicePackSettings from './components/VoicePackSettings';
 import CachePopoverContent from './components/CachePopoverContent';
 import MemoryDetailModal from './components/MemoryDetailModal';
 import SkillsManagerModal from './components/SkillsManagerModal';
@@ -632,9 +633,16 @@ class Mobile extends AppBase {
         const usable = maxTokens * AUTO_COMPACT_USABLE_RATIO;
         if (usable > 0 && mobileContextTokens > 0) mobileContextPercent = Math.min(100, Math.max(0, Math.round(mobileContextTokens / usable * 100)));
       }
-      if (mobileContextPercent === 0 && this._lastContextPercent > 0) mobileContextPercent = this._lastContextPercent;
-      else this._lastContextPercent = mobileContextPercent;
-      if (this.state.contextBarOptimistic) mobileContextPercent = OPTIMISTIC_CLEAR_PERCENT;
+      // /clear 后 contextBarLocked 强制血条 0K (0%)，直到用户发出非 /clear 消息（详见 AppBase）。
+      if (this.state.contextBarLocked) {
+        this._lastContextPercent = 0;
+        mobileContextPercent = 0;
+        mobileContextTokens = 0;
+      } else {
+        if (mobileContextPercent === 0 && this._lastContextPercent > 0) mobileContextPercent = this._lastContextPercent;
+        else this._lastContextPercent = mobileContextPercent;
+        if (this.state.contextBarOptimistic) mobileContextPercent = OPTIMISTIC_CLEAR_PERCENT;
+      }
     }
 
     // 单条 /ws/terminal 的开启条件:与 App 同款,回退到「非本地日志 + 非 SDK 模式都连」,
@@ -646,6 +654,7 @@ class Mobile extends AppBase {
       <ApprovalModal
         enabled={isPad && this.state.approvalPrefs.modalEnabled}
         soundEnabled={this.state.approvalPrefs.soundEnabled}
+        voicePackPrefs={this.state.approvalPrefs.voicePack}
         approvalGlobal={this.state.approvalGlobal}
         dismissedIds={this.state.approvalDismissedIds}
         onDismiss={this.handleApprovalDismiss}
@@ -916,6 +925,7 @@ class Mobile extends AppBase {
                     onUploadPathsConsumed={this.handleUploadPathsConsumed}
                     onMobileOpenFile={this._handleMobileOpenFile}
                     onClearContextOptimistic={this.handleClearContextOptimistic}
+                    onUserMessageSent={this.handleUserMessageSent}
                   />
                 </div>
             </>
@@ -1149,6 +1159,15 @@ class Mobile extends AppBase {
                       </div>
                     )}
                   </>
+                )}
+                {/* Voice pack — exposed on BOTH iPad and phone (phone has no modal but still
+                    benefits from audio notifications for approvals / turn-end). Sits outside
+                    the isPad gate above. */}
+                {this.state.approvalPrefs && (
+                  <VoicePackSettings
+                    prefs={this.state.approvalPrefs.voicePack}
+                    onChange={this.handleVoicePackChange}
+                  />
                 )}
                 <div className={styles.mobileSettingsRow}>
                   <span className={styles.mobileSettingsLabel}>{t('ui.expandThinking')}</span>
