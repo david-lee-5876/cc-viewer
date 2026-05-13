@@ -3976,7 +3976,7 @@ class ChatView extends React.Component {
 
     const { pendingInput, stickyBottom, ptyPromptHistory } = this.state;
 
-    const pendingBubble = (cliMode || terminalVisible) && pendingInput ? (
+    const pendingBubble = cliMode && pendingInput ? (
       <ChatMessage key="pending-input" role="user" text={pendingInput} timestamp={new Date().toISOString()} userProfile={this.props.userProfile} isHistoryLog={false} />
     ) : null;
 
