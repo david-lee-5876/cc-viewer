@@ -7,14 +7,16 @@
  * 详见 src/utils/webSearchGrouping.js 与 src/components/WebSearchResultsView.jsx。
  */
 
-import { extractToolResultText } from './helpers';
 import { t } from '../i18n';
-import { internToolResult } from './readResultPool.js';
-import { classifyToolResultError } from './toolResultClassifier.js';
+import { buildSingleToolResultCore } from './toolResultCore.js';
 
 // --- WeakMap cache for tool result state ---
 
 const _toolResultCache = new WeakMap();
+
+// 稳定引用,避免 `req.body?.messages || []` 每次构造新 `[]` 字面量打穿 WeakMap 缓存
+// (subAgentEntries 扫描在每次 requests-change 时跑,缓存命中是热路径性能假设)。
+const EMPTY_MESSAGES = Object.freeze([]);
 
 export function getToolResultCache(messages) {
   return _toolResultCache.get(messages) || null;
@@ -42,6 +44,148 @@ export function createEmptyToolState() {
     _fileState: {},
     _editOrder: [],
   };
+}
+
+/**
+ * i18n 包装:在 toolResultCore 的 buildSingleToolResultCore 基础上附加本地化 label。
+ * 生产路径调用此函数;test 直接调 core 以避开 i18n 依赖。
+ */
+export function buildSingleToolResult(block, matchedTool) {
+  const core = buildSingleToolResultCore(block, matchedTool);
+  let label = t('ui.toolReturn');
+  if (matchedTool) {
+    if (matchedTool.name === 'Task' && matchedTool.input) {
+      const st = matchedTool.input.subagent_type || '';
+      const desc = matchedTool.input.description || '';
+      label = `SubAgent: ${st}${desc ? ' — ' + desc : ''}`;
+    } else {
+      label = t('ui.toolReturnNamed', { name: matchedTool.name });
+    }
+  }
+  return { label, ...core };
+}
+
+/**
+ * 全局聚合所有 requests 的 tool_result 块,按 tool_use_id 索引。
+ *
+ * 设计动机:并行 SubAgent / Teammate 的请求在日志中互相穿插,K+1 不一定是同一 agent
+ * 的下一个 turn。两遍扫描建立"id → result"全局索引,渲染时 O(1) 查询,免去运行时配对。
+ *
+ * Pass 1: 全量构建 toolUseMap(供 label / toolName / toolInput 解析)
+ *   - body.messages 里 role=assistant 的 tool_use 块
+ *   - response.body.content 里的 tool_use 块(末轮)
+ * Pass 2: 提取所有 tool_result 块写入索引(role=user 消息的 content[])
+ *
+ * id 冲突风险:Anthropic API 用 nanoid 24+ char,2^-128 量级,可忽略。
+ */
+export function buildGlobalToolResultIndex(requests) {
+  const state = createEmptyGlobalIndexState();
+  appendToGlobalToolResultIndex(state, requests, 0);
+  return state.index;
+}
+
+// 同一 session 内并发持有的 base64 image 上限:更早入索引的 entry 一旦超过此数,
+// 其 images 字段被改成 oversized 占位,释放 base64 字节(单图 2MB × N = 几十 MB
+// 常驻内存的隐患)。32 张覆盖大多数实际会话;若超过,旧图回退为占位,新图保留。
+const MAX_LIVE_IMAGE_ENTRIES = 32;
+
+/**
+ * 增量索引 state:供 ChatView / TeamModal 在 requests 增量到达时复用,避免每次全量扫描。
+ *   index           : { [tool_use_id]: entry } (出参,共享给调用方)
+ *   _useMap         : 已扫到的 tool_use 块 (Pass 1 累积,Pass 2 查 label)
+ *   _imageEntryIds  : FIFO 队列,跟踪持有 base64 image 的 entry id,超 MAX 时驱逐最早
+ */
+export function createEmptyGlobalIndexState() {
+  return { index: {}, _useMap: {}, _imageEntryIds: [] };
+}
+
+// 把超出 LRU 上限的最早 image entry 降级为 oversized 占位,释放 base64 字符串。
+function _enforceImageBudget(state) {
+  const { index, _imageEntryIds } = state;
+  while (_imageEntryIds.length > MAX_LIVE_IMAGE_ENTRIES) {
+    const evictId = _imageEntryIds.shift();
+    const entry = index[evictId];
+    if (!entry || !Array.isArray(entry.images)) continue;
+    entry.images = entry.images.map(img => (
+      img && img.src && !img.oversized
+        ? { oversized: true, mediaType: img.mediaType, sizeBytes: img.src.length }
+        : img
+    ));
+  }
+}
+
+/**
+ * 增量追加:扫描 requests[startIndex..] 并把新发现的 tool_use / tool_result 累积到 state。
+ * 仅写入新出现的 id(`!(id in index)`),原条目幂等,可重复调用同一切片不会引入副作用。
+ */
+export function appendToGlobalToolResultIndex(state, requests, startIndex) {
+  if (!Array.isArray(requests)) return;
+  const { index, _useMap, _imageEntryIds } = state;
+  for (let i = startIndex; i < requests.length; i++) {
+    const r = requests[i];
+    if (!r) continue;
+    const msgs = r.body?.messages;
+    if (Array.isArray(msgs)) {
+      for (const m of msgs) {
+        if (m?.role === 'assistant' && Array.isArray(m.content)) {
+          for (const b of m.content) {
+            if (b?.type === 'tool_use' && b.id) _useMap[b.id] = b;
+          }
+        }
+      }
+    }
+    const respContent = r.response?.body?.content;
+    if (Array.isArray(respContent)) {
+      for (const b of respContent) {
+        if (b?.type === 'tool_use' && b.id) _useMap[b.id] = b;
+      }
+    }
+  }
+  for (let i = startIndex; i < requests.length; i++) {
+    const r = requests[i];
+    const msgs = r?.body?.messages;
+    if (!Array.isArray(msgs)) continue;
+    for (const m of msgs) {
+      if (m?.role !== 'user' || !Array.isArray(m.content)) continue;
+      for (const b of m.content) {
+        if (b?.type === 'tool_result' && b.tool_use_id && !(b.tool_use_id in index)) {
+          const entry = buildSingleToolResult(b, _useMap[b.tool_use_id]);
+          index[b.tool_use_id] = entry;
+          if (Array.isArray(entry.images) && entry.images.some(img => img && img.src)) {
+            _imageEntryIds.push(b.tool_use_id);
+          }
+        }
+      }
+    }
+  }
+  _enforceImageBudget(state);
+}
+
+/**
+ * SubAgent / Teammate 渲染入口:组合本地 cachedBuildToolResultMap 与全局索引。
+ * globalIndex 由调用方一次性构建(buildGlobalToolResultIndex),所有 entry 共享,
+ * 渲染查询 O(1)。
+ *
+ * 补偿仅覆盖 toolResultMap;readContentMap / editSnapshotMap / latestPlanContent
+ * 等辅助 map 不在补偿范围内 —— SubAgent 卡片只渲染 response.content 块,Read snapshot
+ * 等高级展开由 mainAgent 路径消费,与 SubAgent 解耦。
+ */
+export function buildSubAgentResultMap(req, globalIndex) {
+  const localState = cachedBuildToolResultMap(req?.body?.messages || EMPTY_MESSAGES);
+  const respContent = req?.response?.body?.content;
+  if (!Array.isArray(respContent) || !globalIndex) {
+    return localState.toolResultMap;
+  }
+  // filled lazy-alloc 为 null sentinel:无补偿时返回原引用,避免下游 ChatMessage memo 抖动。
+  let filled = null;
+  for (const b of respContent) {
+    if (b?.type === 'tool_use' && b.id && !localState.toolResultMap[b.id] && globalIndex[b.id]) {
+      if (!filled) filled = {};
+      filled[b.id] = globalIndex[b.id];
+    }
+  }
+  if (!filled) return localState.toolResultMap;
+  return { ...localState.toolResultMap, ...filled };
 }
 
 export function appendToolResultMap(state, messages, startIndex) {
@@ -124,27 +268,9 @@ export function appendToolResultMap(state, messages, startIndex) {
       for (const block of msg.content) {
         if (block.type === 'tool_result') {
           const matchedTool = toolUseMap[block.tool_use_id];
-          let label = t('ui.toolReturn');
-          let toolName = null;
-          let toolInput = null;
-          if (matchedTool) {
-            toolName = matchedTool.name;
-            toolInput = matchedTool.input;
-            if (matchedTool.name === 'Task' && matchedTool.input) {
-              const st = matchedTool.input.subagent_type || '';
-              const desc = matchedTool.input.description || '';
-              label = `SubAgent: ${st}${desc ? ' — ' + desc : ''}`;
-            } else {
-              label = t('ui.toolReturnNamed', { name: matchedTool.name });
-            }
-          }
-          let resultText = extractToolResultText(block);
-          // v4: 所有 tool_result 默认走 intern pool（含 Bash/Grep/Glob/MCP 等长输出）
-          // 短结果（< 256）由 internToolResult 内部自动透传，无开销
-          resultText = internToolResult(resultText);
-          const isError = !!block.is_error;
-          const { isPermissionDenied, isInputValidationError, isUltraplan } = classifyToolResultError(resultText, isError);
-          toolResultMap[block.tool_use_id] = { label, toolName, toolInput, resultText, isError, isPermissionDenied, isInputValidationError, isUltraplan };
+          const entry = buildSingleToolResult(block, matchedTool);
+          const { resultText, isPermissionDenied, isUltraplan } = entry;
+          toolResultMap[block.tool_use_id] = entry;
           if (matchedTool && matchedTool.name === 'Read' && matchedTool.input?.file_path) {
             readContentMap[matchedTool.input.file_path] = resultText;
             // _fileState 更新（行号解析）

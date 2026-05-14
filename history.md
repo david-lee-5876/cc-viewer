@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.6.266 (2026-05-15)
+
+- fix(subagent): SubAgent / Teammate 末轮工具结果跨请求补偿渲染（全局 tool_use_id → result 索引,并行 sub-agent 交错场景下结果可正常显示）
+- feat(chat): 工具调用结果支持 base64 / url 图片渲染(紧凑模式 hover 浮窗 + 完整展示模式 ToolResultView 都生效;MIME 白名单 png/jpeg/gif/webp,超过 2MB 或单 session 32 张图后老 entry 降级文字占位,popover lazy + destroyOnHide)
+- feat(chat): 紧凑模式工具按钮 hover 浮窗追加 tool_result 文本预览(支持滚动查看长输出,strip Read 行号 / Bash ANSI)
+
 ## 1.6.265 (2026-05-13)
 
 - fix(interceptor): `_commitDeltaState` 加幂等守卫，防止 mainAgent 请求乱序完成时较短 commit 倒推 eager-updated 状态导致 doubled-history 残余

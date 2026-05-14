@@ -300,12 +300,26 @@ function highlight(text, lang) {
   return result;
 }
 
-function ToolResultView({ toolName, toolInput, resultText, defaultCollapsed }) {
+function ToolResultView({ toolName, toolInput, resultText, images, defaultCollapsed }) {
   const [collapsed, setCollapsed] = useState(defaultCollapsed ?? false);
   useEffect(() => { setCollapsed(defaultCollapsed ?? false); }, [defaultCollapsed]);
   const isCodeTool = CODE_TOOLS.includes(toolName);
   const lang = isCodeTool ? detectLang(toolName, toolInput, resultText) : null;
   const displayText = resultText.length > 5000 ? resultText.substring(0, 5000) + '\n... (truncated)' : resultText;
+  const hasImages = Array.isArray(images) && images.length > 0;
+  const imageBlock = hasImages ? (
+    <div className={styles.imageBlock}>
+      {images.map((img, idx) => (
+        img.oversized ? (
+          <div key={`img-${idx}`} className={styles.imagePlaceholder}>
+            {`[image ${(img.mediaType || '').replace('image/', '')} · ${Math.round(img.sizeBytes / 1024)} KB · too large to preview]`}
+          </div>
+        ) : (
+          <img key={`img-${idx}`} src={img.src} alt={img.mediaType || 'image'} className={styles.imageItem} loading="lazy" />
+        )
+      ))}
+    </div>
+  ) : null;
 
   // Build title（内层标题：显示文件名等有用信息）
   let title = toolName ? t('ui.toolReturnNamed', { name: toolName }) : 'Result';
@@ -317,6 +331,23 @@ function ToolResultView({ toolName, toolInput, resultText, defaultCollapsed }) {
       title = `${toolName}: ${parts[parts.length - 1]}`;
     }
   }
+
+  // 文本为空但有图(例如 Read 图片文件)时,仅渲染图块,避免空 pre 占位
+  const hasText = typeof resultText === 'string' && resultText.length > 0;
+  if (!hasText && hasImages) {
+    return (
+      <div className={styles.plainResult}>
+        <div className={styles.codeHeader}>
+          <Text type="secondary" className={styles.plainTitle}>{title}</Text>
+        </div>
+        {imageBlock}
+      </div>
+    );
+  }
+
+  // 4 个文本分支(Task / non-code / code / 兜底)都需要 "imageBlock 在 textBody 之前"
+  // 的折叠展开,抽出 helper 避免重复 `{!collapsed && imageBlock}{!collapsed && body}` 模式
+  const renderBodyWithImages = (textBody) => collapsed ? null : (<>{imageBlock}{textBody}</>);
 
   if (!isCodeTool) {
     // Task tool: render as markdown
@@ -332,7 +363,7 @@ function ToolResultView({ toolName, toolInput, resultText, defaultCollapsed }) {
               {collapsed ? t('ui.expand') : t('ui.collapse')}
             </Text>
           </div>
-          {!collapsed && (
+          {renderBodyWithImages(
             <div className={`chat-md ${styles.markdownBody}`} dangerouslySetInnerHTML={{ __html: renderMarkdown(displayText) }} />
           )}
         </div>
@@ -350,11 +381,7 @@ function ToolResultView({ toolName, toolInput, resultText, defaultCollapsed }) {
             {collapsed ? t('ui.expand') : t('ui.collapse')}
           </Text>
         </div>
-        {!collapsed && (
-          <pre className={styles.plainPre}>
-            {displayText}
-          </pre>
-        )}
+        {renderBodyWithImages(<pre className={styles.plainPre}>{displayText}</pre>)}
       </div>
     );
   }
@@ -372,11 +399,8 @@ function ToolResultView({ toolName, toolInput, resultText, defaultCollapsed }) {
           {collapsed ? t('ui.expand') : t('ui.collapse')}
         </Text>
       </div>
-      {!collapsed && (
-        <pre
-          className={`code-highlight ${styles.codePre}`}
-          dangerouslySetInnerHTML={{ __html: highlighted }}
-        />
+      {renderBodyWithImages(
+        <pre className={`code-highlight ${styles.codePre}`} dangerouslySetInnerHTML={{ __html: highlighted }} />
       )}
     </div>
   );

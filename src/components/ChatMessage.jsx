@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom';
 import { Collapse, Typography, Radio, Checkbox, Input, Button, Tooltip, Popover, message } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
 import { escapeHtml, truncateText, getSvgAvatar } from '../utils/helpers';
+import { compactResultPreview } from '../utils/toolResultCore.js';
 import { extractWebSearchGroups } from '../utils/webSearchGrouping';
 import WebSearchResultsView from './WebSearchResultsView';
 import MarkdownBlock from './MarkdownBlock';
@@ -992,10 +993,60 @@ class ChatMessage extends React.Component {
     return <>{parts}</>;
   }
 
+  // 紧凑模式工具按钮的 Popover 渲染。两处 caller(_renderAssistantContentLegacy 与
+  // _renderAssistantContentInOrder)使用完全相同的逻辑,抽出统一维护;tr 为 toolResultMap[tu.id],
+  // 可能 undefined(末轮未返回 / WebSearch / 历史未到位),compactResultPreview 内部短路返回 null。
+  _renderSimplifiedToolPill(tu, tr) {
+    // 用函数式 content 让 AntD 在 hover 触发前不构造预览(大 base64 图场景下显著省 CPU);
+    // destroyTooltipOnHide 配合 hover 关闭后释放 DOM,避免 detached node 持有图片字节。
+    const renderContent = () => {
+      const preview = compactResultPreview(tr);
+      return (
+        <div className={styles.simplifiedToolPopoverContent}>
+          {this.renderToolCall(tu)}
+          {preview && (
+            <div className={styles.simplifiedToolResultPreview}>
+              {preview.images && preview.images.map((img, idx) => (
+                img.oversized ? (
+                  <div key={`img-${idx}`} className={styles.simplifiedToolResultImagePlaceholder}>
+                    {`[image ${(img.mediaType || '').replace('image/', '')} · ${Math.round(img.sizeBytes / 1024)} KB · too large to preview]`}
+                  </div>
+                ) : (
+                  <img
+                    key={`img-${idx}`}
+                    src={img.src}
+                    alt={img.mediaType || 'image'}
+                    className={styles.simplifiedToolResultImage}
+                    loading="lazy"
+                  />
+                )
+              ))}
+              {preview.text && <div className={styles.simplifiedToolResultText}>{preview.text}</div>}
+            </div>
+          )}
+        </div>
+      );
+    };
+    return (
+      <Popover
+        key={`stag-${tu.id}`}
+        placement="top"
+        overlayClassName="simplifiedToolPopover"
+        overlayInnerStyle={{ background: 'var(--bg-elevated)', border: '1px solid var(--border-hover)', borderRadius: 8, padding: 0 }}
+        content={renderContent}
+        destroyTooltipOnHide
+        mouseEnterDelay={0.5}
+        {...((isMobile && !isPad) ? { trigger: 'click', ...(!isIOS && { getPopupContainer: (node) => node.parentElement }) } : {})}
+      >
+        <span className={styles.simplifiedToolTag}>{tu.name}</span>
+      </Popover>
+    );
+  }
+
   renderToolResult(tr) {
     if (!tr) return null;
     return (
-      <ToolResultView toolName={tr.toolName} toolInput={tr.toolInput} resultText={tr.resultText} defaultCollapsed={this.props.collapseToolResults} />
+      <ToolResultView toolName={tr.toolName} toolInput={tr.toolInput} resultText={tr.resultText} images={tr.images} defaultCollapsed={this.props.collapseToolResults} />
     );
   }
 
@@ -1098,6 +1149,7 @@ class ChatMessage extends React.Component {
     let simplifiedLabelAdded = false;
     toolUseBlocks.forEach((tu, tuIdx) => {
       const isFullDisplayTool = tu.name === 'Edit' || tu.name === 'Write' || tu.name === 'EnterPlanMode' || tu.name === 'ExitPlanMode' || tu.name === 'AskUserQuestion' || tu.name === 'Agent' || tu.name === 'TaskCreate' || tu.name === 'SendMessage';
+      const tr = toolResultMap[tu.id];
       if (simplify && !isFullDisplayTool) {
         // 简化模式：首个标签前加 "使用工具: " 标签
         if (!simplifiedLabelAdded) {
@@ -1107,26 +1159,11 @@ class ChatMessage extends React.Component {
           );
         }
         // 简化模式：非 Edit/Write 工具只显示标签，hover/click 显示完整内容
-        // 移动端 zoom:0.6 导致 Popover 坐标偏移，需 getPopupContainer 渲染在缩放容器内
-        innerContent.push(
-          <Popover
-            key={`stag-${tu.id}`}
-            placement="top"
-            overlayClassName="simplifiedToolPopover"
-            overlayInnerStyle={{ background: 'var(--bg-elevated)', border: '1px solid var(--border-hover)', borderRadius: 8, padding: 0 }}
-            content={<div className={styles.simplifiedToolPopoverContent}>{this.renderToolCall(tu)}</div>}
-            mouseEnterDelay={0.3}
-            {...((isMobile && !isPad) ? { trigger: 'click', ...(!isIOS && { getPopupContainer: (node) => node.parentElement }) } : {})}
-          >
-            <span className={styles.simplifiedToolTag}>{tu.name}</span>
-          </Popover>
-        );
+        innerContent.push(this._renderSimplifiedToolPill(tu, tr));
       } else {
         simplifiedLabelAdded = false; // 遇到完整展示工具后重置，下一组简化标签前重新显示 label
         innerContent.push(this.renderToolCall(tu));
       }
-
-      const tr = toolResultMap[tu.id];
 
       // 危险操作审批卡片：第一个无 tool_result 的 tool_use + 有活跃的 dangerous prompt
       const isFirstPendingTool = !tr && !toolUseBlocks.slice(0, tuIdx).some(t2 => !toolResultMap[t2.id]);
@@ -1305,6 +1342,7 @@ class ChatMessage extends React.Component {
         const tu = block;
         const tuIdxInList = toolUseGlobalIndices.indexOf(i);
         const isFullDisplayTool = tu.name === 'Edit' || tu.name === 'Write' || tu.name === 'EnterPlanMode' || tu.name === 'ExitPlanMode' || tu.name === 'AskUserQuestion' || tu.name === 'Agent' || tu.name === 'TaskCreate' || tu.name === 'SendMessage';
+        const tr = toolResultMap[tu.id];
         if (simplify && !isFullDisplayTool) {
           if (!simplifiedLabelAdded) {
             simplifiedLabelAdded = true;
@@ -1312,25 +1350,11 @@ class ChatMessage extends React.Component {
               <span key={`stag-label-${i}`} className={styles.simplifiedToolLabel}>{t('ui.toolsUsed')}</span>
             );
           }
-          innerContent.push(
-            <Popover
-              key={`stag-${tu.id}`}
-              placement="top"
-              overlayClassName="simplifiedToolPopover"
-              overlayInnerStyle={{ background: 'var(--bg-elevated)', border: '1px solid var(--border-hover)', borderRadius: 8, padding: 0 }}
-              content={<div className={styles.simplifiedToolPopoverContent}>{this.renderToolCall(tu)}</div>}
-              mouseEnterDelay={0.3}
-              {...((isMobile && !isPad) ? { trigger: 'click', ...(!isIOS && { getPopupContainer: (node) => node.parentElement }) } : {})}
-            >
-              <span className={styles.simplifiedToolTag}>{tu.name}</span>
-            </Popover>
-          );
+          innerContent.push(this._renderSimplifiedToolPill(tu, tr));
         } else {
           simplifiedLabelAdded = false;
           innerContent.push(this.renderToolCall(tu));
         }
-
-        const tr = toolResultMap[tu.id];
         const isFirstPendingTool = !tr && tuIdxInList >= 0 && !toolUseGlobalIndices.slice(0, tuIdxInList).some(gi => !toolResultMap[content[gi].id]);
         if (isFirstPendingTool && this.props.activeDangerousPrompt && this.props.cliMode) {
           const dp = this.props.activeDangerousPrompt;
@@ -1523,7 +1547,7 @@ class ChatMessage extends React.Component {
   }
 
   renderSubAgentMessage() {
-    const { label, resultText, toolName, toolInput } = this.props;
+    const { label, resultText, toolName, toolInput, images } = this.props;
     const tmAvatar = this.props.isTeammate ? getTeammateAvatar(label) : null;
     return (
       <div className={styles.messageRow}>
@@ -1533,7 +1557,7 @@ class ChatMessage extends React.Component {
         <div className={styles.contentCol}>
           {this.renderLabel(label)}
           <div className={styles.bubbleSubAgent}>
-            <ToolResultView toolName={toolName} toolInput={toolInput} resultText={resultText} />
+            <ToolResultView toolName={toolName} toolInput={toolInput} resultText={resultText} images={images} />
           </div>
         </div>
       </div>

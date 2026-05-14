@@ -8,6 +8,7 @@ import { restoreSlimmedEntry } from './entry-slim.js';
 import { classifyRequest, formatRequestTag, formatTeammateLabel } from './requestType';
 import { getModelInfo, getEffectiveModel } from './helpers';
 import { getTeammateAvatar } from './teammateAvatars';
+import { buildSubAgentResultMap, buildGlobalToolResultIndex } from './toolResultBuilder';
 
 export function buildTeamModalData(team, requests, mainAgentSessions) {
   const startIdx = team.requestIndex;
@@ -107,6 +108,10 @@ export function buildTeamModalData(team, requests, mainAgentSessions) {
     }
   }
 
+  // 全局 tool_result 索引(team 范围内):并行 sub-agent 请求穿插,K+1 不可预测;
+  // 一次性建 id → result 索引,O(1) 查询。
+  const teamGlobalIndex = buildGlobalToolResultIndex(teamRequests);
+
   // 收集 assistant + sub-agent 条目
   for (let i = 0; i < teamRequests.length; i++) {
     const req = teamRequests[i];
@@ -119,18 +124,7 @@ export function buildTeamModalData(team, requests, mainAgentSessions) {
     if (isMA) {
       entries.push({ type: 'assistant', content: respContent, timestamp: req.response?.timestamp || req.timestamp, requestIndex: startIdx + i, modelInfo });
     } else if (isSub) {
-      const subToolResultMap = {};
-      const msgs = req.body?.messages || [];
-      for (const msg of msgs) {
-        if (msg.role === 'tool_result' || (msg.role === 'user' && Array.isArray(msg.content))) {
-          const blocks = Array.isArray(msg.content) ? msg.content : [msg];
-          for (const b of blocks) {
-            if (b.type === 'tool_result' && b.tool_use_id) {
-              subToolResultMap[b.tool_use_id] = { resultText: typeof b.content === 'string' ? b.content : JSON.stringify(b.content) };
-            }
-          }
-        }
-      }
+      const subToolResultMap = buildSubAgentResultMap(req, teamGlobalIndex);
       entries.push({
         type: 'sub-agent',
         content: respContent,

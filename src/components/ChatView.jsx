@@ -18,7 +18,7 @@ import { buildChunksForAnswer, buildBracketPasteSubmitChunks, BRACKET_PASTE_SUBM
 import { isPlanApprovalPrompt, isDangerousOperationPrompt, parseToolInfoFromBuffer } from '../utils/promptClassifier';
 import { isImageFile, isMutatingCommand } from '../utils/commandValidator';
 import { loadExpandedPaths, saveExpandedPaths } from '../utils/fileExpandedPathsStorage';
-import { createEmptyToolState, appendToolResultMap, cachedBuildToolResultMap, getToolResultCache, setToolResultCache } from '../utils/toolResultBuilder';
+import { createEmptyToolState, appendToolResultMap, cachedBuildToolResultMap, getToolResultCache, setToolResultCache, buildSubAgentResultMap, createEmptyGlobalIndexState, appendToGlobalToolResultIndex } from '../utils/toolResultBuilder';
 import { refreshPlanApprovalOnCachedItems } from '../utils/refreshPlanApprovalCache';
 import { refreshAskAnswerOnCachedItems } from '../utils/refreshAskAnswerCache';
 import { resolveBubbleProducerTs } from '../utils/sessionManager';
@@ -165,7 +165,7 @@ class ChatView extends React.Component {
     //
     // ── SubAgent/Teammate 渲染入口 ──
     //   subAgentEntries      : 非 MainAgent 的 Sub/Teammate 消息渲染数据（时序插入到主列表里）
-    this._reqScanCache = { tsToIndex: {}, modelName: null, completedModelName: null, modelNameByReqIdx: [], subAgentEntries: [], processedCount: 0, requestCacheTokenMap: new Map() };
+    this._reqScanCache = { tsToIndex: {}, modelName: null, completedModelName: null, modelNameByReqIdx: [], subAgentEntries: [], processedCount: 0, subAgentProcessedCount: 0, requestCacheTokenMap: new Map(), globalIndexState: createEmptyGlobalIndexState(), globalIndexProcessedCount: 0 };
 
     // buildAllItems session 级缓存
     // 每项: { session, msgsLen, subCount, items, tsEntries, lastPendingAskId, lastPendingPlanId }
@@ -757,7 +757,7 @@ class ChatView extends React.Component {
           this._incToolState = null;
           this._incToolProcessedCount = 0;
           this._incToolSessionIdx = -1;
-          this._reqScanCache = { tsToIndex: {}, modelName: null, completedModelName: null, modelNameByReqIdx: [], subAgentEntries: [], processedCount: 0, subAgentProcessedCount: 0, requestCacheTokenMap: new Map() };
+          this._reqScanCache = { tsToIndex: {}, modelName: null, completedModelName: null, modelNameByReqIdx: [], subAgentEntries: [], processedCount: 0, subAgentProcessedCount: 0, requestCacheTokenMap: new Map(), globalIndexState: createEmptyGlobalIndexState(), globalIndexProcessedCount: 0 };
           this._sessionItemCache = [];
         }
         this._prevSessions = this.props.mainAgentSessions;
@@ -780,6 +780,8 @@ class ChatView extends React.Component {
       this._reqScanCache.subAgentEntries = [];
       this._reqScanCache.subAgentProcessedCount = 0;
       this._reqScanCache.requestCacheTokenMap = new Map();
+      this._reqScanCache.globalIndexState = createEmptyGlobalIndexState();
+      this._reqScanCache.globalIndexProcessedCount = 0;
       this.startRender();
       // subAgent / teammate 的 tool_result 只走 requests 路径（不进 mainAgentSessions），
       // 必须在这里也调一次刷新检查，否则它们的文件修改完全感知不到
@@ -1509,6 +1511,17 @@ class ChatView extends React.Component {
           cache.subAgentEntries.pop();
         }
       }
+      // 全局 tool_result 索引:并行 SubAgent / Teammate 的请求互相穿插,K+1 不可
+      // 预测,需 id → result 全局映射。增量追加新请求,避免每次 setState 全量重扫。
+      // 与 subStart 同样回退一位:上轮尾项的 response 可能刚到达,需补扫其 response.content。
+      // `!(id in index)` 守卫保证幂等。
+      let globalIndexStart = cache.globalIndexProcessedCount || 0;
+      if (globalIndexStart > 0 && globalIndexStart < requests.length) globalIndexStart--;
+      if (globalIndexStart < requests.length) {
+        appendToGlobalToolResultIndex(cache.globalIndexState, requests, globalIndexStart);
+        cache.globalIndexProcessedCount = requests.length;
+      }
+      const globalToolResultIndex = cache.globalIndexState.index;
       for (let i = subStart; i < requests.length; i++) {
         const req = requests[i];
         if (!req.timestamp) continue;
@@ -1516,7 +1529,7 @@ class ChatView extends React.Component {
         if (cls.type === 'SubAgent' || cls.type === 'Teammate') {
           const respContent = req.response?.body?.content;
           if (Array.isArray(respContent) && respContent.length > 0) {
-            const subToolResultMap = cachedBuildToolResultMap(req.body?.messages || []).toolResultMap;
+            const subToolResultMap = buildSubAgentResultMap(req, globalToolResultIndex);
             const isTeammateEntry = cls.type === 'Teammate';
             cache.subAgentEntries.push({
               timestamp: req.timestamp,

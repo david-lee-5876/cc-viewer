@@ -277,7 +277,9 @@ export function truncateText(text, maxLen) {
   return text.length > maxLen ? text.substring(0, maxLen) + '...' : text;
 }
 
-export function extractToolResultText(toolResult) {
+// 文件内私有,仅供 L755 自调用使用。公共定义在 src/utils/toolResultCore.js,
+// 跨模块请 import 那里的版本(本文件因 SVG/i18n 依赖链不能被 node --test 直接加载)。
+function extractToolResultText(toolResult) {
   if (!toolResult.content) return String(toolResult.content ?? '');
   if (typeof toolResult.content === 'string') return toolResult.content;
   if (Array.isArray(toolResult.content)) {
