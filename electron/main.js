@@ -13,6 +13,7 @@ import { fileURLToPath, pathToFileURL } from 'url';
 import { dirname, join, basename, delimiter } from 'path';
 import { fork, execSync } from 'child_process';
 import { realpathSync, existsSync, readFileSync, watch, mkdirSync, createWriteStream, readdirSync, statSync, unlinkSync } from 'fs';
+import { initDiag, appendDiag, attachDiagListeners } from './diag.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -21,6 +22,12 @@ const rootDir = join(__dirname, '..');
 // pathToFileURL(p).href 在 POSIX 产出 file:///abs/.. 在 Windows 产出 file:///C:/.. —— 两平台 ESM 等价。
 const { t } = await import(pathToFileURL(join(rootDir, 'i18n.js')).href);
 const { getClaudeConfigDir, LOG_DIR } = await import(pathToFileURL(join(rootDir, 'findcc.js')).href);
+
+// 白屏诊断日志（实现在 electron/diag.js）。
+initDiag(LOG_DIR);
+// 主进程兜底：仅 log 不 exit，先观察分布再决定是否升级为终止。
+process.on('uncaughtException', (e) => appendDiag('main:uncaughtException', e));
+process.on('unhandledRejection', (r) => appendDiag('main:unhandledRejection', r));
 
 // --- Resolve shell environment (Finder-launched Electron has minimal env) ---
 // When launched from Finder/dock, process.env lacks shell profile vars (HTTP_PROXY, PATH, LANG, etc.)
@@ -135,17 +142,38 @@ function killChildEscalating(child, escalateMs = 3000) {
 }
 
 async function startMgmtServer() {
-  const { startProxy } = await import(pathToFileURL(join(rootDir, 'proxy.js')).href);
-  const proxyPort = await startProxy();
-  process.env.CCV_PROXY_PORT = String(proxyPort);
-  mgmtServerMod = await import(pathToFileURL(join(rootDir, 'server.js')).href);
-  await mgmtServerMod.startViewer();
-  mgmtPort = mgmtServerMod.getPort();
-  if (claudePath) {
-    mgmtServerMod.setWorkspaceClaudeArgs([]);
-    mgmtServerMod.setWorkspaceClaudePath(claudePath, isNpmVersion);
+  try {
+    const { startProxy } = await import(pathToFileURL(join(rootDir, 'proxy.js')).href);
+    const proxyPort = await startProxy();
+    process.env.CCV_PROXY_PORT = String(proxyPort);
+    mgmtServerMod = await import(pathToFileURL(join(rootDir, 'server.js')).href);
+    await mgmtServerMod.startViewer();
+    mgmtPort = mgmtServerMod.getPort();
+    if (!mgmtPort) {
+      // 端口段 [7048, 7099) 全占 / startViewer 早返回 null —— 后续 loadURL 会拼出
+      // `http://127.0.0.1:null` 直接白屏。日志里把 mgmtPort 显式记下来定位用。
+      appendDiag('main:startMgmtServer', { error: 'getPort() returned null', portRangeHint: '7048-7099' });
+      throw new Error('mgmt server port unavailable');
+    }
+    if (claudePath) {
+      mgmtServerMod.setWorkspaceClaudeArgs([]);
+      mgmtServerMod.setWorkspaceClaudePath(claudePath, isNpmVersion);
+    }
+    mgmtServerMod.setLaunchCallback((path, extraArgs) => createTab(path, extraArgs));
+  } catch (err) {
+    // mgmt server 起不来后续所有 loadURL 会拼出 `http://127.0.0.1:null` 白屏。
+    // 先落 diag 日志，再弹 errorBox 告知用户，最后 exit(1) 让用户能立刻定位到日志而非
+    // 面对白屏发呆。dialog 是阻塞的，用户点确认后才会 app.exit。
+    appendDiag('main:startMgmtServer', { err, mgmtPort, claudePath, isNpmVersion, proxyPort: process.env.CCV_PROXY_PORT });
+    try {
+      dialog.showErrorBox(
+        'CC Viewer 启动失败',
+        `管理服务无法启动：${err && err.message ? err.message : String(err)}\n\n` +
+        `详细日志：~/.claude/cc-viewer/electron-diag.log`,
+      );
+    } catch { /* dialog 在 ready 前调用会抛，忽略后直接退出 */ }
+    app.exit(1);
   }
-  mgmtServerMod.setLaunchCallback((path, extraArgs) => createTab(path, extraArgs));
 }
 
 // --- Tab state ---
@@ -445,10 +473,16 @@ function createTab(projectPath, extraArgs = []) {
   // Timeout
   const timeout = setTimeout(() => {
     if (tabs.get(tabId)?.status === 'loading') {
+      appendDiag('tab:ready-timeout', { tabId, project: tabs.get(tabId)?.projectName, ms: 30000 });
       tabs.get(tabId).status = 'error';
       broadcastTabs();
     }
   }, 30000);
+
+  // fork 失败（execPath 不存在 / 权限）—— 之前完全无人接，主进程直接 crash。
+  child.on('error', (err) => {
+    appendDiag('tab:child-error', { tabId, project: tabs.get(tabId)?.projectName, err });
+  });
 
   child.on('message', (msg) => {
     console.log(`[main] child msg for tab ${tabId}:`, msg.type, msg.port || '', msg.projectName || '', msg.message || '');
@@ -471,6 +505,7 @@ function createTab(projectPath, extraArgs = []) {
         },
       });
       const url = `http://127.0.0.1:${msg.port}${msg.token ? `?token=${msg.token}` : ''}`;
+      attachDiagListeners(view.webContents, 'tab', { tabId, port: msg.port, project: tab.projectName });
       view.webContents.loadURL(url);
       tab.view = view;
 
@@ -502,9 +537,15 @@ function createTab(projectPath, extraArgs = []) {
     }
   });
 
-  child.on('exit', () => {
+  child.on('exit', (code, signal) => {
     clearTimeout(timeout);
     const tab = tabs.get(tabId);
+    // 非正常退出（segfault / OOM / spawnClaude 失败）记 diag；正常 shutdown 安静。
+    if (code !== 0 && code !== null) {
+      appendDiag('tab:child-exit', { tabId, project: tab?.projectName, code, signal, status: tab?.status });
+    } else if (signal && signal !== 'SIGTERM') {
+      appendDiag('tab:child-exit', { tabId, project: tab?.projectName, code, signal, status: tab?.status });
+    }
     if (tab && tab.status === 'loading') {
       tab.status = 'error';
       broadcastTabs();
@@ -618,6 +659,7 @@ function showWorkspaceSelector() {
       },
     });
     const token = mgmtServerMod.getAccessToken();
+    attachDiagListeners(workspaceView.webContents, 'workspace');
     workspaceView.webContents.loadURL(`http://127.0.0.1:${mgmtPort}${token ? `?token=${token}` : ''}`);
   }
   // Remove all tab views, then add workspace view on top
@@ -896,6 +938,7 @@ if (!gotLock) {
         autoplayPolicy: 'no-user-gesture-required',
       },
     });
+    attachDiagListeners(tabBarView.webContents, 'tabBar');
     tabBarView.webContents.loadFile(join(__dirname, 'tab-bar.html'));
     mainWindow.contentView.addChildView(tabBarView);
 

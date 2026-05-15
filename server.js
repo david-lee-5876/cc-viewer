@@ -46,7 +46,8 @@ import { getGitDiffs, countUntrackedLines, getUnpushedCommits, isValidCommitHash
 import { CONTEXT_WINDOW_FILE, readModelContextSize, buildContextWindowEvent, getContextSizeForModel } from './lib/context-watcher.js';
 import { watchLogFile, startWatching, getWatchedFiles, sendEventToClients, sendToClients } from './lib/log-watcher.js';
 import { isMainAgentEntry, extractCachedContent } from './lib/kv-cache-analyzer.js';
-import { listLocalLogs, deleteLogFiles, mergeLogFiles } from './lib/log-management.js';
+import { listLocalLogs, deleteLogFiles, mergeLogFiles, archiveLogFiles } from './lib/log-management.js';
+import { cleanupExtractCache } from './lib/jsonl-archive.js';
 import { countLogEntries, streamRawEntriesAsync, readPagedEntries } from './lib/log-stream.js';
 import { awaitDrainOrClose } from './lib/sse-backpressure.js';
 import { enrichRawIfNeeded } from './lib/enrich-plan-input.js';
@@ -3680,7 +3681,7 @@ async function handleRequest(req, res) {
       res.end(JSON.stringify({ error: 'Invalid file name' }));
       return;
     }
-    if (!file.endsWith('.jsonl')) {
+    if (!file.endsWith('.jsonl') && !file.endsWith('.jsonl.zip')) {
       res.writeHead(400, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'Invalid file type' }));
       return;
@@ -3699,8 +3700,11 @@ async function handleRequest(req, res) {
         res.end(JSON.stringify({ error: 'Access denied' }));
         return;
       }
-      const fileName = basename(file);
       const format = parsedUrl.searchParams.get('format');
+      // 默认下载重建后的 .jsonl；raw 下载原始字节（.zip 或 .jsonl 视实际而定）
+      const fileName = (format !== 'raw' && file.endsWith('.jsonl.zip'))
+        ? basename(file).slice(0, -4)
+        : basename(file);
       // Delta storage: format=raw 下载原始文件；默认下载重建后的全量格式
       if (format === 'raw') {
         const stat = statSync(realPath);
@@ -3740,10 +3744,10 @@ async function handleRequest(req, res) {
       return;
     }
 
-    // 验证文件类型：只允许 .jsonl 文件
-    if (!file.endsWith('.jsonl')) {
+    // 验证文件类型：允许 .jsonl 或 .jsonl.zip
+    if (!file.endsWith('.jsonl') && !file.endsWith('.jsonl.zip')) {
       res.writeHead(400, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: 'Invalid file type. Only .jsonl files are allowed.' }));
+      res.end(JSON.stringify({ error: 'Invalid file type. Only .jsonl(.zip) files are allowed.' }));
       return;
     }
 
@@ -3770,6 +3774,9 @@ async function handleRequest(req, res) {
       res.end();
     } catch (err) {
       // 如果 headers 未发送，返回 JSON 错误；否则关闭连接
+      // 落 stderr 让用户在 ccv 终端能看到 .jsonl.zip 解压失败等具体原因（SSE onerror 在客户端
+      // 不携带错误明细，只能从服务端日志反查）
+      console.error('[local-log]', file, err && err.stack || err);
       if (!res.headersSent) {
         const status = err.code === 'NOT_FOUND' ? 404 : err.code === 'ACCESS_DENIED' ? 403 : 500;
         res.writeHead(status, { 'Content-Type': 'application/json' });
@@ -3818,6 +3825,34 @@ async function handleRequest(req, res) {
         const status = err.code === 'NOT_FOUND' ? 404 : err.code === 'INVALID_INPUT' ? 400 : 500;
         res.writeHead(status, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
+
+  // 压缩归档日志文件：每个 .jsonl 压成同目录同名 .jsonl.zip，删除原文件
+  if (url === '/api/archive-logs' && method === 'POST') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; if (body.length > MAX_POST_BODY) req.destroy(); });
+    req.on('end', () => {
+      try {
+        const { files } = JSON.parse(body);
+        if (!Array.isArray(files) || files.length === 0) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'No files specified' }));
+          return;
+        }
+        if (files.length > 50) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Too many files (max 50 per request)' }));
+          return;
+        }
+        const result = archiveLogFiles(LOG_DIR, files);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(result));
+      } catch {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Invalid JSON' }));
       }
     });
     return;
@@ -4082,6 +4117,9 @@ async function handleRequest(req, res) {
 export async function startViewer() {
   // 加载插件（需要在创建服务器之前，以便通过 hook 获取 HTTPS 证书）
   await loadPlugins();
+
+  // 清理过期解压缓存（fire-and-forget；任何错误吞掉）
+  setImmediate(() => { try { cleanupExtractCache(); } catch { /* ignore */ } });
 
   // 通过插件 hook 获取 HTTPS 证书选项
   let httpsOptions = null;

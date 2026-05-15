@@ -476,11 +476,11 @@ export default function CachePopoverContent({
               // 三态契约 → 刷新按钮的 disable / tooltip 决策：
               //   null  = lazy-load 进行中     → disabled + 提示"加载中"
               //   false = lazy-load 失败       → enabled（允许重试）
-              //   {exists:false} = 无 MEMORY.md → disabled + 提示"无记忆文件"
+              //   {exists:false} = 无 MEMORY.md → enabled（用户可能刚创建文件，要能主动重查）
               //   {exists:true , content}      → enabled（正常刷新）
               const isLoading = memory === null;
               const isMissingFile = memory && memory.exists === false;
-              const refreshDisabled = isLoading || isMissingFile;
+              const refreshDisabled = isLoading;
               const tooltipTitle = isLoading ? t('ui.memoryLoading')
                 : isMissingFile ? t('ui.memoryNotFound')
                 : '';
@@ -495,12 +495,14 @@ export default function CachePopoverContent({
                   {t('ui.memoryRefresh')}
                 </Button>
               );
-              // antd v5 disabled Button 不响应 mouse events，Tooltip 需 span 包裹才能触发。
-              return tooltipTitle ? (
+              // antd v5 disabled Button 不响应 mouse events，Tooltip 需 span 包裹才能触发；
+              // enabled 时无需 span 包裹，避免拦截 button click。
+              if (!tooltipTitle) return btn;
+              return (
                 <Tooltip title={tooltipTitle}>
-                  <span>{btn}</span>
+                  {refreshDisabled ? <span>{btn}</span> : btn}
                 </Tooltip>
-              ) : btn;
+              );
             })()}
           </div>
           {memoryBody}

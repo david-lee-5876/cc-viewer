@@ -14,6 +14,7 @@ import { playEvent as playVoiceEvent } from './utils/voicePackPlayer';
 import { DEFAULT_BINDINGS as VP_DEFAULT_BINDINGS } from '../lib/voice-pack-events';
 import { mergeVoicePackInto } from '../lib/approval-modal-prefs';
 import { saveEntries, loadEntries, clearEntries, getCacheMeta, saveSessionEntries, loadSessionEntries, saveSessionIndex } from './utils/entryCache';
+import { loadContextBarLocked, saveContextBarLocked } from './utils/contextBarLockedStorage';
 import { buildSessionIndex, splitHotCold, mergeSessionIndices, HOT_SESSION_COUNT, assignMessageTimestamps, applyInPlaceLastMsgReplace } from './utils/sessionManager';
 import { mergeMainAgentSessions as _mergeMainAgentSessions } from './utils/sessionMerge';
 import { reconstructEntries, createIncrementalReconstructor } from '../lib/delta-reconstructor.js';
@@ -465,7 +466,9 @@ class AppBase extends React.Component {
       .then(res => res.json())
       .then(data => {
         const projectName = data.projectName || '';
-        this.setState({ projectName });
+        // localLog (?logfile=) 是只读历史快照，无 /clear 语义，跳过 hydrate 避免误锁。
+        const persistedLocked = logfile ? false : loadContextBarLocked(projectName);
+        this.setState({ projectName, contextBarLocked: persistedLocked });
         if (projectName) document.title = projectName;
         // 移动端：从缓存恢复数据，在 SSE 数据到达前立即渲染
         if (isMobile && projectName && !logfile && this.state.requests.length === 0) {
@@ -629,6 +632,8 @@ class AppBase extends React.Component {
     }
 
     this._teardownTransientLiveState();
+    // 这里只重置 in-memory state，**不**清 sessionStorage：lock 是用户语义状态
+    // （刚 /clear），不该被网络抖动 / SSE 断流清零；刷新后由 hydrate 恢复。
     this.setState({ isStreaming: false, contextBarLocked: false });
     if (this._sseReconnectTimer) clearTimeout(this._sseReconnectTimer);
     this._sseReconnectTimer = setTimeout(() => { this.initSSE(); }, 2000);
@@ -856,6 +861,18 @@ class AppBase extends React.Component {
         this._chunkedTotal = 0;
         const isIncremental = this._isIncremental;
         this._isIncremental = false;
+        // 解锁信号：增量模式下出现至少一条**带 body.messages 的 mainAgent** 条目，说明
+        // mainAgent 真有新一轮请求落盘。仅看 delta.length>0 会被 SSE 重连时 backlog
+        // replay 的旧 entry（synthetic、post-stop hook 等）误触发；mainAgent + body.messages
+        // 才是"用户实际发了内容"的最强信号。
+        if (isIncremental && this.state.contextBarLocked) {
+          const hasMainAgentTurn = delta.some(e => {
+            if (!e || !e.mainAgent) return false;
+            const msgs = e.body?.messages;
+            return Array.isArray(msgs) && msgs.length > 0;
+          });
+          if (hasMainAgentTurn) this._setContextBarLocked(false);
+        }
 
         // 增量模式：Map 去重合并（delta 条目覆盖同 key 的缓存条目）
         let rawEntries;
@@ -1007,6 +1024,9 @@ class AppBase extends React.Component {
         this._resetSSETimeout();
         this._teardownTransientLiveState();
         this._rebuildRequestIndex([]);
+        // 顺序约束：必须在 setState({projectName: ''}) 之前；
+        // 否则 setState 后 this.state.projectName 已空，清不到旧 key。
+        this._clearContextBarLockedForProject(this.state.projectName);
         this.setState({
           workspaceMode: true,
           requests: [],
@@ -1462,13 +1482,25 @@ class AppBase extends React.Component {
 
   handleScrollDone = () => { this.setState({ scrollCenter: false }); };
   handleScrollTsDone = () => { this.setState({ chatScrollToTs: null }); };
-  // 用户点 /clear 时立即把 Header 上下文血条降到 OPTIMISTIC_CLEAR_PERCENT 水位；
-  // 正常路径下一次 context_window SSE 推送会自动取消。
-  // 30s 兜底：SSE 没及时来（PTY 未连接、后端没推、CLI 崩了）时自动清掉，避免血条卡在低位。
-  // 同时进入 locked 状态：忽略 SSE / 其他 re-render，强制血条 0K (0%)，直到用户
-  // 通过 _sendUserMessageImmediate 发出一条非 /clear 消息（见 handleUserMessageSent）。
+
+  // contextBarLocked 单一写入点：state + sessionStorage 同步。
+  // 项目切换路径（workspace_stopped / workspaceLaunch / returnToWorkspaces）涉及
+  // projectName 同帧变更，需显式调用 _clearContextBarLockedForProject(oldProject)，不走此 setter。
+  _setContextBarLocked = (value) => {
+    this.setState({ contextBarLocked: value });
+    saveContextBarLocked(this.state.projectName, value);
+  };
+
+  // 离场旧 project 时清掉它的 sessionStorage lock；不改 state（state 由调用方的 setState 一并处理）。
+  _clearContextBarLockedForProject = (projectName) => {
+    if (projectName) saveContextBarLocked(projectName, false);
+  };
+
+  // /clear：30s 内乐观降低水位 + 锁定 0K (0%)，直到用户发出非 /clear 消息（ChatView 触发）
+  // 或 SSE load_end 增量模式回报有新 entry（load_end handler 触发）才解锁。
   handleClearContextOptimistic = () => {
-    this.setState({ contextBarOptimistic: true, contextBarLocked: true });
+    this.setState({ contextBarOptimistic: true });
+    this._setContextBarLocked(true);
     if (this._clearOptimisticTimer) clearTimeout(this._clearOptimisticTimer);
     this._clearOptimisticTimer = setTimeout(() => {
       this.setState({ contextBarOptimistic: false });
@@ -1476,9 +1508,8 @@ class AppBase extends React.Component {
     }, 30000);
   };
 
-  // ChatView 在 _sendUserMessageImmediate 里对非 /clear 文本调用本方法解锁血条。
   handleUserMessageSent = () => {
-    if (this.state.contextBarLocked) this.setState({ contextBarLocked: false });
+    if (this.state.contextBarLocked) this._setContextBarLocked(false);
   };
 
   // ─── 模式切换 ──────────────────────────────────────────
@@ -1486,13 +1517,22 @@ class AppBase extends React.Component {
   handleWorkspaceLaunch = ({ projectName }) => {
     this._isLocalLog = false;
     this._localLogFile = null;
+    // 切 project：清旧 lock + 按新名 hydrate。
+    const oldProject = this.state.projectName;
+    if (oldProject !== projectName) this._clearContextBarLockedForProject(oldProject);
+    // 清掉旧 project 残留的 optimistic timer，否则会延迟触发到新 project。
+    if (this._clearOptimisticTimer) {
+      clearTimeout(this._clearOptimisticTimer);
+      this._clearOptimisticTimer = null;
+    }
     this.setState({
       workspaceMode: false,
       projectName,
       viewMode: 'chat',
       cliMode: true,
       terminalVisible: false,
-      contextBarLocked: false,
+      contextBarOptimistic: false,
+      contextBarLocked: loadContextBarLocked(projectName),
     });
   };
 
@@ -1501,6 +1541,8 @@ class AppBase extends React.Component {
       .then(() => {
         this._teardownTransientLiveState();
         this._rebuildRequestIndex([]);
+        // 同 workspace_stopped 的顺序约束：必须在 setState 清空 projectName 之前。
+        this._clearContextBarLockedForProject(this.state.projectName);
         this.setState({
           workspaceMode: true,
           requests: [],
@@ -1784,7 +1826,7 @@ class AppBase extends React.Component {
     }
 
     const totalSize = indices.reduce((sum, i) => sum + logs[i].size, 0);
-    if (totalSize > 500 * 1024 * 1024) {
+    if (totalSize > 400 * 1024 * 1024) {
       message.warning(t('ui.mergeTooLarge'));
       return;
     }
@@ -1807,6 +1849,43 @@ class AppBase extends React.Component {
         }
       })
       .catch(() => message.error('Merge failed'));
+  };
+
+  handleArchiveLogs = () => {
+    const { selectedLogs, localLogs, currentProject } = this.state;
+    if (selectedLogs.size === 0) return;
+    const logs = localLogs[currentProject];
+    if (!logs) return;
+    const latestFile = logs[0]?.file;
+    const candidates = [...selectedLogs].filter(f => f.endsWith('.jsonl') && f !== latestFile);
+    if (candidates.length === 0) {
+      message.warning(t('ui.mergeLatestNotAllowed'));
+      return;
+    }
+
+    Modal.confirm({
+      title: t('ui.archiveLogs'),
+      content: t('ui.archiveLogsConfirm', { count: candidates.length }),
+      okText: t('ui.archiveLogs'),
+      cancelText: t('ui.cancel'),
+      onOk: () => {
+        fetch(apiUrl('/api/archive-logs'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ files: candidates }),
+        })
+          .then(res => res.json())
+          .then(data => {
+            const archived = data.archived?.length || 0;
+            const failed = (data.failed?.length || 0) + (data.skipped?.length || 0);
+            if (archived > 0) message.success(t('ui.archiveSuccess', { count: archived }));
+            if (failed > 0) message.error(t('ui.archiveFailed', { count: failed }));
+            this.setState({ selectedLogs: new Set() });
+            this.handleImportLocalLogs();
+          })
+          .catch(() => message.error(t('ui.archiveFailed', { count: candidates.length })));
+      },
+    });
   };
 
   handleDeleteLogs = () => {

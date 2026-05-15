@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.6.267 (2026-05-15)
+
+- feat(log-mgmt): 日志管理工具新增「压缩归档」批操作，单个 .jsonl 压成同名 .jsonl.zip；查看/下载/合并/删除/统计透明支持 .jsonl.zip（首次访问解压到 tmpdir 缓存，sidecar mtime+size 命中跳过解压；UTF-8 GP flag / Zip Slip 防护 / Windows rename 重试 / 启动清理 >7 天未访问缓存；validateZipEntries 上限对齐 400MB 防自家归档读不回；archiveJsonl unlink 失败回滚 zip）
+- fix(context-bar): 修复血条 /clear lock 状态在 mainAgent 已经追加多条新请求后仍卡 0%（SSE load_end 增量模式 + delta 含 mainAgent 带 messages 条目才解锁，避免 backlog replay 误触发）
+- fix(memory): 持久记忆面板「刷新」按钮在 MEMORY.md 不存在时不再灰禁，允许用户主动重查捕捉「从无到有」过程
+- chore(log-mgmt): 日志合并大小上限前后端统一 400MB（原前端 500MB / 后端 300MB 不一致；错误文案随常量参数化）
+- feat(file-explorer): 文件浏览器支持拖到容器空白处 = 移动到项目根目录（之前从二级目录拖回根没有交互入口）；蓝色 dashed 容器高亮区分 external import 的绿色语义；TreeNode dragOver/drop 全分支 stopPropagation 防冒泡误触发；已在根 no-op 静默
+- fix(log-mgmt): 选中含归档（.jsonl.zip）文件时「合并日志」按钮 disabled + 非 primary 样式；mergeLogFiles 后端拒绝 .jsonl.zip 兜底；归档文件「已归档」tag 与 preview 文本并排显示（之前 preview 不空时漏显）
+- feat(context-bar): `/clear` 后血条 lock 状态同步到 sessionStorage（按 projectName 拆 key），刷新页面后保持 0% 锁定到用户发出非 /clear 消息
+- feat(electron-diag): 主进程 + 三层 webContents（tabBar / workspace / tab）错误日志落盘 `~/.claude/cc-viewer/electron-diag.log`（JSON Lines / 2MB rename rotate / token + 用户路径 redact / 单条 16KB cap / 0600 权限 / 循环引用守卫）；startMgmtServer 失败弹 dialog + exit 避免白屏
+- chore(jsonl-archive): cleanupExtractCache 改用 mtimeMs（noatime 兼容）；migrateStatsCacheKey 同步更新 size+mtime 避免 stats 全量重解析；renameWithRetry 阻塞 200ms→50ms 降低 event-loop 影响
+
 ## 1.6.266 (2026-05-15)
 
 - fix(subagent): SubAgent / Teammate 末轮工具结果跨请求补偿渲染（全局 tool_use_id → result 索引,并行 sub-agent 交错场景下结果可正常显示）

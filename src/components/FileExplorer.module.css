@@ -149,6 +149,14 @@
   outline-offset: -2px;
 }
 
+/* 内部拖动（树内文件 → 空白处 = 移到项目根目录）的容器高亮：用蓝色 dashed 区别于
+   external import 的绿色 dashed banner，避免用户误以为是导入操作。 */
+.internalDragOverContainer {
+  outline: 2px dashed var(--color-primary);
+  outline-offset: -2px;
+  background: var(--bg-elevated);
+}
+
 .importOverlay {
   display: flex;
   flex-direction: column;

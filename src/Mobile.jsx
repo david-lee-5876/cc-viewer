@@ -1,6 +1,6 @@
 import React from 'react';
 import { ConfigProvider, Spin, Button, Badge, Switch, Select, Modal, message, Radio } from 'antd';
-import { BranchesOutlined, DownloadOutlined, DeleteOutlined, RollbackOutlined, ReloadOutlined, UploadOutlined } from '@ant-design/icons';
+import { BranchesOutlined, DownloadOutlined, DeleteOutlined, RollbackOutlined, ReloadOutlined, UploadOutlined, FileZipOutlined } from '@ant-design/icons';
 import AppBase, { styles, OPTIMISTIC_CLEAR_PERCENT } from './AppBase';
 import { isIOS, isPad, setViewMode } from './env';
 import { isMainAgent, isSystemText, classifyUserContent } from './utils/contentFilter';
@@ -1054,12 +1054,21 @@ class Mobile extends AppBase {
             <div className={styles.mobileLogMgmtActions}>
               <Button
                 size="small"
-                type={this.state.selectedLogs.size >= 2 ? 'primary' : 'default'}
-                disabled={this.state.selectedLogs.size < 2}
+                type={this.state.selectedLogs.size >= 2 && ![...this.state.selectedLogs].some(f => f.endsWith('.jsonl.zip')) ? 'primary' : 'default'}
+                disabled={this.state.selectedLogs.size < 2 || [...this.state.selectedLogs].some(f => f.endsWith('.jsonl.zip'))}
                 onClick={this.handleMergeLogs}
-                style={this.state.selectedLogs.size < 2 ? { color: 'var(--text-muted)', borderColor: 'var(--border-light)' } : undefined}
+                style={this.state.selectedLogs.size < 2 || [...this.state.selectedLogs].some(f => f.endsWith('.jsonl.zip')) ? { color: 'var(--text-muted)', borderColor: 'var(--border-light)' } : undefined}
               >
                 {t('ui.mergeLogs')}
+              </Button>
+              <Button
+                size="small"
+                icon={<FileZipOutlined />}
+                disabled={![...this.state.selectedLogs].some(f => f.endsWith('.jsonl'))}
+                onClick={this.handleArchiveLogs}
+                style={![...this.state.selectedLogs].some(f => f.endsWith('.jsonl')) ? { color: 'var(--text-muted)', borderColor: 'var(--border-light)' } : undefined}
+              >
+                {t('ui.archiveLogs')}
               </Button>
               <Button
                 size="small"

@@ -36,13 +36,20 @@ function LogTable({ logs, mobile, selectedLogs = EMPTY_SET, onToggleSelect, onOp
       key: 'preview',
       width: mobile ? 150 : undefined,
       ellipsis: true,
-      render: (arr) => {
-        if (!Array.isArray(arr) || arr.length === 0) return '—';
+      render: (arr, log) => {
+        // 已归档文件统一前缀一个"已归档"tag：preview 为空时单独显示，preview 有内容时
+        // 与文本并排（archived 状态独立于 preview 是否保留 stats 缓存）。
+        const archivedTag = log.archived
+          ? <Tag className={styles.tableTag} style={{ marginRight: 6 }}>{t('ui.logArchived')}</Tag>
+          : null;
+        if (!Array.isArray(arr) || arr.length === 0) {
+          return archivedTag || '—';
+        }
         const first = arr[0];
         // 防 server 偶发返回 [null] / [undefined] / [number] — 强制 string 才用作 displayText
-        if (typeof first !== 'string') return '—';
+        if (typeof first !== 'string') return archivedTag || '—';
         const displayText = (first.length <= 30 && arr.length > 1) ? `${first} | ${arr[1]}` : first;
-        if (arr.length <= 1) return <span className={styles.tablePreviewText}>{displayText}</span>;
+        if (arr.length <= 1) return <span className={styles.tablePreviewText}>{archivedTag}{displayText}</span>;
         return (
           <Popover
             trigger={mobile ? 'click' : 'hover'}
@@ -66,7 +73,7 @@ function LogTable({ logs, mobile, selectedLogs = EMPTY_SET, onToggleSelect, onOp
               </div>
             }
           >
-            <span className={styles.tablePreviewTextClickable} style={{ textDecoration: mobile ? 'underline dotted #666' : 'none' }}>{displayText}</span>
+            <span className={styles.tablePreviewTextClickable} style={{ textDecoration: mobile ? 'underline dotted #666' : 'none' }}>{archivedTag}{displayText}</span>
           </Popover>
         );
       },

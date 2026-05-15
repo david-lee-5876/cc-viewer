@@ -264,6 +264,9 @@ function TreeNode({ item, path, depth, onFileClick, expandedPaths, onToggleExpan
     if (isInternal && !isDir) return;
     if (!isExternal && !isInternal) return;
     e.preventDefault();
+    // 节点接受 drop 后阻止冒泡：否则容器级 onDragOver 会同帧 setExternalDragOver(true)
+    // / 覆写 dropEffect，导致视觉闪烁与"拖到空白处=移到根"的语义被错误触发。
+    e.stopPropagation();
     e.dataTransfer.dropEffect = isExternal ? 'copy' : 'move';
     setDragOver(true);
     // hover 在折叠目录上 500ms → 自动展开（外部导入和内部移动都支持）
@@ -285,10 +288,12 @@ function TreeNode({ item, path, depth, onFileClick, expandedPaths, onToggleExpan
 
   const handleDrop = useCallback(async (e) => {
     e.preventDefault();
+    // 任何已 preventDefault 的 drop 都视为"被节点消费"——同时 stopPropagation 防止冒泡
+    // 到容器级 handleContainerDrop 再次触发"移到根"。包含所有 internal early-return 路径。
+    e.stopPropagation();
     setDragOver(false);
     // External file drop — 目录节点导入到该目录，文件节点导入到其父目录
     if (isExternalFileDrag(e) && (e.dataTransfer.files.length > 0 || (e.dataTransfer.items && e.dataTransfer.items.length > 0))) {
-      e.stopPropagation();
       // 同步阶段一次性抽取 entry（异步后 items 会失效）
       const topEntries = getTopLevelEntries(e.dataTransfer.items);
       const flatFiles = Array.from(e.dataTransfer.files);
@@ -540,6 +545,9 @@ export default function FileExplorer({ style, onClose, onFileClick, expandedPath
   const [error, setError] = useState(null);
   const [htmlPreviewPath, setHtmlPreviewPath] = useState(null);
   const [externalDragOver, setExternalDragOver] = useState(false);
+  // 内部拖动（树内文件拖到容器空白处 = 移到项目根目录）的容器高亮状态。
+  // 与 externalDragOver 同帧只可能有一个为 true（容器 dragOver handler 用 isInternal 二选一）。
+  const [internalContainerDragOver, setInternalContainerDragOver] = useState(false);
   const mounted = useRef(true);
   const containerRef = useRef(null);
 
@@ -784,6 +792,7 @@ export default function FileExplorer({ style, onClose, onFileClick, expandedPath
   const resetDragState = useCallback(() => {
     if (dragTimerRef.current) { clearTimeout(dragTimerRef.current); dragTimerRef.current = null; }
     setExternalDragOver(false);
+    setInternalContainerDragOver(false);
   }, []);
 
   // 全局 drop/dragend 兜底：确保任何情况下状态都能重置
@@ -798,33 +807,72 @@ export default function FileExplorer({ style, onClose, onFileClick, expandedPath
   }, [resetDragState]);
 
   const handleContainerDragOver = useCallback((e) => {
-    if (!isExternalFileDrag(e)) return;
+    const isInternal = e.dataTransfer.types.includes('text/x-internal-move');
+    const isExternal = isExternalFileDrag(e);
+    if (!isInternal && !isExternal) return;
     e.preventDefault();
-    e.dataTransfer.dropEffect = 'copy';
-    if (!externalDragOver) setExternalDragOver(true);
+    if (isInternal) {
+      e.dataTransfer.dropEffect = 'move';
+      if (!internalContainerDragOver) setInternalContainerDragOver(true);
+    } else {
+      e.dataTransfer.dropEffect = 'copy';
+      if (!externalDragOver) setExternalDragOver(true);
+    }
     // 每次 dragover 重置定时器，300ms 内无新 dragover 则清除状态
     if (dragTimerRef.current) clearTimeout(dragTimerRef.current);
     dragTimerRef.current = setTimeout(() => {
       setExternalDragOver(false);
+      setInternalContainerDragOver(false);
       dragTimerRef.current = null;
     }, 300);
-  }, [externalDragOver]);
+  }, [externalDragOver, internalContainerDragOver]);
 
-  const handleContainerDrop = useCallback((e) => {
+  const handleContainerDrop = useCallback(async (e) => {
     resetDragState();
-    if (!isExternalFileDrag(e)) return;
-    e.preventDefault();
-    e.stopPropagation();
-    // 同步阶段一次性抽取 entry（异步后 items 会失效）
-    const topEntries = getTopLevelEntries(e.dataTransfer.items);
-    const flatFiles = Array.from(e.dataTransfer.files);
-    if ((topEntries && topEntries.length > 0) || flatFiles.length > 0) {
-      importFiles({ topEntries, flatFiles }, '');
+    // 1) External file drop：保留既有 import 行为（拖外部文件到容器空白处 = 导入到根）
+    if (isExternalFileDrag(e)) {
+      e.preventDefault();
+      e.stopPropagation();
+      // 同步阶段一次性抽取 entry（异步后 items 会失效）
+      const topEntries = getTopLevelEntries(e.dataTransfer.items);
+      const flatFiles = Array.from(e.dataTransfer.files);
+      if ((topEntries && topEntries.length > 0) || flatFiles.length > 0) {
+        importFiles({ topEntries, flatFiles }, '');
+      }
+      return;
     }
-  }, [importFiles, resetDragState]);
+    // 2) Internal move：拖树内文件到容器空白处 = 移到项目根目录。
+    //    TreeNode 内 drop 已 stopPropagation，所以只有"目标 = 空白处"才会走到这里。
+    if (!e.dataTransfer.types.includes('text/x-internal-move')) return;
+    e.preventDefault();
+    const fromPath = e.dataTransfer.getData('text/plain');
+    if (!fromPath) {
+      // Safari / Firefox 个别版本在 drop 阶段 getData('text/plain') 偶发返空，
+      // 用户感知是"拖到空白处啥也没发生"；落一条 warn 便于排查这种平台 bug。
+      console.warn('[FileExplorer] internal-move drop with empty fromPath; ignored');
+      return;
+    }
+    const fromDir = fromPath.includes('/') ? fromPath.substring(0, fromPath.lastIndexOf('/')) : '';
+    if (fromDir === '') return; // 已在根，no-op（拖回原位无效果，符合直觉）
+    try {
+      const res = await fetch(apiUrl('/api/move-file'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fromPath, toDir: '' }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        message.error(data.error || 'Move failed');
+        return;
+      }
+      if (onFileRenamed) onFileRenamed(fromPath, data.newPath);
+    } catch (err) {
+      message.error(err.message || 'Move failed');
+    }
+  }, [importFiles, resetDragState, onFileRenamed]);
 
   return (
-    <div ref={containerRef} className={styles.fileExplorer} style={style} data-file-explorer onDragOver={handleContainerDragOver} onDrop={handleContainerDrop}>
+    <div ref={containerRef} className={`${styles.fileExplorer}${internalContainerDragOver ? ' ' + styles.internalDragOverContainer : ''}`} style={style} data-file-explorer onDragOver={handleContainerDragOver} onDrop={handleContainerDrop}>
       <div className={styles.header}>
         <Dropdown menu={{ items: headerMenuItems, onClick: handleHeaderMenuClick }} trigger={['contextMenu']}>
           <span className={styles.headerTitle}>
