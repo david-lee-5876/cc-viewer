@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.6.269 (2026-05-16)
+
+- fix(file-browser): 指向目录的 symlink 不再被误标为 file，可正常展开（Dirent.isDirectory 不解引用 link → 对 symlink 走 statSync follow，断链兜底 file）
+- fix(terminal): 嵌入终端 zsh 现在能正确 source 用户 `~/.zshrc`（wrapper `.zshenv` 里 `${ZDOTDIR:-…}` 永远命中 wrapper dir 导致 `.zshrc` 的 `[[ != ]]` 恒假；改为显式比较 wrapper dir，并补一条 spawn zsh 的端到端回归测试）
+- fix(context-bar): /clear 血条 lock 增加两条解锁兜底（SSE `context_window` 新测量推送 / `streaming.active=true`），覆盖 WS 抖动、非增量 load、pty 直接键入等 `onUserMessageSent` 漏触发场景
+
 ## 1.6.268 (2026-05-15)
 
 - feat(approval-sound): 「审批提示音」与「语音包」合并为单一开关，OFF 时音量/事件 binding/上传隐藏，默认开启；旧版若两开关不一致，hydrate 时以「审批提示音」为准强制对齐

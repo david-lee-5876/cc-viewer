@@ -1053,7 +1053,11 @@ class AppBase extends React.Component {
         this._resetSSETimeout();
         try {
           const data = JSON.parse(event.data);
-          this.setState({ contextWindow: data, contextBarOptimistic: false });
+          // 收到新的 context_window 测量 → 同步解锁血条。
+          // 兜底场景：onUserMessageSent / load_end fallback 都没触发解锁时
+          //（WS 抖动、非增量 load、纯外部输入），SSE 推送的真实测量值就是
+          //「会话已推进」的最强信号，避免 lock 永久卡 0%。
+          this.setState({ contextWindow: data, contextBarOptimistic: false, contextBarLocked: false });
           if (this._clearOptimisticTimer) { clearTimeout(this._clearOptimisticTimer); this._clearOptimisticTimer = null; }
         } catch { }
       });
@@ -1116,7 +1120,12 @@ class AppBase extends React.Component {
           if (data.active) {
             // 立即显示 loading
             clearTimeout(this._streamingOffTimer);
-            this.setState({ isStreaming: true });
+            // agent 开始响应 = 新一轮已落实 → 顺手解锁血条。
+            // 覆盖 onUserMessageSent 没触发的极端情况（WS 抖动 / 外部输入 /
+            // pty 直接键入），避免 lock 永久卡 0%。
+            const patch = { isStreaming: true };
+            if (this.state.contextBarLocked) patch.contextBarLocked = false;
+            this.setState(patch);
           } else {
             // 延迟隐藏，避免工具调用间隙导致 spinner 频繁闪烁
             clearTimeout(this._streamingOffTimer);
