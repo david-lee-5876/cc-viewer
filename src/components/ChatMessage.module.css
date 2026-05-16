@@ -130,6 +130,17 @@
   color: #fff;
 }
 
+[data-theme="light"] .bubbleUser {
+  background: var(--bubble-user-bg-light);
+  border-color: var(--bubble-user-bg-light);
+}
+[data-theme="light"] .bubbleUser:hover {
+  border-color: var(--bubble-user-hover-border-light);
+}
+[data-theme="light"] .bubbleUser.bubbleHighlight {
+  box-shadow: var(--bubble-user-highlight-shadow-light);
+}
+
 .bubbleAssistant {
   composes: bubble;
   background: var(--bg-container);
@@ -144,6 +155,10 @@
 .bubbleAssistant:hover {
   background: var(--bg-container);
   border: 1px solid var(--border-secondary);
+}
+
+[data-theme="light"] .bubbleAssistant {
+  box-shadow: var(--bubble-assistant-shadow-light);
 }
 
 .bubbleHighlight {
@@ -552,6 +567,17 @@
   white-space: pre-wrap;
   word-break: break-all;
   margin: 0;
+}
+
+/* light theme 下 Compact summary 被包在深色 .bubbleUser 里,文字色需反转 */
+[data-theme="light"] .bubbleUser .compactPre {
+  color: #fff;
+}
+
+/* slash 命令本地化标签的 span,留作未来视觉钩子(下划线/虚线/cursor 提示等),
+   当前与普通 user bubble 文本无视觉差异。 */
+.slashCommandLabel {
+  cursor: help;
 }
 
 /* === View request button === */

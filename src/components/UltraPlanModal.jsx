@@ -77,12 +77,11 @@ export default function UltraPlanModal({
                   type="button"
                   className={styles.addExpertBtn}
                   onClick={() => onOpenCustomEditor(null)}
-                  title={t('ui.ultraplan.customAdd')}
-                  aria-label={t('ui.ultraplan.customAdd')}
                 >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M12 5v14M5 12h14" />
                   </svg>
+                  {t('ui.ultraplan.customExpert')}
                 </button>
               )}
             </div>

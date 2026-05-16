@@ -859,19 +859,21 @@
 }
 
 .ultraplanAddExpertBtn {
-  width: 26px;
-  height: 26px;
-  margin-left: 2px;
   display: inline-flex;
   align-items: center;
-  justify-content: center;
+  gap: 4px;
+  padding: 4px 10px;
+  font-size: 12px;
+  line-height: 1.6;
+  margin-left: 2px;
   border: 1px dashed var(--border-primary);
-  border-radius: 50%;
+  border-radius: 14px;
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
   transition: all 0.2s;
-  padding: 0;
+  user-select: none;
+  white-space: nowrap;
 }
 
 .ultraplanAddExpertBtn:hover {
@@ -879,6 +881,13 @@
   border-color: var(--color-primary);
   color: var(--color-primary);
   background: var(--bg-surface);
+}
+
+/* light theme:dashed border + text-muted 在白底上对比度偏弱(static 状态接近
+   placeholder/disabled 视感),用 text-secondary 提色保留「新增 = 待激活」语义。 */
+[data-theme="light"] .ultraplanAddExpertBtn {
+  color: var(--text-secondary);
+  border-color: var(--text-disabled);
 }
 
 .ultraplanRoleBtnActive {

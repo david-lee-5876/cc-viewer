@@ -18,6 +18,7 @@ import { shouldPortalAskForm } from '../utils/askPortalMatcher';
 import { SettingsContext } from '../contexts/SettingsContext';
 import { t } from '../i18n';
 import { tc } from '../utils/tClaude';
+import { getSlashCommandLabel, getSlashCommandTooltip } from '../utils/slashCommandLabels';
 import { isPlanApprovalPrompt } from '../utils/promptClassifier';
 import DiffView from './DiffView';
 import ToolResultView from './ToolResultView';
@@ -183,6 +184,7 @@ class ChatMessage extends React.Component {
       p.onDangerousApprovalClick !== n.onDangerousApprovalClick || p.onAskQuestionSubmit !== n.onAskQuestionSubmit ||
       p.onAskQuestionCancel !== n.onAskQuestionCancel ||
       p.askMetaMap !== n.askMetaMap ||
+      p.lang !== n.lang ||
       p.taskNotification?.taskId !== n.taskNotification?.taskId;
   }
 
@@ -923,7 +925,7 @@ class ChatMessage extends React.Component {
             <div className={styles.labelRow}>
               {timeStr && <Text className={styles.timeTextNoMargin}>{timeStr}</Text>}
               {this.renderViewRequestBtn()}
-              <Text type="secondary" className={styles.labelTextRight}>{userName} — /compact</Text>
+              <Text type="secondary" className={styles.labelTextRight}>{userName} — {t('ui.slashCommand.compact')}</Text>
             </div>
             {this.renderHighlightBubble(styles.bubbleUser, (
               <Collapse
@@ -931,7 +933,7 @@ class ChatMessage extends React.Component {
                 size="small"
                 items={[{
                   key: '1',
-                  label: <Text className={styles.compactLabel}>Compact Summary</Text>,
+                  label: <Text className={styles.compactLabel}>{t('ui.compactSummary')}</Text>,
                   children: <pre className={styles.compactPre}>{text}</pre>,
                 }]}
                 className={styles.collapseNoMargin}
@@ -943,6 +945,17 @@ class ChatMessage extends React.Component {
       );
     }
 
+    const slashLabel = getSlashCommandLabel(text);
+    // Tooltip 只显裸命令(`/model` 而非 `/model <args>`),避免 /login 等带敏感
+    // 参数的命令在 hover/移动端长按时把 token 暴露给旁观者。
+    const bubbleContent = slashLabel != null
+      ? (
+        <Tooltip title={getSlashCommandTooltip(text)} mouseEnterDelay={0.3} placement="top">
+          <span className={styles.slashCommandLabel}>{slashLabel}</span>
+        </Tooltip>
+      )
+      : this.renderUserTextWithImages(text);
+
     return (
       <div className={styles.messageRowEnd}>
         <div className={styles.contentColLimited}>
@@ -951,7 +964,7 @@ class ChatMessage extends React.Component {
             {this.renderViewRequestBtn()}
             <Text type="secondary" className={styles.labelTextRight}>{userName}</Text>
           </div>
-          {this.renderHighlightBubble(styles.bubbleUser, this.renderUserTextWithImages(text))}
+          {this.renderHighlightBubble(styles.bubbleUser, bubbleContent)}
         </div>
         {this.renderUserAvatar('#1e40af')}
       </div>

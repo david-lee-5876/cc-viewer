@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- feat(chat): 用户气泡里的内置 slash 命令(/clear /compact /theme /model 等 33 个)按当前语言展示本地化标签,带参形态拼回原始参数;Tooltip 只显裸命令避免 /login 等敏感参数泄漏;Unicode 换行 / bidi-control 注入过滤;切语言即时刷新(ChatMessage SCU 接 lang)
+- feat(theme): 雪山白主题用户气泡走 #222 深底白字,hover / highlight / Compact summary 子区同步覆写;新增 4 个 light theme bubble token
+- feat(ultraplan): UltraPlan 模态与终端面板的「+」按钮统一改为 pill「+ 自定义专家」(33 + 1 个 i18n key × 18 语言,light theme 提色 override)
+- fix(ui): Compact summary 折叠头改 `t('ui.compactSummary')` 替代英文字面值;紧凑模式 chip grid / mcpServerName padding-left 14→2 对齐左缘;navSidebar padding-top 4
+
 ## 1.6.269 (2026-05-16)
 
 - fix(file-browser): 指向目录的 symlink 不再被误标为 file，可正常展开（Dirent.isDirectory 不解引用 link → 对 symlink 走 statSync follow，断链兜底 file）

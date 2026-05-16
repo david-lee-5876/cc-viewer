@@ -149,19 +149,21 @@
 }
 
 .addExpertBtn {
-  width: 36px;
-  height: 36px;
-  margin-left: 4px;
   display: inline-flex;
   align-items: center;
-  justify-content: center;
+  gap: 5px;
+  padding: 7px 14px;
+  font-size: 15px;
+  line-height: 1.6;
+  margin-left: 4px;
   border: 1px dashed var(--border-primary);
-  border-radius: 50%;
+  border-radius: 14px;
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
   transition: all 0.2s;
-  padding: 0;
+  user-select: none;
+  white-space: nowrap;
 }
 
 .addExpertBtn:hover {
@@ -169,6 +171,13 @@
   border-color: var(--color-primary);
   color: var(--color-primary);
   background: var(--bg-surface);
+}
+
+/* light theme:dashed border + text-muted 在白底上对比度偏弱(static 状态接近
+   placeholder/disabled 视感),用 text-secondary 提色保留「新增 = 待激活」语义。 */
+[data-theme="light"] .addExpertBtn {
+  color: var(--text-secondary);
+  border-color: var(--text-disabled);
 }
 
 .fileList {

@@ -1521,12 +1521,11 @@ class TerminalPanel extends React.Component {
                         type="button"
                         className={styles.ultraplanAddExpertBtn}
                         onClick={() => this.openCustomUltraplanEditor(null)}
-                        title={t('ui.ultraplan.customAdd')}
-                        aria-label={t('ui.ultraplan.customAdd')}
                       >
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                           <path d="M12 5v14M5 12h14" />
                         </svg>
+                        {t('ui.ultraplan.customExpert')}
                       </button>
                     </div>
                     {this.state.ultraplanFiles.length > 0 && (

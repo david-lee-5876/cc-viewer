@@ -150,6 +150,13 @@
 }
 
 [data-theme="light"] {
+  /* Light-theme bubble overrides:雪山白下用户气泡走深底白字,
+     同步覆写 hover/highlight/compact 子区域颜色,避免 var(--color-primary-*)
+     与 var(--text-primary) 在 #222 深底上对比塌陷。 */
+  --bubble-user-bg-light: #222;
+  --bubble-user-hover-border-light: #444;
+  --bubble-user-highlight-shadow-light: 0 0 12px rgba(255, 255, 255, 0.5);
+  --bubble-assistant-shadow-light: 0 3px 8px rgba(0, 0, 0, 0.08);
   /* Background */
   --bg-base: #FAFAFA;
   --bg-base-pure: #FFFFFF;

@@ -217,6 +217,9 @@ class AppBase extends React.Component {
       preferences: ctx.preferences,
       onUpdatePreferences: ctx.updatePreferences,
       onUpdateClaudeSettings: ctx.updateClaudeSettings,
+      // 把 lang 塞进 settings spread,让 App / Mobile 入口都自动拿到,
+      // 避免 ChatMessage 切语言时只在桌面端刷新而漏移动端。
+      lang: this.state.lang,
     };
   }
 

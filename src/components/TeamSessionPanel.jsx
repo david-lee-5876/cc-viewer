@@ -387,7 +387,7 @@ function TeamGantt({ teamAgents, teamTotalStart, teamTotalEnd, leadSegments, gan
 }
 
 /* ── Main modal component ── */
-function TeamModal({ session, requests, mainAgentSessions, collapseToolResults, expandThinking, userProfile, onViewRequest, isHistoryLog, onClose }) {
+function TeamModal({ session, requests, mainAgentSessions, collapseToolResults, expandThinking, userProfile, onViewRequest, isHistoryLog, lang, onClose }) {
   const modalBodyRef = useRef(null);
   const ganttIndicatorRef = useRef(null);
   const ganttWrapRef = useRef(null);
@@ -553,7 +553,7 @@ function TeamModal({ session, requests, mainAgentSessions, collapseToolResults, 
           <div className={styles.teamModalBody} ref={modalBodyRef} onScroll={onScroll}>
             {entries.map((entry, i) => (
               <div key={`tw-${i}`} data-timestamp={entry.timestamp}>
-                {entry.type === 'user' && <ChatMessage role="user" text={entry.text} timestamp={entry.timestamp} userProfile={userProfile} modelInfo={modelInfo} requestIndex={entry.requestIndex} onViewRequest={onViewRequest} isHistoryLog={isHistoryLog} />}
+                {entry.type === 'user' && <ChatMessage role="user" text={entry.text} lang={lang} timestamp={entry.timestamp} userProfile={userProfile} modelInfo={modelInfo} requestIndex={entry.requestIndex} onViewRequest={onViewRequest} isHistoryLog={isHistoryLog} />}
                 {entry.type === 'assistant' && <ChatMessage role="assistant" content={entry.content} timestamp={entry.timestamp} modelInfo={entry.modelInfo} collapseToolResults={collapseToolResults} expandThinking={expandThinking} toolResultMap={{}} askAnswerMap={{}} requestIndex={entry.requestIndex} onViewRequest={onViewRequest} isHistoryLog={isHistoryLog} />}
                 {entry.type === 'sub-agent' && <ChatMessage role="sub-agent-chat" content={entry.content} toolResultMap={entry.toolResultMap} label={entry.label} isTeammate={entry.isTeammate} timestamp={entry.timestamp} collapseToolResults={collapseToolResults} expandThinking={expandThinking} requestIndex={entry.requestIndex} onViewRequest={onViewRequest} isHistoryLog={isHistoryLog} />}
                 {entry.type === 'context' && <ChatMessage role="assistant" content={[{ type: 'text', text: entry.text }]} timestamp={entry.timestamp} modelInfo={modelInfo} collapseToolResults={collapseToolResults} expandThinking={expandThinking} toolResultMap={{}} askAnswerMap={{}} isHistoryLog={isHistoryLog} />}

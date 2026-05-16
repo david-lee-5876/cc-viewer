@@ -22,6 +22,7 @@ import { createEmptyToolState, appendToolResultMap, cachedBuildToolResultMap, ge
 import { refreshPlanApprovalOnCachedItems } from '../utils/refreshPlanApprovalCache';
 import { refreshAskAnswerOnCachedItems } from '../utils/refreshAskAnswerCache';
 import { resolveBubbleProducerTs } from '../utils/sessionManager';
+import { getSlashCommandLabel } from '../utils/slashCommandLabels';
 import { TeamButton, TeamModal } from './TeamSessionPanel';
 import SnapLineOverlay from './SnapLineOverlay';
 import RoleFilterBar from './RoleFilterBar';
@@ -1270,7 +1271,7 @@ class ChatView extends React.Component {
             // 渲染 slash command 作为独立用户输入
             for (let ci = 0; ci < commands.length; ci++) {
               renderedMessages.push(
-                <ChatMessage key={`${keyPrefix}-cmd-${mi}-${ci}`} role="user" text={commands[ci]} timestamp={ts} userProfile={userProfile} modelInfo={modelInfo} requestIndex={hasViewRequest ? reqIdx : undefined} onViewRequest={hasViewRequest ? onViewRequest : undefined} isHistoryLog={isHistoryLog} />
+                <ChatMessage key={`${keyPrefix}-cmd-${mi}-${ci}`} role="user" text={commands[ci]} lang={this.props.lang} timestamp={ts} userProfile={userProfile} modelInfo={modelInfo} requestIndex={hasViewRequest ? reqIdx : undefined} onViewRequest={hasViewRequest ? onViewRequest : undefined} isHistoryLog={isHistoryLog} />
               );
             }
             // 渲染 skill 加载块
@@ -1285,7 +1286,7 @@ class ChatView extends React.Component {
             for (let ti = 0; ti < textBlocks.length; ti++) {
               const isPlan = /Implement the following plan:/i.test(textBlocks[ti].text || '');
               renderedMessages.push(
-                <ChatMessage key={`${keyPrefix}-user-${mi}-${ti}`} role={isPlan ? 'plan-prompt' : 'user'} text={textBlocks[ti].text} timestamp={ts} userProfile={userProfile} modelInfo={modelInfo} requestIndex={hasViewRequest ? reqIdx : undefined} onViewRequest={hasViewRequest ? onViewRequest : undefined} isHistoryLog={isHistoryLog} />
+                <ChatMessage key={`${keyPrefix}-user-${mi}-${ti}`} role={isPlan ? 'plan-prompt' : 'user'} text={textBlocks[ti].text} lang={this.props.lang} timestamp={ts} userProfile={userProfile} modelInfo={modelInfo} requestIndex={hasViewRequest ? reqIdx : undefined} onViewRequest={hasViewRequest ? onViewRequest : undefined} isHistoryLog={isHistoryLog} />
               );
             }
             // 渲染 teammate-message 块
@@ -1344,7 +1345,7 @@ class ChatView extends React.Component {
           } else if (!isSystemText(content)) {
             const isPlan = /Implement the following plan:/i.test(content);
             renderedMessages.push(
-              <ChatMessage key={`${keyPrefix}-user-${mi}`} role={isPlan ? 'plan-prompt' : 'user'} text={content} timestamp={ts} userProfile={userProfile} modelInfo={modelInfo} requestIndex={hasViewRequest ? reqIdx : undefined} onViewRequest={hasViewRequest ? onViewRequest : undefined} isHistoryLog={isHistoryLog} />
+              <ChatMessage key={`${keyPrefix}-user-${mi}`} role={isPlan ? 'plan-prompt' : 'user'} text={content} lang={this.props.lang} timestamp={ts} userProfile={userProfile} modelInfo={modelInfo} requestIndex={hasViewRequest ? reqIdx : undefined} onViewRequest={hasViewRequest ? onViewRequest : undefined} isHistoryLog={isHistoryLog} />
             );
           }
         }
@@ -4019,11 +4020,14 @@ class ChatView extends React.Component {
       const raw = props.text || '';
       if (!raw) continue;
       // 清理图片标记，只保留文字部分用于导航列表显示
-      const text = raw
+      const cleaned = raw
         .replace(/\[Image(?:\s*#\d+)?(?::?\s*source)?:\s*[^\]]+\]/gi, '')
         .replace(/"\/tmp\/cc-viewer-uploads\/[^"]+"/g, '')
         .trim();
-      if (!text) continue;
+      if (!cleaned) continue;
+      // 内置 slash 命令(/theme /clear …)在 nav 列表里也显示本地化标签,
+      // 与主气泡 surface 保持一致;未命中白名单的命令/普通文本走原文。
+      const text = getSlashCommandLabel(cleaned) || cleaned;
       const key = text.substring(0, 100);
       if (seen.has(key)) continue;
       seen.add(key);
@@ -4246,7 +4250,7 @@ class ChatView extends React.Component {
     const { pendingInput, stickyBottom, ptyPromptHistory } = this.state;
 
     const pendingBubble = cliMode && pendingInput ? (
-      <ChatMessage key="pending-input" role="user" text={pendingInput} timestamp={new Date().toISOString()} userProfile={this.props.userProfile} isHistoryLog={false} />
+      <ChatMessage key="pending-input" role="user" text={pendingInput} lang={this.props.lang} timestamp={new Date().toISOString()} userProfile={this.props.userProfile} isHistoryLog={false} />
     ) : null;
 
     const stickyBtn = !stickyBottom ? (
@@ -4377,7 +4381,7 @@ class ChatView extends React.Component {
             {messageList}
           </div>
         </div>
-        <TeamModal session={this.state.teamModalSession} requests={this.props.requests} mainAgentSessions={this.props.mainAgentSessions} collapseToolResults={this.props.collapseToolResults} expandThinking={this.props.expandThinking} showFullToolContent={this.props.showFullToolContent} userProfile={this.props.userProfile} onViewRequest={this.props.onViewRequest} isHistoryLog={this._getIsHistoryLog()} onClose={() => this.setState({ teamModalSession: null })} />
+        <TeamModal session={this.state.teamModalSession} requests={this.props.requests} mainAgentSessions={this.props.mainAgentSessions} collapseToolResults={this.props.collapseToolResults} expandThinking={this.props.expandThinking} showFullToolContent={this.props.showFullToolContent} userProfile={this.props.userProfile} onViewRequest={this.props.onViewRequest} isHistoryLog={this._getIsHistoryLog()} lang={this.props.lang} onClose={() => this.setState({ teamModalSession: null })} />
       </>);
     }
 
@@ -4661,7 +4665,7 @@ class ChatView extends React.Component {
           )}
         </div>
       </div>
-      <TeamModal session={this.state.teamModalSession} requests={this.props.requests} mainAgentSessions={this.props.mainAgentSessions} collapseToolResults={this.props.collapseToolResults} expandThinking={this.props.expandThinking} showFullToolContent={this.props.showFullToolContent} userProfile={this.props.userProfile} onViewRequest={this.props.onViewRequest} isHistoryLog={this._getIsHistoryLog()} onClose={() => this.setState({ teamModalSession: null })} />
+      <TeamModal session={this.state.teamModalSession} requests={this.props.requests} mainAgentSessions={this.props.mainAgentSessions} collapseToolResults={this.props.collapseToolResults} expandThinking={this.props.expandThinking} showFullToolContent={this.props.showFullToolContent} userProfile={this.props.userProfile} onViewRequest={this.props.onViewRequest} isHistoryLog={this._getIsHistoryLog()} lang={this.props.lang} onClose={() => this.setState({ teamModalSession: null })} />
       <PresetModal open={this.state.mobilePresetModalVisible} onClose={() => this.setState({ mobilePresetModalVisible: false })} items={this.state.presetItems} onItemsChange={(items) => this.setState({ presetItems: items })} onSavePresets={(payload) => { if (this.props.onUpdatePreferences) this.props.onUpdatePreferences(payload); }} />
     </>);
   }
