@@ -107,8 +107,12 @@ ccv -h
 
 ## 附录 (本段不需要翻译成其他语言)
 
-推荐中国🇨🇳的用户在无法使用claude 模型的情况下优先选择 deepseek 官方版本的 deepseek V4-Pro。经过博主的验证，官方版本API提供的 deepseek V4-Pro 水位可以接近claude sonnet 4.6模型的能力。接口的调教也非常到位。
-在cc-viewer中，大家可以尝试使用“代理热切换”的能力直接使用，或者把默认直接配置成 deepseek 
+推荐中国🇨🇳的用户在无法使用claude 模型的情况下优先选择 deepseek 官方版本的 deepseek V4-Pro。
+
+经过博主的验证，官方版本API提供的 deepseek V4-Pro 水位可以接近claude sonnet 4.6模型的能力。接口的调教也非常到位。
+
+在cc-viewer中，大家可以尝试使用“代理热切换”的能力直接使用，或者把默认直接配置成 deepseek。
+
 <img width="1500" height="714" alt="image" src="https://github.com/user-attachments/assets/425452fe-d167-42b0-b339-a05a877ef493" />
 
 
