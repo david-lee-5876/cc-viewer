@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+## 1.6.270 (2026-05-16)
+
+- fix(voice-pack): turnEnd 剔除「仅窗口失焦时响」门控，任务结束就响（保留 30s 节流 + dedupeKey）；17 语言 hint 文案同步精简
+- fix(ui): ApprovalModal 最小化按钮挪到 modal 右上角；底部只保留「⌘/Ctrl+ESC 取消」提示
+- fix(ui): ApprovalModal header 项目名 chip 去掉；ask 卡片「无超时」文案删除
+- chore(voice-pack): 剔除「超时预警 5min/60s」语音事件，老用户 preferences 经白名单自动 strip
+- fix(ask): GUI AskUserQuestion 实质无超时（与 TUI 对齐），ask 卡片不再自动消失
+- fix(ask): _askHookEverActive 区分新老 Claude Code 版本，老版本走 PTY 兜底，新版本无限等
+- feat(ask): ask-store 持久化 pending ask 到 ~/.claude/cc-viewer/ask-store.json，server 重启可恢复
+- feat(ask): ask-bridge 短轮询协议 POST 立即返 askId + GET 25s wait + 404 自动重 POST 重建 entry
+- feat(ask): /api/pending-asks 端点供前端 server 重启后拉取恢复 UI
+- fix(ask): setEntry/markAnswered/markCancelled status guard 实现 first-write-wins
+- fix(ask): consumeIfFinal 单 lock 替代 consume+setEntry 双 lock 避免 race
+- fix(ask): pruneStale 用 max(createdAt, answeredAt) 不再误删刚 answered 的老 entry
+- fix(ask): ask-cancel handler 补 disk-only 分支让 server 重启后的 ask 也能被取消
+- fix(ask): ws ask-hook-answer/ask-cancel 晚到方收到 `ask-hook-already-answered` ack 关 modal
+- fix(ask): ask-bridge GET 5xx 独立 3 次短重试避免 server 真坏时阻塞主进程 5min
+- fix(ask): ask-bridge re-POST id 与原 askId 不一致时直接 fallback terminal
+- fix(ask): ask-store pruneStale 周期 1h 触发，长跑进程不再累积 disk-only 残留
+- fix(ask): AskQuestionForm cancel 按钮始终可点，ws/hook 抖动时也能逃生
+- feat(ask): ASK_TIMEOUT_MS 抽公共常量，server / sdk-manager 同源 24h
+- fix(ask): ask-store 落盘失败首次 console.warn，便于磁盘满场景排错
+- fix(ask): 注入 hook (ask/perm/turn-end) 加 24h timeout 防 Claude Code 10min 强制中断
+- fix(ask): 老 settings.json 自动重写，merge 保留第三方追加字段；env CCV_HOOK_TIMEOUT_S 可调
+- test: 补 ask-store / ask-bridge / pending-asks / ensure-hooks / voice-pack-events / ask-no-timeout invariants 单测
 - feat(chat): 用户气泡里的内置 slash 命令(/clear /compact /theme /model 等 33 个)按当前语言展示本地化标签,带参形态拼回原始参数;Tooltip 只显裸命令避免 /login 等敏感参数泄漏;Unicode 换行 / bidi-control 注入过滤;切语言即时刷新(ChatMessage SCU 接 lang)
 - feat(theme): 雪山白主题用户气泡走 #222 深底白字,hover / highlight / Compact summary 子区同步覆写;新增 4 个 light theme bubble token
 - feat(ultraplan): UltraPlan 模态与终端面板的「+」按钮统一改为 pill「+ 自定义专家」(33 + 1 个 i18n key × 18 语言,light theme 提色 override)

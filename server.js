@@ -10,6 +10,8 @@ import { execFile, exec, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { Worker } from 'node:worker_threads';
 import { isPathContained, ERROR_STATUS_MAP, validateImportDir } from './lib/file-api.js';
+import { loadAskStore, setEntry as askStoreSetEntry, deleteEntry as askStoreDeleteEntry, pruneStale as askStorePruneStale, markAnswered as askStoreMarkAnswered, markCancelled as askStoreMarkCancelled, consumeIfFinal as askStoreConsumeIfFinal } from './lib/ask-store.js';
+import { ASK_TIMEOUT_MS } from './lib/ask-constants.js';
 import { isReadAllowed, reasonToStatus, bumpWorkspacesVersion } from './lib/file-access-policy.js';
 
 const execFileAsync = promisify(execFile);
@@ -140,7 +142,66 @@ let _workspaceLaunched = false; // 工作区是否已经启动了会话
 // Map supports concurrent ask requests (sub-agents / teammates) so a stale unanswered
 // ask never blocks the next one. Keyed by server-generated id.
 const pendingAskHooks = new Map(); // Map<id, { questions, res, timer, createdAt }>
-const ASK_HOOK_MAP_MAX = 50;
+// 1000 远超任何合理并发场景；保留 LRU 仅作为防恶意/bug 撑爆内存的兜底，
+// 不再用于"正常使用时的容量上限"——用户的 ask 不应该因为 50 个 cap 被强行 evict。
+const ASK_HOOK_MAP_MAX = 1000;
+// 单一来源的"无超时"实质上限——延伸至 24h 兼顾防 entry 泄漏；
+// 任何引用此值的地方（HOOK_TIMEOUT / REPLAY_HOOK_TIMEOUT / 广播 timeoutMs）都从这里取。
+// 实际常量定义在 lib/ask-constants.js（hook 路径 + SDK 路径同源）。
+const ASK_HOOK_TIMEOUT_MS = ASK_TIMEOUT_MS;
+
+// 内存 Map 是权威源；ask-store 是镜像（best-effort）。崩溃时只丢"未落盘窗口"内的最新一次变更。
+// 任何 pendingAskHooks.set(...) 后必须调 _persistAskEntry；.delete(...) 后必须调 _persistAskDelete。
+function _persistAskEntry(id, entry) {
+  if (!entry || !Array.isArray(entry.questions)) return;
+  // 异步触发：磁盘 IO 不阻塞 ask 主流程（落盘失败不影响业务）
+  setImmediate(() => {
+    try { askStoreSetEntry(id, { questions: entry.questions, createdAt: entry.createdAt }); } catch {}
+  });
+}
+function _persistAskDelete(id) {
+  setImmediate(() => {
+    try { askStoreDeleteEntry(id); } catch {}
+  });
+}
+
+// Phase 3: short-poll listener registry. Hangs GET /api/ask-hook/:id/result responses
+// until either an answer/cancel arrives or wait ms elapses (then 204).
+const shortPollListeners = new Map(); // id -> Set<{ res, tid, finished }>
+
+function _notifyShortPollAnswer(id, answers) {
+  const set = shortPollListeners.get(id);
+  if (!set) return;
+  for (const listener of set) {
+    if (listener.finished) continue;
+    listener.finished = true;
+    clearTimeout(listener.tid);
+    try {
+      if (!listener.res.headersSent) {
+        listener.res.writeHead(200, { 'Content-Type': 'application/json' });
+        listener.res.end(JSON.stringify({ answers }));
+      }
+    } catch {}
+  }
+  shortPollListeners.delete(id);
+}
+
+function _notifyShortPollCancel(id, reason) {
+  const set = shortPollListeners.get(id);
+  if (!set) return;
+  for (const listener of set) {
+    if (listener.finished) continue;
+    listener.finished = true;
+    clearTimeout(listener.tid);
+    try {
+      if (!listener.res.headersSent) {
+        listener.res.writeHead(200, { 'Content-Type': 'application/json' });
+        listener.res.end(JSON.stringify({ cancelled: true, reason: reason || '' }));
+      }
+    } catch {}
+  }
+  shortPollListeners.delete(id);
+}
 
 // Permission hook bridge state (for PreToolUse permission approval)
 // Map supports concurrent sub-agent/teammate requests (keyed by request id)
@@ -2655,6 +2716,35 @@ async function handleRequest(req, res) {
     return;
   }
 
+  // Ask 持久化恢复：浏览器 WS reconnect 后用来"补"那些 ws 断开期间到达的 pending ask
+  // （server.js 已有 ws reconnect replay 路径，但该路径仅 broadcast 内存 Map 中存活的 entry；
+  // server 自身重启过会丢内存态——此端点从磁盘 ask-store 镜像恢复 disk superset 列表）。
+  if (url === '/api/pending-asks' && method === 'GET') {
+    try {
+      // 优先内存 Map（含活跃 res / timer 的真实状态），用 createdAt 排序；
+      // 再 union disk（hydrate 已死 entry 或本进程未持有的孤儿 entry，用于恢复 UI 列表，
+      // 答案投递仍由 WS ask-hook-answer 路径走 server 端 first-write-wins）。
+      const memEntries = [...pendingAskHooks.entries()].map(([id, e]) => ({
+        id, questions: e.questions, createdAt: e.createdAt, source: 'memory',
+      }));
+      const memIds = new Set(memEntries.map(e => e.id));
+      const diskAll = loadAskStore();
+      // 只暴露 status === 'pending' 的 disk entry —— markAnswered 创建的 questions=[] 终态占位
+      // 也会被 loadAskStore 返回，但它不是真"待回答"，前端 inject 会渲染空 ghost ask。
+      // 另外过滤 questions 数组非空（防御性）。
+      const diskOnly = Object.values(diskAll)
+        .filter(e => !memIds.has(e.id) && e.status === 'pending' && Array.isArray(e.questions) && e.questions.length > 0)
+        .map(e => ({ id: e.id, questions: e.questions, createdAt: e.createdAt, source: 'disk' }));
+      const all = [...memEntries, ...diskOnly].sort((a, b) => a.createdAt - b.createdAt);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ pendingAsks: all, askProtocolVersion: 1 }));
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'failed to read pending asks', detail: String(err?.message || err) }));
+    }
+    return;
+  }
+
   // Ask hook bridge: long-poll endpoint for PreToolUse AskUserQuestion hook
   if (url === '/api/ask-hook' && method === 'POST') {
     let body = '';
@@ -2666,6 +2756,10 @@ async function handleRequest(req, res) {
         req.destroy();
       }
     });
+    // Phase 3: ask-bridge 用 `X-Ask-Poll-Mode: short` 头声明走短轮询。新 server 看到后
+    // 立即返 { id, capability: 'short-poll' }（不挂 res），client 之后 GET /api/ask-hook/:id/result 取答案。
+    // 老 server 不识别此头 → 按长轮询走（仍挂 res 直到答案/24h 超时）→ 完全向后兼容。
+    const shortPollMode = (req.headers['x-ask-poll-mode'] || '').toLowerCase() === 'short';
     req.on('end', async () => {
       if (bodyTooLarge) {
         try { if (!res.headersSent) { res.writeHead(413, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: 'Request body too large' })); } } catch {}
@@ -2699,6 +2793,7 @@ async function handleRequest(req, res) {
             clearTimeout(oldest.timer);
             try { if (!oldest.res.headersSent) { oldest.res.writeHead(429, { 'Content-Type': 'application/json' }); oldest.res.end(JSON.stringify({ error: 'Too many concurrent requests' })); } } catch {}
             pendingAskHooks.delete(oldestId);
+            _persistAskDelete(oldestId);
             if (terminalWss) {
               const tmsg = JSON.stringify({ type: 'ask-hook-timeout', id: oldestId });
               terminalWss.clients.forEach((c) => {
@@ -2709,8 +2804,9 @@ async function handleRequest(req, res) {
           }
         }
 
-        const HOOK_TIMEOUT = 60 * 60 * 1000; // 60 minutes — 等价 terminal Claude Code 的"无超时"体验
-        // (terminal interactiveHandler 本身无 timeout，hook 子进程层 10min；这里 60min 远超人类响应时间)
+        // 实质等同"无超时"，仍保留兜底防 entry 泄漏（plugin throw / OOM 等异常路径）。
+        // ask-bridge 不设客户端 timeout，由 server 单向控制 response 终止。
+        const HOOK_TIMEOUT = ASK_HOOK_TIMEOUT_MS;
         // toolUseId 路由策略：
         //  - char whitelist + ≤256 长度 防恶意 1MB key 撑大 Map
         //  - 已存在同 id 但旧 res 已断（writableEnded/destroyed）→ 复用槽位（ask-bridge 重试场景）
@@ -2728,6 +2824,7 @@ async function handleRequest(req, res) {
             // 旧 res 已断（包含占位 res:null 残留）— ask-bridge 重试同 toolUseId 合理，复用槽位
             if (existing.timer) clearTimeout(existing.timer);
             pendingAskHooks.delete(toolUseId);
+            _persistAskDelete(toolUseId);
             id = toolUseId;
           } else {
             res.writeHead(409, { 'Content-Type': 'application/json' });
@@ -2745,14 +2842,19 @@ async function handleRequest(req, res) {
         // TOCTOU 防御：占位 id 之前先注册 res.on('close')，否则 await runWaterfallHook 期间 client
         // abort 的 close 事件落空 → entry 残 5min。占位 set 提前到 await 之前防两条同 ms 并发
         // POST 的 do-while 都通过 collision check 后 set 互相覆盖（first res 永泄漏到 5min）。
-        pendingAskHooks.set(id, { questions, res, timer: null, createdAt: Date.now() });
+        const _placeholderEntry = { questions, res, timer: null, createdAt: Date.now(), shortPoll: shortPollMode };
+        pendingAskHooks.set(id, _placeholderEntry);
+        _persistAskEntry(id, _placeholderEntry);
 
         // res.on('close') 提前注册：handler 用 entry.timer 守卫（占位期 timer:null → 仅 delete Map）
+        // Phase 3: short-poll 模式下 res 主动 end，close 不视为 client cancel；entry 由 24h timer 兜底清理。
         res.on('close', () => {
           const entry = pendingAskHooks.get(id);
           if (entry) {
+            if (entry.shortPoll) return;
             if (entry.timer) clearTimeout(entry.timer);
             pendingAskHooks.delete(id);
+            _persistAskDelete(id);
             if (terminalWss) {
               const tmsg = JSON.stringify({ type: 'ask-hook-timeout', id });
               terminalWss.clients.forEach((c) => {
@@ -2768,8 +2870,15 @@ async function handleRequest(req, res) {
           const hookResult = await runWaterfallHook('onAskRequest', { id, questions, mode: 'hook' });
           if (hookResult.answers) {
             pendingAskHooks.delete(id); // 释放占位 — plugin 直接答了
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ answers: hookResult.answers }));
+            _persistAskDelete(id);
+            // race: plugin 执行期间 client 主动断开 → res.on('close') 已清 entry，
+            // 但本闭包仍持着 res 引用；guard 防 writeHead 抛 ERR_STREAM_WRITE_AFTER_END
+            if (!res.writableEnded && !res.destroyed && !res.headersSent) {
+              try {
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ answers: hookResult.answers }));
+              } catch {}
+            }
             return;
           }
         } catch {}
@@ -2778,6 +2887,7 @@ async function handleRequest(req, res) {
           const entry = pendingAskHooks.get(id);
           if (entry) {
             pendingAskHooks.delete(id);
+            _persistAskDelete(id);
             try {
               // null guard：plugin throw + outer body-parse race 极端下占位残留时 fire 防 TypeError
               if (entry.res && !entry.res.headersSent) {
@@ -2796,7 +2906,19 @@ async function handleRequest(req, res) {
         }, HOOK_TIMEOUT);
 
         const askStartedAt = Date.now();
-        pendingAskHooks.set(id, { questions, res, timer, createdAt: askStartedAt });
+        const _liveEntry = { questions, res, timer, createdAt: askStartedAt, shortPoll: shortPollMode };
+        pendingAskHooks.set(id, _liveEntry);
+        _persistAskEntry(id, _liveEntry);
+
+        // Phase 3: short-poll 模式立即返 ack，让 client 改走 GET 轮询；entry 留在内存等 ws answer。
+        if (shortPollMode) {
+          try {
+            if (!res.headersSent) {
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ id, capability: 'short-poll' }));
+            }
+          } catch {}
+        }
 
         // Broadcast to all terminal WS clients — 附 startedAt + timeoutMs 让前端渲染倒计时
         if (terminalWss) {
@@ -2813,6 +2935,75 @@ async function handleRequest(req, res) {
         res.end(JSON.stringify({ error: 'Invalid request body' }));
       }
     });
+    return;
+  }
+
+  // Phase 3: short-poll handoff endpoint. ask-bridge GET /api/ask-hook/:id/result?wait=30000
+  // 在 wait ms 内若答案/cancel 到达 → 立即返；否则返 204 让 client 重发。
+  // 内存有 entry → 注册 listener；内存无 → 查 disk consume（server 重启场景）。
+  if (url.startsWith('/api/ask-hook/') && url.includes('/result') && method === 'GET') {
+    try {
+      // URL 形如 /api/ask-hook/<id>/result?wait=30000；id 受白名单约束（与 POST 同源）
+      const m = url.match(/^\/api\/ask-hook\/([^/?]+)\/result(?:\?(.*))?$/);
+      if (!m) { res.writeHead(400); res.end(); return; }
+      const id = decodeURIComponent(m[1]);
+      if (!id || id.length > 256 || !/^[a-zA-Z0-9_-]+$/.test(id)) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'invalid id' }));
+        return;
+      }
+      const qs = new URLSearchParams(m[2] || '');
+      const wait = Math.max(1000, Math.min(60000, parseInt(qs.get('wait') || '30000', 10)));
+
+      // 1) disk 命中 answered/cancelled：浏览器答得早过 GET 到达 → 立即返并消费（一次性）
+      // 用 consumeIfFinal 单次 withLock 内判 status 决定是否 delete —— 旧设计的
+      // "consume + 若 pending 再 setEntry 写回" 两段是 race window：中间被 markAnswered 命中后，
+      // setEntry 走 status guard 已经不会覆盖；但不删的 pending 也无须重写一遍。
+      const diskEntry = askStoreConsumeIfFinal(id);
+      if (diskEntry && diskEntry.status === 'answered') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ answers: diskEntry.answers || {} }));
+        return;
+      }
+      if (diskEntry && diskEntry.status === 'cancelled') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ cancelled: true, reason: diskEntry.cancelReason || '' }));
+        return;
+      }
+      // diskEntry.status === 'pending' → consumeIfFinal 已保留它，无须重写
+
+      // 2) entry 仍 pending：注册 listener 等 wait ms。内存或 disk 至少一个有就允许注册——
+      //    server 重启后 disk 是 pending，但内存无 entry，仍要让 GET 挂等（浏览器答案到达时
+      //    会走 ws ask-hook-answer handler 路径，handler 内 markAnswered 落 disk + _notifyShortPollAnswer 直推 listener）。
+      const memEntry = pendingAskHooks.get(id);
+      if (!memEntry && !diskEntry) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'no such ask' }));
+        return;
+      }
+      const listener = { res, finished: false, tid: null };
+      if (!shortPollListeners.has(id)) shortPollListeners.set(id, new Set());
+      shortPollListeners.get(id).add(listener);
+      listener.tid = setTimeout(() => {
+        if (listener.finished) return;
+        listener.finished = true;
+        shortPollListeners.get(id)?.delete(listener);
+        try { if (!res.headersSent) { res.writeHead(204); res.end(); } } catch {}
+      }, wait);
+      res.on('close', () => {
+        if (listener.finished) return;
+        listener.finished = true;
+        clearTimeout(listener.tid);
+        shortPollListeners.get(id)?.delete(listener);
+      });
+    } catch (err) {
+      try {
+        if (!res.headersSent) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: String(err?.message || err) }));
+        }
+      } catch {}
+    }
     return;
   }
 
@@ -4132,6 +4323,18 @@ export async function startViewer() {
   // 清理过期解压缓存（fire-and-forget；任何错误吞掉）
   setImmediate(() => { try { cleanupExtractCache(); } catch { /* ignore */ } });
 
+  // 启动时清理磁盘上 ASK_HOOK_TIMEOUT_MS 之前的 ask 条目（兜底防泄漏）。
+  // 内存 Map 不 hydrate：旧 res 已死、新 ask-bridge 重连同 toolUseId 会自动复用槽位
+  // （server.js 已有"旧 res 已断 → 复用"分支），无需在这里主动重建内存态。
+  // 留下来的 disk 镜像供 /api/pending-asks 端点查询，让浏览器重连后仍能看见 pending 列表。
+  setImmediate(() => { try { askStorePruneStale(ASK_HOOK_TIMEOUT_MS); } catch {} });
+  // 长跑进程兜底：短轮询路径下 markAnswered 标的终态 entry 若 ask-bridge 已死（GET 不再来 consume），
+  // 仅靠启动 prune 永远清不掉。1h 周期触发一次，.unref() 不阻塞进程退出。
+  const _pruneAskStoreInterval = setInterval(() => {
+    try { askStorePruneStale(ASK_HOOK_TIMEOUT_MS); } catch {}
+  }, 60 * 60 * 1000);
+  _pruneAskStoreInterval.unref();
+
   // 通过插件 hook 获取 HTTPS 证书选项
   let httpsOptions = null;
   try {
@@ -4255,6 +4458,7 @@ export async function startViewer() {
                 const { res: hookRes, timer } = entry;
                 clearTimeout(timer);
                 pendingAskHooks.delete(id);
+                _persistAskDelete(id);
                 try {
                   if (!hookRes.headersSent) {
                     hookRes.writeHead(200, { 'Content-Type': 'application/json' });
@@ -4434,8 +4638,8 @@ async function setupTerminalWebSocket(httpServer) {
       // Replay pending ask-hook 请求：浏览器关 tab 再开（或 ws 重连）时，
       // 让新 ws 立即收到当前 server-side 仍 long-poll 的 ask 列表 + startedAt + 剩余 timeoutMs，
       // 否则前端 askMetaMap 空 → 倒计时不渲染 + lastPendingAskId 派生错。
-      // ASK_HOOK_TIMEOUT 在闭包外（line 2425 const HOOK_TIMEOUT），不直接可见 — 用 60min 字面量同源。
-      const REPLAY_HOOK_TIMEOUT = 60 * 60 * 1000;
+      // 与上方 HOOK_TIMEOUT 同源（实质无超时）。
+      const REPLAY_HOOK_TIMEOUT = ASK_HOOK_TIMEOUT_MS;
       const now = Date.now();
       for (const [id, entry] of pendingAskHooks) {
         const elapsed = now - (entry.createdAt || now);
@@ -4541,6 +4745,7 @@ async function setupTerminalWebSocket(httpServer) {
             // 老协议 fallback（取最老）已废弃 — 多 pending 时会"答错对象"造成串答；
             // 缺 id 直接 WARN 并丢弃，让前端在 console 里看到为什么答案没生效。
             let askAnswered = false;
+            let alreadyAnswered = false; // first-write-wins 抢答失败信号
             let askId = msg.id;
             let askEntry = null;
             if (askId) {
@@ -4552,12 +4757,58 @@ async function setupTerminalWebSocket(httpServer) {
               const { res: hookRes, timer } = askEntry;
               clearTimeout(timer);
               pendingAskHooks.delete(askId);
-              askAnswered = true;
-              try {
-                if (!hookRes.headersSent) {
-                  hookRes.writeHead(200, { 'Content-Type': 'application/json' });
-                  hookRes.end(JSON.stringify({ answers: msg.answers }));
+              // Phase 3: short-poll 模式不立即删 disk —— 落 answered 让 GET listener / disk consume 拿
+              if (askEntry.shortPoll) {
+                let wrote = false;
+                try { wrote = askStoreMarkAnswered(askId, msg.answers); } catch {}
+                if (wrote) {
+                  _notifyShortPollAnswer(askId, msg.answers);
+                  askAnswered = true;
+                } else {
+                  // race 边角：进入 handler 时内存 entry 还在，但 disk 已被另一进程 / 之前的 cancel 写过终态。
+                  // 不广播 answer，让发起方知道被抢答；hookRes 也按 cancelled 返回让 ask-bridge 走 deny 路径。
+                  alreadyAnswered = true;
+                  try {
+                    if (!hookRes.headersSent) {
+                      hookRes.writeHead(200, { 'Content-Type': 'application/json' });
+                      hookRes.end(JSON.stringify({ cancelled: true, reason: 'Already answered by another client' }));
+                    }
+                  } catch {}
                 }
+              } else {
+                _persistAskDelete(askId);
+                askAnswered = true;
+              }
+              if (askAnswered) {
+                try {
+                  if (!hookRes.headersSent) {
+                    hookRes.writeHead(200, { 'Content-Type': 'application/json' });
+                    hookRes.end(JSON.stringify({ answers: msg.answers }));
+                  }
+                } catch {}
+              }
+            } else if (askId) {
+              // server 重启 / 内存 entry 已被清，但 ask-bridge 可能仍在短轮询 disk —— 落 answered。
+              // first-write-wins：如果 disk 已被其他 client 抢答（markAnswered 返 false），
+              // 不唤醒 listener（让 listener 等到 GET hit disk 拿到真实抢答者答案）—— 自然 idempotent。
+              // 给当前 ws 发 ack-already-answered 让前端关 modal、不误覆盖灰态。
+              let wrote = false;
+              try { wrote = askStoreMarkAnswered(askId, msg.answers); } catch {}
+              if (wrote) {
+                _notifyShortPollAnswer(askId, msg.answers);
+                askAnswered = true;
+              } else {
+                alreadyAnswered = true;
+              }
+            }
+            // first-write-wins 抢答失败 → 仅 ack 发起方让其关 modal；不广播给其他 client 防覆盖真实 answer。
+            if (alreadyAnswered && askId && ws && ws.readyState === 1) {
+              try {
+                ws.send(JSON.stringify({
+                  type: 'ask-hook-already-answered',
+                  id: askId,
+                  reason: 'Another client answered first (first-write-wins)',
+                }));
               } catch {}
             }
             // Broadcast resolved to other clients so they clear their ask panel
@@ -4650,6 +4901,13 @@ async function setupTerminalWebSocket(httpServer) {
                 const { res: hookRes, timer } = askEntry;
                 if (timer) clearTimeout(timer);
                 pendingAskHooks.delete(cancelId);
+                // Phase 3: short-poll 同样要让 disk + listener 知道，否则 ask-bridge 永远收不到 cancelled
+                if (askEntry.shortPoll) {
+                  try { askStoreMarkCancelled(cancelId, cancelReason); } catch {}
+                  _notifyShortPollCancel(cancelId, cancelReason);
+                } else {
+                  _persistAskDelete(cancelId);
+                }
                 handled = true;
                 try {
                   if (hookRes && !hookRes.headersSent) {
@@ -4657,6 +4915,26 @@ async function setupTerminalWebSocket(httpServer) {
                     hookRes.end(JSON.stringify({ cancelled: true, reason: cancelReason }));
                   }
                 } catch {}
+              } else {
+                // 内存无 entry，但 disk 可能有 pending（server 重启后 ask-bridge 重 POST 之前，
+                // 浏览器从 /api/pending-asks 看到 disk-only ask 并 Cancel 它）。
+                // first-wins：disk 已是终态（如另一 client 抢先 answer）时 markCancelled 返 false，
+                // 不能唤醒 listener 用 cancel 覆盖真实 answer —— 让 listener 下次 GET consumeIfFinal
+                // 拿到真实 disk 终态自然投递。
+                const wrote = askStoreMarkCancelled(cancelId, cancelReason);
+                if (wrote) {
+                  _notifyShortPollCancel(cancelId, cancelReason);
+                  handled = true;
+                } else if (ws && ws.readyState === 1) {
+                  // 抢答失败 ack：只给发起方关 modal，不广播防覆盖其他 client 真实 answer。
+                  try {
+                    ws.send(JSON.stringify({
+                      type: 'ask-hook-already-answered',
+                      id: cancelId,
+                      reason: 'Already resolved by another client',
+                    }));
+                  } catch {}
+                }
               }
             }
             // ack 广播分两档：

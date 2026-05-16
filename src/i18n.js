@@ -5792,14 +5792,6 @@ const i18nData = {
     "ar": "تصغير", "no": "Minimer", "pt-BR": "Minimizar",
     "th": "ย่อ", "tr": "Küçült", "uk": "Згорнути"
   },
-  "ui.approval.modal.dismissHint": {
-    "zh": "ESC 或点击外部最小化（待审批保留）", "en": "ESC or click outside to minimise (pending stays)", "zh-TW": "ESC 或點擊外部最小化（保留待審批）",
-    "ko": "ESC 또는 외부 클릭으로 최소화 (보류 유지)", "ja": "ESC または外側をクリックして最小化", "de": "ESC oder außen klicken zum Minimieren",
-    "es": "ESC o clic fuera para minimizar", "fr": "ESC ou cliquer dehors pour minimiser", "it": "ESC o clic fuori per minimizzare",
-    "da": "ESC eller klik udenfor for at minimere", "pl": "ESC lub kliknij na zewnątrz aby zminimalizować", "ru": "ESC или клик снаружи — свернуть",
-    "ar": "ESC أو انقر خارجًا للتصغير", "no": "ESC eller klikk utenfor for å minimere", "pt-BR": "ESC ou clique fora para minimizar",
-    "th": "ESC หรือคลิกนอกเพื่อย่อ", "tr": "ESC veya dışarı tıklayarak küçült", "uk": "ESC або клік зовні — згорнути"
-  },
   "ui.approval.modal.cancelHint": {
     "zh": "⌘/Ctrl+ESC 取消", "en": "⌘/Ctrl+ESC to cancel", "zh-TW": "⌘/Ctrl+ESC 取消",
     "ko": "⌘/Ctrl+ESC로 취소", "ja": "⌘/Ctrl+ESC でキャンセル", "de": "⌘/Strg+ESC zum Abbrechen",
@@ -5807,6 +5799,14 @@ const i18nData = {
     "da": "⌘/Ctrl+ESC for at annullere", "pl": "⌘/Ctrl+ESC aby anulować", "ru": "⌘/Ctrl+ESC — отмена",
     "ar": "⌘/Ctrl+ESC للإلغاء", "no": "⌘/Ctrl+ESC for å avbryte", "pt-BR": "⌘/Ctrl+ESC para cancelar",
     "th": "⌘/Ctrl+ESC เพื่อยกเลิก", "tr": "⌘/Ctrl+ESC ile iptal", "uk": "⌘/Ctrl+ESC — скасувати"
+  },
+  "ui.approval.modal.hintPrefix": {
+    "zh": "操作提示:", "en": "Hint:", "zh-TW": "操作提示:",
+    "ko": "안내:", "ja": "ヒント:", "de": "Hinweis:",
+    "es": "Pista:", "fr": "Astuce :", "it": "Suggerimento:",
+    "da": "Tip:", "pl": "Wskazówka:", "ru": "Подсказка:",
+    "ar": "تلميح:", "no": "Tips:", "pt-BR": "Dica:",
+    "th": "คำแนะนำ:", "tr": "İpucu:", "uk": "Підказка:"
   },
   "ui.approval.bell.reopen": {
     "zh": "重新打开审批弹层", "en": "Reopen approval modal", "zh-TW": "重新開啟審批彈層",
@@ -5888,22 +5888,6 @@ const i18nData = {
     "ar": "سؤال المستخدم", "no": "Spør bruker", "pt-BR": "Pergunta ao usuário",
     "th": "ถามผู้ใช้", "tr": "Kullanıcıya sor", "uk": "Запит до користувача"
   },
-  "ui.voicePack.event.timeoutWarning5min": {
-    "zh": "超时预警 (剩 5 分钟)", "en": "Timeout warning (5 min left)", "zh-TW": "逾時預警 (剩 5 分鐘)",
-    "ko": "시간 초과 경고 (5분 남음)", "ja": "タイムアウト警告 (残り5分)", "de": "Timeout-Warnung (5 Min)",
-    "es": "Aviso de tiempo (5 min)", "fr": "Alerte délai (5 min)", "it": "Avviso timeout (5 min)",
-    "da": "Timeout-advarsel (5 min)", "pl": "Ostrzeżenie limitu (5 min)", "ru": "Предупреждение (5 мин)",
-    "ar": "تحذير المهلة (٥ دقائق)", "no": "Tidsadvarsel (5 min)", "pt-BR": "Aviso de tempo (5 min)",
-    "th": "เตือนหมดเวลา (5 นาที)", "tr": "Zaman uyarısı (5 dk)", "uk": "Попередження (5 хв)"
-  },
-  "ui.voicePack.event.timeoutWarning60s": {
-    "zh": "超时预警 (剩 60 秒)", "en": "Timeout warning (60 s left)", "zh-TW": "逾時預警 (剩 60 秒)",
-    "ko": "시간 초과 경고 (60초 남음)", "ja": "タイムアウト警告 (残り60秒)", "de": "Timeout-Warnung (60 s)",
-    "es": "Aviso de tiempo (60 s)", "fr": "Alerte délai (60 s)", "it": "Avviso timeout (60 s)",
-    "da": "Timeout-advarsel (60 s)", "pl": "Ostrzeżenie limitu (60 s)", "ru": "Предупреждение (60 с)",
-    "ar": "تحذير المهلة (٦٠ ثانية)", "no": "Tidsadvarsel (60 s)", "pt-BR": "Aviso de tempo (60 s)",
-    "th": "เตือนหมดเวลา (60 วินาที)", "tr": "Zaman uyarısı (60 sn)", "uk": "Попередження (60 с)"
-  },
   "ui.voicePack.event.turnEnd": {
     "zh": "回合结束 / 任务完成", "en": "Turn end / task done", "zh-TW": "回合結束 / 任務完成",
     "ko": "턴 종료 / 작업 완료", "ja": "ターン終了 / タスク完了", "de": "Antwort fertig",
@@ -5929,24 +5913,24 @@ const i18nData = {
     "th": "ตัวอย่าง", "tr": "yer tutucu", "uk": "заповнювач"
   },
   "ui.voicePack.eventHint.turnEnd": {
-    "zh": "仅窗口失焦时响，30 秒内最多一次",
-    "en": "Plays only when window unfocused, max once per 30s",
-    "zh-TW": "僅視窗失焦時播放，30 秒內最多一次",
-    "ko": "창이 비활성일 때만 재생, 30초당 최대 1회",
-    "ja": "ウィンドウが非アクティブのみ、30秒ごとに最大1回",
-    "de": "Nur bei unfokussiertem Fenster, max. 1×/30s",
-    "es": "Solo si la ventana no tiene foco, máx 1 por 30 s",
-    "fr": "Uniquement fenêtre non focalisée, max 1 par 30 s",
-    "it": "Solo a finestra non attiva, max 1 ogni 30s",
-    "da": "Kun ved ufokuseret vindue, maks. 1 pr. 30s",
-    "pl": "Tylko gdy okno nieaktywne, maks 1 / 30 s",
-    "ru": "Только при неактивном окне, ≤1 за 30с",
-    "ar": "فقط عند فقدان تركيز النافذة، مرة كل 30 ثانية",
-    "no": "Kun når vinduet er ufokusert, maks 1 per 30s",
-    "pt-BR": "Só com janela desfocada, máx 1 a cada 30s",
-    "th": "เฉพาะตอนหน้าต่างไม่โฟกัส, สูงสุด 1 ครั้งต่อ 30 วิ",
-    "tr": "Yalnızca pencere odakta değilken, 30s'de en fazla 1",
-    "uk": "Лише коли вікно не у фокусі, ≤1 раз/30с"
+    "zh": "30 秒内最多一次",
+    "en": "At most once per 30s",
+    "zh-TW": "30 秒內最多一次",
+    "ko": "30초당 최대 1회",
+    "ja": "30秒ごとに最大1回",
+    "de": "Max. 1×/30s",
+    "es": "Máx 1 cada 30 s",
+    "fr": "Max 1 toutes les 30 s",
+    "it": "Max 1 ogni 30s",
+    "da": "Maks. 1 pr. 30s",
+    "pl": "Maks 1 / 30 s",
+    "ru": "≤1 раз/30с",
+    "ar": "مرة واحدة كل 30 ثانية كحد أقصى",
+    "no": "Maks 1 per 30s",
+    "pt-BR": "Máx 1 a cada 30s",
+    "th": "สูงสุด 1 ครั้งต่อ 30 วินาที",
+    "tr": "30s'de en fazla 1",
+    "uk": "≤1 раз/30с"
   },
   "ui.voicePack.binding.disabled": {
     "zh": "禁用", "en": "Disabled", "zh-TW": "停用",

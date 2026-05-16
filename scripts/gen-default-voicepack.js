@@ -44,26 +44,9 @@ const PATTERNS = {
     { freq: 0, ms: 70, vol: 0 },
     { wave: 'square', freq: 1175, ms: 75, vol: 0.24 },
   ],
-  // "Boo... boo..." — soft, slow, sine (not square — gentler)
-  timeoutWarning5min: [
-    { wave: 'sine', freq: 392, ms: 240, vol: 0.22 },
-    { freq: 0, ms: 360, vol: 0 },
-    { wave: 'sine', freq: 392, ms: 240, vol: 0.22 },
-  ],
-  // "Beep-beep-beep-beep!" — 4 urgent blips, last two rise a step for urgency
-  timeoutWarning60s: [
-    { wave: 'square', freq: 880, ms: 70, vol: 0.26 },
-    { freq: 0, ms: 30, vol: 0 },
-    { wave: 'square', freq: 880, ms: 70, vol: 0.26 },
-    { freq: 0, ms: 30, vol: 0 },
-    { wave: 'square', freq: 988, ms: 70, vol: 0.28 },
-    { freq: 0, ms: 30, vol: 0 },
-    { wave: 'square', freq: 988, ms: 70, vol: 0.28 },
-  ],
   // "Wee-doo~ ♪" — descending arpeggio with a glide tail for the satisfied finish.
-  // Starting note dropped from A5 (880Hz) to E5 (659Hz) so the ≥800Hz band stays
-  // exclusive to the timeoutWarning60s alarm cue — the two events were
-  // hard to distinguish when they fired close together.
+  // 659Hz 起点是历史值（曾为避让已删除的 timeoutWarning60s 880Hz 警报刻意降调），
+  // 现可自由调整；保留是因为现有 default-pack 音色已稳定，不必无故 churn。
   turnEnd: [
     { wave: 'square', freq: 659, ms: 110, vol: 0.24 },
     { freq: 0, ms: 30, vol: 0 },
@@ -164,8 +147,6 @@ const manifest = {
   cues: {
     planApproval:       'Bi-poop?  (短低 + 上扬"问"句)',
     askQuestion:        'Pip pip!  (两短促跳跳)',
-    timeoutWarning5min: 'Boo... boo...  (慢且软)',
-    timeoutWarning60s:  'Beep-beep-beep-beep!  (4 连音紧迫)',
     turnEnd:            'Wee-doo~ ♪  (下行小调，满足)',
   },
 };

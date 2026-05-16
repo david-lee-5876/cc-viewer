@@ -1093,8 +1093,7 @@ class AppBase extends React.Component {
       // turn_end SSE — broadcast by /api/turn-end-notify whenever Claude Code's Stop hook
       // fires (real end of a user-prompt turn). This is the **authoritative** turnEnd
       // signal — far more accurate than isStreaming falling-edge, which resets per-API-call
-      // and would mis-fire during slow tool execution. focusGate keeps it quiet while the
-      // user is looking at the window; 30s cooldown lives in voicePackPlayer.
+      // and would mis-fire during slow tool execution. 30s cooldown lives in voicePackPlayer.
       this.eventSource.addEventListener('turn_end', (event) => {
         // Guard against a teardown race: SSE chunks in flight when _reconnectSSE
         // closes the current EventSource can still fire here before the listener
@@ -1107,7 +1106,6 @@ class AppBase extends React.Component {
           try { serverTs = (JSON.parse(event?.data || '{}'))?.ts || null; } catch { /* fine */ }
           try {
             playVoiceEvent('turnEnd', vp, {
-              focusGate: true,
               // Prefer the server-supplied ts so a re-broadcast (server bug, two
               // SSE delivery paths) is deduped by the player. Falls back to a
               // unique key if absent — relies on COOLDOWN_MS.turnEnd to suppress.

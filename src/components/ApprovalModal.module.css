@@ -99,7 +99,7 @@
 
 .footer {
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-start;
   align-items: center;
   gap: 12px;
   padding: 12px 18px;
@@ -108,23 +108,30 @@
   color: var(--text-tertiary, #888);
 }
 
-.dismissHintExtra {
+.footerHint {
   color: var(--text-secondary, #b8b8b8);
-  margin-left: -8px;
 }
 
-.dismissBtn {
+.footerHintLabel {
+  color: var(--text-tertiary, #888);
+  font-weight: 500;
+}
+
+/* Minimise 按钮：从 footer 右下移到 header 右上。
+ * margin-left: auto 把它推到 header 行末（在 chip 之后），右上角视觉锚定。 */
+.headerDismissBtn {
+  margin-left: auto;
   background: transparent;
   border: 1px solid var(--border-color, rgba(255, 255, 255, 0.12));
   color: var(--text-secondary, #b8b8b8);
-  padding: 6px 14px;
+  padding: 4px 12px;
   border-radius: 6px;
   cursor: pointer;
-  font-size: 13px;
+  font-size: 12px;
   transition: background 120ms, border-color 120ms;
 }
 
-.dismissBtn:hover {
+.headerDismissBtn:hover {
   background: var(--bg-code, rgba(255, 255, 255, 0.06));
   border-color: var(--color-primary-light, #4096ff);
 }

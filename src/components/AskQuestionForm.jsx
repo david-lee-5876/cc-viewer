@@ -22,9 +22,7 @@ export default class AskQuestionForm extends React.Component {
     };
   }
 
-  componentWillUnmount() {
-    if (this._submitTimeout) clearTimeout(this._submitTimeout);
-  }
+  componentWillUnmount() {}
 
   render() {
     const { questions: rawQuestions, onSubmit } = this.props;
@@ -43,12 +41,9 @@ export default class AskQuestionForm extends React.Component {
     const handleSubmit = () => {
       if (!allValid || submitting) return;
       this.setState({ submitting: true });
-      // 超时恢复：30s 后重置提交状态，防止卡在"提交中..."
-      // 需覆盖最长路径：hook bridge 等待 3s + PTY prompt 等待 5s + sequential queue 15s
-      if (this._submitTimeout) clearTimeout(this._submitTimeout);
-      this._submitTimeout = setTimeout(() => {
-        this.setState({ submitting: false });
-      }, 30000);
+      // submitting 释放由父组件驱动：成功路径 promote 后本组件直接 unmount；
+      // PTY abort 路径父组件回滚 pendingAsk 会触发 remount，constructor 自动初始化 submitting=false。
+      // 用户卡住时通过下方 Cancel 按钮主动逃生（无任何隐式超时）。
       const answers = questions.map((q, qi) => {
         if (otherActive[qi]) {
           const optCount = (q.options || []).length;
@@ -258,12 +253,12 @@ export default class AskQuestionForm extends React.Component {
             <button
               type="button"
               className={styles.askCancelBtn}
-              disabled={submitting}
               onClick={() => {
-                // submitting=true 时按钮 disabled — 防 cancel 锁死真实 answer。
-                // answer 已发到 server 后 cancel 会让 first-wins 让 cancel no-op，但前端仍会
-                // 乐观写 cancel sentinel 覆盖 ChatMessage 灰态，与 jsonl 真实 answer 不一致。
-                if (this._submitTimeout) { clearTimeout(this._submitTimeout); this._submitTimeout = null; }
+                // cancel 按钮始终可点：删除 30s 强释放 submitting 兜底后，submitting 释放完全依赖
+                // 父组件 promote / 回滚触发 unmount/remount —— ws/hook 抖动卡 ack 时若 cancel 也禁用，
+                // 用户会被锁死在"提交中…"无逃生口。
+                // first-write-wins（ask-store.js markCancelled）保证：answer 已落 disk 后 cancel
+                // 会被 noop，server 端不会让前端乐观写覆盖真实 answer。
                 this.props.onCancel();
               }}
             >

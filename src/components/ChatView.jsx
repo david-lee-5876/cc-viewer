@@ -273,10 +273,15 @@ class ChatView extends React.Component {
     this._ptyDebounceTimer = null;
     this._currentPtyPrompt = null; // 同步跟踪 ptyPrompt，避免闭包捕获旧 state
     this._askHookActive = false;      // PreToolUse hook bridge is pending
+    // hook bridge 在本 session 内是否曾经握手过——区分"新版 CC 有 ask-bridge"和"老版无 hook"两种场景。
+    // 新版：_waitForHookBridge 进入无限等模式（hook bridge 偶发晚到 / 长时间挂起均不打断）。
+    // 老版：30s 兜底 fallback 到 PTY 模拟，否则 answer 永远投递不出。
+    this._askHookEverActive = false;
     this._askHookQuestions = null;    // questions from hook bridge
     this._pendingHookAnswers = null;  // answers waiting for hook bridge
     this._askHookWaitRetries = 0;     // hook bridge wait retry counter
     this._hookWaitTimer = null;       // hook bridge wait timer
+    this._askAbortRequested = false;  // Cancel 路径请求 polling 立即退出（每次新 submit 入口重置）
     this._mobileExtraItems = 0;
     this._mobileSliceOffset = 0;
     this._totalItemCount = 0;
@@ -2265,7 +2270,7 @@ class ChatView extends React.Component {
         this._askHookActive = false;
       } else {
         this._sdkAskId = null;
-        this._askHookActive = true;
+        this._askHookActive = true; this._askHookEverActive = true;
       }
       this._askHookQuestions = next.questions;
       this.setState({
@@ -2329,7 +2334,7 @@ class ChatView extends React.Component {
                 return { askQueue: [...state.askQueue, { id: askId, questions: msg.questions, kind: ASK_KIND.HOOK }] };
               }
               // Become the head and own routing flags.
-              this._askHookActive = true;
+              this._askHookActive = true; this._askHookEverActive = true;
               this._askHookQuestions = msg.questions;
               this._sdkAskId = null;
               return { pendingAsk: { id: askId, questions: msg.questions } };
@@ -2376,7 +2381,7 @@ class ChatView extends React.Component {
                 if (state.askQueue.some(a => a.id === askId)) return null;
                 return { askQueue: [...state.askQueue, { id: askId, questions: msg.questions, kind: ASK_KIND.SDK }] };
               }
-              this._askHookActive = true;
+              this._askHookActive = true; this._askHookEverActive = true;
               this._askHookQuestions = msg.questions;
               this._sdkAskId = msg.id;
               return { pendingAsk: { id: askId, questions: msg.questions } };
@@ -2424,9 +2429,11 @@ class ChatView extends React.Component {
             }
             return { permissionQueue: state.permissionQueue.filter(p => p.id !== msg.id) };
           });
-        } else if (msg.type === 'ask-hook-resolved') {
-          // 另一端已回答 AskUserQuestion (hook bridge 模式) — id-aware after Map migration.
-          // Legacy resolved without id → only clear the placeholder head.
+        } else if (msg.type === 'ask-hook-resolved' || msg.type === 'ask-hook-already-answered') {
+          // ask-hook-resolved：另一端回答了 AskUserQuestion (hook bridge 模式)。
+          // ask-hook-already-answered：本端发起的 ws ask-hook-answer 触发了 first-write-wins
+          //   抢答失败 — 抢答赢家是另一端，server 只 ack 本端让 modal 关掉，不广播给其他 client。
+          // 两种语义一样（清 modal/queue），统一处理；first-write-wins ack 路径不需要额外 toast。
           const askId = msg.id != null ? String(msg.id) : null;
           if (askId == null) {
             if (this.state.pendingAsk?.id === LEGACY_ASK_PLACEHOLDER_ID) this._promoteNextAskFromQueue();
@@ -2470,6 +2477,14 @@ class ChatView extends React.Component {
           }
           // 应用 cancel local state — promoteHead 仅远端场景需要（本端 handleAskCancel 已 promote）
           this._applyCancelLocal(askId, msg.reason, { promoteHead: !isLocalAck });
+          // 远端取消（其他 tab / API 触发）时本 tab 可能正在 _waitForHookBridge polling 该 ask —
+          // 必须同步打破 polling 循环并清 submit 状态，否则下一轮新 ask 会复用残留 _askSubmitting=true。
+          if (!isLocalAck) {
+            this._askAbortRequested = true;
+            if (this._hookWaitTimer) { clearTimeout(this._hookWaitTimer); this._hookWaitTimer = null; }
+            this._pendingHookAnswers = null;
+            this._askSubmitting = false;
+          }
         } else if (msg.type === 'sdk-plan-resolved') {
           if (this.state.pendingPlanApproval?.id === msg.id) {
             this.setState({ pendingPlanApproval: null });
@@ -2505,6 +2520,27 @@ class ChatView extends React.Component {
         }
         this._pendingCancelIds.clear();
       }
+      // 拉 /api/pending-asks：恢复 ws 断开期间产生 + server 重启前已存在的 ask UI。
+      // WS reconnect server 端 replay (server.js:4478) 已 broadcast 内存中存活的 ask-hook-pending，
+      // 但 disk-only entry（server 重启后未 hydrate 到内存的）只能靠此 HTTP 端点拉回。
+      // dedupe 走与 ws ask-hook-pending 同一条路径（setState 内 askQueue.some id 检查）。
+      try {
+        fetch(apiUrl('/api/pending-asks'))
+          .then(r => r.ok ? r.json() : null)
+          .then(data => {
+            if (this._unmounted || !data || !Array.isArray(data.pendingAsks)) return;
+            for (const ask of data.pendingAsks) {
+              if (!ask || !ask.id || !Array.isArray(ask.questions)) continue;
+              // 注入与 ws ask-hook-pending 同形态的 fake msg 走现有 dedupe + 入队路径，
+              // 避免在两处维护"插队 askQueue"逻辑。createdAt 透传给倒计时（已自动转 startedAt）。
+              this._onTerminalWsMessage({ data: JSON.stringify({
+                type: 'ask-hook-pending', id: ask.id, questions: ask.questions,
+                startedAt: ask.createdAt, timeoutMs: 24 * 60 * 60 * 1000,
+              }) });
+            }
+          })
+          .catch(() => { /* 静默：旧 server 没此端点 → 404 → ws replay 仍能覆盖大多数场景 */ });
+      } catch {}
       return;
     }
     if (state !== 'close') return;
@@ -2978,6 +3014,13 @@ class ChatView extends React.Component {
     if (!askId) return;
     const cancelReason = typeof reason === 'string' && reason ? reason : 'User aborted';
 
+    // 通知 _waitForHookBridge 的 polling 立即停下：
+    // 用户取消是唯一的逃生口，必须打破"无超时等待"循环（否则下一帧又会 setTimeout 200ms 自调）。
+    this._askAbortRequested = true;
+    if (this._hookWaitTimer) { clearTimeout(this._hookWaitTimer); this._hookWaitTimer = null; }
+    this._pendingHookAnswers = null;
+    this._askSubmitting = false;
+
     this._applyCancelLocal(askId, cancelReason);
 
     // 通知 Electron main 清 dock badge / pendingByTab[tabId].ask
@@ -3035,6 +3078,9 @@ class ChatView extends React.Component {
   };
 
   handleAskQuestionSubmit = (answers, askId, questions) => {
+    // 每次新提交入口重置 abort：上轮 Cancel 可能把标志置 true 但 polling 已停在 abort 早退分支，
+    // 这一轮 _waitForHookBridge 第一帧会立即误判 abort 而吞掉答案。
+    this._askAbortRequested = false;
     // 关键：在 _promoteNextAskFromQueue 之前把当前 head 的所有提交上下文整体快照下来。
     // promote 会立刻把 _askHookQuestions / _askHookActive / _sdkAskId 切到下一个 ask，
     // 用 instance 字段就会用"下一个 ask 的 questions"给"当前 ask 的 answers"编 key —— 错位。
@@ -3150,26 +3196,47 @@ class ChatView extends React.Component {
   };
 
   /**
-   * 等待 hook bridge（ask-hook-pending）到达，最多 3s。
-   * 解决：对话面板渲染 AskUserQuestion 卡片远早于 PreToolUse hook 触发。
+   * 等待 hook bridge（ask-hook-pending）到达。
+   *
+   * 两种模式：
+   * - `_askHookEverActive=true`（新版 CC，hook bridge 在本 session 至少握手过一次）：
+   *   无任何隐式超时。ask-hook-pending 因网络/抖动晚到 N 秒甚至 N 分钟都不打断，
+   *   用户主动 Cancel 是唯一逃生口。
+   * - `_askHookEverActive=false`（老版 CC 无 ask-bridge / 启动早期）：
+   *   等 ~30s（150 × 200ms）后兜底 fallback 到 PTY 模拟，否则 answer 永远投递不出。
+   *
+   * 退出条件：unmounted / 显式 abort / ws closed / hook bridge 就绪 / 老版兜底超时。
    */
   _waitForHookBridge() {
     if (this._unmounted) return;
+    if (this._askAbortRequested) {
+      this._askAbortRequested = false;
+      this._pendingHookAnswers = null;
+      this._askSubmitting = false;
+      return;
+    }
     if (this._askHookActive) {
       const answers = this._pendingHookAnswers;
       this._pendingHookAnswers = null;
       this._submitViaHookBridge(answers);
       return;
     }
-    this._askHookWaitRetries = (this._askHookWaitRetries || 0) + 1;
-    if (this._askHookWaitRetries > 30) { // 3s 超时
-      // Hook bridge 未到达，fallback 到 PTY 路径
+    // ws 突然 closed：hook 路径无法走 → 转 PTY 由 _waitForWsAndSubmit 接管重连
+    if (!this._inputWs || this._inputWs.readyState !== WebSocket.OPEN) {
       const answers = this._pendingHookAnswers;
       this._pendingHookAnswers = null;
       this._submitViaPty(answers);
       return;
     }
-    this._hookWaitTimer = setTimeout(() => this._waitForHookBridge(), 100);
+    this._askHookWaitRetries = (this._askHookWaitRetries || 0) + 1;
+    // 老版 CC 兜底：本 session 从未见过 ask-hook-pending → 30s 后视作 hook 不可用，走 PTY
+    if (!this._askHookEverActive && this._askHookWaitRetries > 150) {
+      const answers = this._pendingHookAnswers;
+      this._pendingHookAnswers = null;
+      this._submitViaPty(answers);
+      return;
+    }
+    this._hookWaitTimer = setTimeout(() => this._waitForHookBridge(), 200);
   }
 
   /**

@@ -51,6 +51,24 @@
   justify-content: flex-end;
 }
 
+/* 方向性气泡：朝向头像那个角微尖（3px），其他角保持 10px 圆角。
+   .bubble 基类是 8px 全圆，这里按行方向覆盖让 user / assistant 视觉上指向各自头像。 */
+.messageRow .bubble {
+  border-radius: 3px 10px 10px 10px;
+}
+.messageRowEnd .bubble {
+  border-radius: 10px 3px 10px 10px;
+}
+
+/* 内部气泡 .chat-boxer（global class，在 global.css）沿用同样的方向性收角逻辑，
+   但尺寸更小（2px 尖 / 6px 圆）配合 chat-boxer 的 6px 默认 radius。 */
+.messageRow :global(.chat-boxer) {
+  border-radius: 2px 6px 6px 6px;
+}
+.messageRowEnd :global(.chat-boxer) {
+  border-radius: 6px 2px 6px 6px;
+}
+
 /* === Content column === */
 
 .contentCol {

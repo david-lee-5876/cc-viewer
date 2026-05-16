@@ -215,8 +215,8 @@ export default function VoicePackSettings({ prefs, onChange, embedded = false })
               const isCustomBound = selectValue !== 'default' && selectValue !== 'disabled';
               const eventHint = _tr(`ui.voicePack.eventHint.${eventKey}`, null, '');
               const labelText = _tr(`ui.voicePack.event.${eventKey}`, null, eventKey);
-              // Move per-event explanatory text (e.g. turnEnd's focus-gate + 30s cooldown
-              // wording) into a hover tooltip — inline `· hint` text was overflowing the
+              // Move per-event explanatory text (e.g. turnEnd's 30s cooldown wording)
+              // into a hover tooltip — inline `· hint` text was overflowing the
               // settings panel width.
               const labelEl = eventHint ? (
                 <Tooltip title={eventHint} placement="topLeft">

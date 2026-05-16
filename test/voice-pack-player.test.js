@@ -106,8 +106,6 @@ const prefsAllOn = () => ({
   events: {
     planApproval: 'default',
     askQuestion: 'default',
-    timeoutWarning5min: 'default',
-    timeoutWarning60s: 'default',
     turnEnd: 'default',
   },
 });
@@ -205,16 +203,26 @@ describe('playEvent — dedupeKey', () => {
   });
 });
 
-describe('playEvent — focus gate (turnEnd)', () => {
-  it("document.hasFocus()=true + focusGate skips playback", () => {
+describe('playEvent — no focus gate (turnEnd plays regardless of focus)', () => {
+  // 反向 invariant：剔除"仅窗口失焦时响"门控后，文档聚焦也必须播 —— 防回滚保护。
+  // 用户视角："任务结束就响"，靠 30s cooldown + dedupeKey 防扰民，不靠 focus 门控。
+  it('turnEnd plays even when document.hasFocus() === true', () => {
     documentHasFocus = true;
-    assert.equal(player.playEvent('turnEnd', prefsAllOn(), { focusGate: true }), false);
-    assert.equal(MockAudio.instances.length, 0);
+    assert.equal(player.playEvent('turnEnd', prefsAllOn()), true);
+    assert.equal(MockAudio.instances.length, 1);
   });
 
-  it("document.hasFocus()=false + focusGate plays", () => {
+  it('turnEnd still plays when document.hasFocus() === false', () => {
     documentHasFocus = false;
+    assert.equal(player.playEvent('turnEnd', prefsAllOn()), true);
+  });
+
+  it('legacy `focusGate: true` opt is ignored (no longer suppresses)', () => {
+    documentHasFocus = true;
+    // 老调用方残留 focusGate: true 不应反复挡播放 —— 参数本身已从 playEvent 移除。
+    // 双锁：返回值 true + 真的有 Audio 实例（防未来某次重构走 chime fallback 仍假阳）。
     assert.equal(player.playEvent('turnEnd', prefsAllOn(), { focusGate: true }), true);
+    assert.equal(MockAudio.instances.length, 1);
   });
 });
 

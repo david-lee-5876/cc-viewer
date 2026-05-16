@@ -19,12 +19,6 @@ function _idForKind(kind, payload) {
   return null;
 }
 
-function _projectNameFor(kind, payload) {
-  if (!payload) return '';
-  if (kind === 'ptyPlan') return payload.ptyPlan?.ptyPlan?.projectName || '';
-  if (kind === 'ask') return payload.ask?.ask?.projectName || '';
-  return '';
-}
 
 function _isDismissed(dismissedSet, kind, id) {
   if (!id || !(dismissedSet instanceof Set)) return false;
@@ -200,8 +194,6 @@ export default function ApprovalModal({
     if (id != null && onDismiss) onDismiss(activeKind, id);
   };
 
-  const projectName = activeKind ? _projectNameFor(activeKind, approvalGlobal) : '';
-
   const titleKey = activeKind === 'ptyPlan' ? 'ui.approval.modal.title.ptyPlan'
     : 'ui.approval.modal.title.ask';
   const titleFallback = activeKind === 'ptyPlan' ? 'Plan review'
@@ -217,7 +209,6 @@ export default function ApprovalModal({
           <div className={styles.modal}>
             <div className={styles.header}>
               <span className={styles.title}>{_tr(titleKey, null, titleFallback)}</span>
-              {projectName && <span className={styles.chip}>{projectName}</span>}
               {Array.isArray(otherTabs) && otherTabs.map((ot) => (
                 <span
                   key={ot.tabId}
@@ -227,6 +218,9 @@ export default function ApprovalModal({
                   {_tr('ui.approval.modal.jumpToSession', { project: ot.projectName || '' }, `→ ${ot.projectName || 'session'}`)}
                 </span>
               ))}
+              <button className={styles.headerDismissBtn} onClick={handleManualDismiss}>
+                {_tr('ui.approval.modal.dismiss', null, 'Minimise')}
+              </button>
             </div>
             {visibleKinds.length > 1 && (
               <div className={styles.kindTabs}>
@@ -245,17 +239,17 @@ export default function ApprovalModal({
               <div ref={ptyPlanSlotRef} className={`${styles.slot}${activeKind !== 'ptyPlan' ? ' ' + styles.slotHidden : ''}`} />
               <div ref={askSlotRef} className={`${styles.slot}${activeKind !== 'ask' ? ' ' + styles.slotHidden : ''}`} />
             </div>
-            <div className={styles.footer}>
-              <span>{_tr('ui.approval.modal.dismissHint', null, 'ESC or click outside to minimise (pending stays)')}</span>
-              {activeKind === 'ask' && approvalGlobal?.ask?.handlers?.cancel && (
-                <span className={styles.dismissHintExtra}>
+            {activeKind === 'ask' && approvalGlobal?.ask?.handlers?.cancel && (
+              <div className={styles.footer}>
+                <span className={styles.footerHint}>
+                  <span className={styles.footerHintLabel}>
+                    {_tr('ui.approval.modal.hintPrefix', null, 'Hint:')}
+                  </span>
+                  {' '}
                   {_tr('ui.approval.modal.cancelHint', null, '⌘/Ctrl+ESC to cancel')}
                 </span>
-              )}
-              <button className={styles.dismissBtn} onClick={handleManualDismiss}>
-                {_tr('ui.approval.modal.dismiss', null, 'Minimise')}
-              </button>
-            </div>
+              </div>
+            )}
           </div>
         </div>
       )}

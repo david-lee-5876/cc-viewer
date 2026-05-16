@@ -104,10 +104,9 @@ const COOLDOWN_MS = {
 };
 
 // Main entry point.
-//   eventKey:  'planApproval' | 'askQuestion' | 'timeoutWarning5min' | 'timeoutWarning60s' | 'turnEnd'
+//   eventKey:  'planApproval' | 'askQuestion' | 'turnEnd'
 //   prefs:     prefs.approvalModal.voicePack — { enabled, volume, events: { ... } }
 //   opts.dedupeKey:  optional string; second call with same key for same event is ignored
-//   opts.focusGate:  if true and document is focused, skip (used for turnEnd)
 export function playEvent(eventKey, prefs, opts = {}) {
   if (typeof window === 'undefined') return false;
   if (!prefs || prefs.enabled !== true) return false;
@@ -119,11 +118,6 @@ export function playEvent(eventKey, prefs, opts = {}) {
   if (cooldown > 0) {
     const last = lastFireAt.get(eventKey) || 0;
     if (Date.now() - last < cooldown) return false;
-  }
-
-  // Focus gate (mainly for turnEnd — quiet when user is watching the screen)
-  if (opts.focusGate && typeof document !== 'undefined' && document.hasFocus && document.hasFocus()) {
-    return false;
   }
 
   // Caller-side dedupe (e.g. same approval modal kind re-rendering shouldn't

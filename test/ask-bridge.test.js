@@ -216,5 +216,156 @@ describe('ask-bridge.js', () => {
       assert.match(output.hookSpecificOutput.permissionDecisionReason, /^\[cc-viewer:cancel\]/);
       assert.match(output.hookSpecificOutput.permissionDecisionReason, /cc-viewer/i);
     });
+
+    describe('Phase 3 short-poll protocol (X-Ask-Poll-Mode: short)', () => {
+      const Q = [{ question: 'Q?', header: 'H', options: [{ label: 'A', description: '' }], multiSelect: false }];
+      const STDIN = JSON.stringify({ tool_input: { questions: Q } });
+
+      it('POST returns short-poll ack → GET 200 with answers → allow', async () => {
+        let postSeen = false;
+        let getCount = 0;
+        server.on('request', (req, res) => {
+          if (req.method === 'POST' && req.url === '/api/ask-hook') {
+            postSeen = true;
+            assert.equal(req.headers['x-ask-poll-mode'], 'short', 'ask-bridge 必须发 X-Ask-Poll-Mode: short');
+            let body = '';
+            req.on('data', (c) => { body += c; });
+            req.on('end', () => {
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ id: 'test-id', capability: 'short-poll' }));
+            });
+          } else if (req.method === 'GET' && req.url.startsWith('/api/ask-hook/test-id/result')) {
+            getCount++;
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ answers: { 'Q?': 'A' } }));
+          } else {
+            res.writeHead(404); res.end();
+          }
+        });
+
+        const { code, stdout } = await runBridge(STDIN, { CCVIEWER_PORT: String(port) });
+        assert.equal(code, 0);
+        assert.ok(postSeen, 'POST 必须发出');
+        assert.equal(getCount, 1, 'GET 在拿到 200 后必须只发一次');
+        const output = JSON.parse(stdout.trim());
+        assert.equal(output.hookSpecificOutput.permissionDecision, 'allow');
+        assert.deepEqual(output.hookSpecificOutput.updatedInput.answers, { 'Q?': 'A' });
+      });
+
+      it('GET 204 triggers immediate re-request until 200', async () => {
+        let getCount = 0;
+        server.on('request', (req, res) => {
+          if (req.method === 'POST') {
+            let body = ''; req.on('data', (c) => { body += c; });
+            req.on('end', () => {
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ id: 'wait-id', capability: 'short-poll' }));
+            });
+          } else if (req.method === 'GET') {
+            getCount++;
+            if (getCount < 3) {
+              res.writeHead(204); res.end();
+            } else {
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ answers: { 'Q?': 'A' } }));
+            }
+          }
+        });
+
+        const { code, stdout } = await runBridge(STDIN, { CCVIEWER_PORT: String(port) });
+        assert.equal(code, 0);
+        assert.equal(getCount, 3, '204 必须立即重发 GET，第 3 次才拿到 200');
+        const output = JSON.parse(stdout.trim());
+        assert.equal(output.hookSpecificOutput.permissionDecision, 'allow');
+      });
+
+      it('GET 404 triggers re-POST exactly once; new id matches → continue polling', async () => {
+        let postCount = 0;
+        let getCount = 0;
+        server.on('request', (req, res) => {
+          if (req.method === 'POST') {
+            postCount++;
+            let body = ''; req.on('data', (c) => { body += c; });
+            req.on('end', () => {
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              // 两次 POST 都返同一个 id —— re-POST id mismatch 保护通过
+              res.end(JSON.stringify({ id: 'stable-id', capability: 'short-poll' }));
+            });
+          } else if (req.method === 'GET') {
+            getCount++;
+            if (getCount === 1) {
+              res.writeHead(404, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'gone' }));
+            } else {
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ answers: { 'Q?': 'A' } }));
+            }
+          }
+        });
+
+        const { code, stdout } = await runBridge(STDIN, { CCVIEWER_PORT: String(port) });
+        assert.equal(code, 0);
+        assert.equal(postCount, 2, '404 必须触发一次 re-POST');
+        assert.equal(getCount, 2, 'GET 拿到 200 后停止');
+        const output = JSON.parse(stdout.trim());
+        assert.equal(output.hookSpecificOutput.permissionDecision, 'allow');
+      });
+
+      it('GET 404 → re-POST returns mismatched id → fall back to terminal (no infinite loop)', async () => {
+        let postCount = 0;
+        server.on('request', (req, res) => {
+          if (req.method === 'POST') {
+            postCount++;
+            let body = ''; req.on('data', (c) => { body += c; });
+            req.on('end', () => {
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              // 第一次 POST 返 id-1，第二次返 id-2 → bridge 必须直接 fallback
+              res.end(JSON.stringify({ id: postCount === 1 ? 'id-1' : 'id-2', capability: 'short-poll' }));
+            });
+          } else if (req.method === 'GET') {
+            res.writeHead(404, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'gone' }));
+          }
+        });
+
+        const { code, stdout, stderr } = await runBridge(STDIN, { CCVIEWER_PORT: String(port) });
+        assert.equal(code, 0);
+        assert.equal(postCount, 2, '只 re-POST 一次（postRetried gate），不会无限循环');
+        const output = JSON.parse(stdout.trim());
+        assert.equal(output.continue, true, 'id mismatch 必须 fallback terminal UI');
+        assert.ok(stderr.includes('mismatch') || stderr.includes('ask-bridge'), 'stderr 应有 fallback 痕迹');
+      });
+
+      it('GET 5xx retries up to 3 times then falls back (does not block for ~5min like network errors)', async () => {
+        let postCount = 0;
+        let getCount = 0;
+        const start = Date.now();
+        server.on('request', (req, res) => {
+          if (req.method === 'POST') {
+            postCount++;
+            let body = ''; req.on('data', (c) => { body += c; });
+            req.on('end', () => {
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ id: 'sick-server', capability: 'short-poll' }));
+            });
+          } else if (req.method === 'GET') {
+            getCount++;
+            res.writeHead(503, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'sick' }));
+          }
+        });
+
+        const { code, stdout } = await runBridge(STDIN, { CCVIEWER_PORT: String(port) });
+        const elapsed = Date.now() - start;
+        assert.equal(code, 0);
+        // 5xx 独立短重试：MAX_SERVER_5XX_RETRIES = 3 → 第 1 次 + 3 次重试 = 共 4 次 GET 后 fallback
+        assert.ok(getCount >= 3 && getCount <= 5, `5xx 应在 3-5 次 GET 后 fallback，实测 ${getCount}`);
+        // 总耗时上限：500ms + 1000ms + 2000ms ≈ 3.5s（远小于 5min 网络重试上限）
+        assert.ok(elapsed < 10000, `5xx fallback 应远低于 5min 网络抖动上限，实测 ${elapsed}ms`);
+        const output = JSON.parse(stdout.trim());
+        assert.equal(output.continue, true);
+        assert.equal(postCount, 1, '5xx 不触发 re-POST');
+      });
+    });
   });
 });
