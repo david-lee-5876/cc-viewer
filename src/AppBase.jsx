@@ -10,8 +10,8 @@ import { SettingsContext } from './contexts/SettingsContext';
 import { formatTokenCount, filterRelevantRequests, isRelevantRequest, appendCacheLossMap, extractCachedContent } from './utils/helpers';
 import { isMainAgent, isPostClearCheckpoint } from './utils/contentFilter';
 import { apiUrl } from './utils/apiUrl';
-import { playEvent as playVoiceEvent, unlockAudio } from './utils/voicePackPlayer';
-import { DEFAULT_BINDINGS as VP_DEFAULT_BINDINGS } from '../lib/voice-pack-events';
+import { playEvent as playVoiceEvent, unlockAudio, setTurnEndCooldownMs } from './utils/voicePackPlayer';
+import { getDefaultBindingsForLocale as vpDefaultBindingsForLocale } from '../lib/voice-pack-events';
 import { mergeVoicePackInto } from '../lib/approval-modal-prefs';
 import { saveEntries, loadEntries, clearEntries, getCacheMeta, saveSessionEntries, loadSessionEntries, saveSessionIndex } from './utils/entryCache';
 import { buildSessionIndex, splitHotCold, mergeSessionIndices, HOT_SESSION_COUNT, assignMessageTimestamps, applyInPlaceLastMsgReplace } from './utils/sessionManager';
@@ -146,7 +146,12 @@ class AppBase extends React.Component {
       // approvalPrefs: user toggles persisted to /api/preferences.
       // soundEnabled = 合并后的"审批提示音"主开关（默认 ON），voicePack.enabled 始终 == soundEnabled。
       // hydrate 时如检测到老版本独立两字段不一致，会强制对齐并一次性写回 server。
-      // events.turnEnd 仍默认 null（disabled，避免每轮都响） — DEFAULT_BINDINGS 是单一来源。
+      // events.turnEnd 仍默认 null（disabled，避免每轮都响）。
+      // Locale-aware initial seed: zh / zh-TW 新用户首次拿 sanguo，其它走 default (butler)。
+      // getLang() 在 i18n.js 模块加载时已调过 setLang(detectLanguage())（i18n.js:9465），
+      // AppBase constructor 进入这里时 currentLang 已就绪 — 单测见 voice-pack-events.test.js。
+      // 注意：这是 React state 初始 seed，不是 dynamic 重计算。运行时切语言不会重 seed
+      // binding（避免静默改变用户持久化选择 — "no silent migration" P0 规则）。
       approvalPrefs: {
         modalEnabled: true,
         soundEnabled: true,
@@ -154,7 +159,7 @@ class AppBase extends React.Component {
         voicePack: {
           enabled: true,
           volume: 0.3,
-          events: { ...VP_DEFAULT_BINDINGS },
+          events: { ...vpDefaultBindingsForLocale(getLang()) },
         },
       },
     };
@@ -1090,6 +1095,15 @@ class AppBase extends React.Component {
         } catch { }
       });
       this.eventSource.addEventListener('ping', () => { this._resetSSETimeout(); });
+      // server_config: server 启动时一次性推 turnEnd debounce ms（CCV_TURN_END_DEBOUNCE_MS
+      // 可能改过默认值），前端拿这个值同步 voicePackPlayer 的 turnEnd cooldown，避免硬常数漂移。
+      this.eventSource.addEventListener('server_config', (event) => {
+        this._resetSSETimeout();
+        try {
+          const cfg = JSON.parse(event?.data || '{}');
+          if (typeof cfg.turnEndDebounceMs === 'number') setTurnEndCooldownMs(cfg.turnEndDebounceMs);
+        } catch { /* tolerate parse error */ }
+      });
       // turn_end SSE — broadcast by /api/turn-end-notify whenever Claude Code's Stop hook
       // fires (real end of a user-prompt turn). This is the **authoritative** turnEnd
       // signal — far more accurate than isStreaming falling-edge, which resets per-API-call

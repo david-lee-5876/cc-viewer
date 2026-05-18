@@ -12,9 +12,15 @@ import {
   getUserAudioPath,
   deleteUserAudio,
   getDefaultPackPath,
+  getBundledPackPath,
   listDefaultPack,
+  listBundledPack,
+  listBundledPacks,
   isDefaultPackPlaceholder,
+  isBundledPackPlaceholder,
   reconcileVoicePackPrefs,
+  _resolveBundledPackManifestFile,
+  BUNDLED_PACK_IDS,
   EVENT_KEYS,
   MAX_AUDIO_BYTES,
 } from '../lib/voice-pack-manager.js';
@@ -206,6 +212,159 @@ describe('default pack (bundled "皇上系列")', () => {
     assert.equal(getDefaultPackPath('../../etc/passwd'), null);
     assert.equal(getDefaultPackPath('bogusEvent'), null);
   });
+
+  it('honors pack.json events[k].file — descriptive filenames resolve to the manifest target', () => {
+    // The shipped butler pack uses descriptive filenames (e.g.
+    // "The_plan_awaits_your_approval_sir.MP3"). Without the manifest-aware
+    // resolver, the literal-only lookup would silently return null. Assert the
+    // resolved path matches the manifest filename rather than the legacy
+    // `<eventKey>.<ext>` convention.
+    const hit = getDefaultPackPath('planApproval');
+    assert.ok(hit, 'planApproval should resolve via manifest');
+    assert.ok(
+      !/[\\/]planApproval\.[a-z0-9]+$/i.test(hit.path),
+      `expected descriptive filename, got ${hit.path}`,
+    );
+    assert.equal(hit.format, 'mp3');
+  });
+});
+
+describe('getBundledPackPath + listBundledPacks (multi-pack)', () => {
+  it('resolves every EVENT_KEY for both shipped packs (default + sanguo)', () => {
+    for (const packId of BUNDLED_PACK_IDS) {
+      for (const eventKey of EVENT_KEYS) {
+        const hit = getBundledPackPath(packId, eventKey);
+        assert.ok(hit, `no file for pack=${packId} event=${eventKey}`);
+        assert.ok(existsSync(hit.path));
+      }
+    }
+  });
+
+  it('rejects unknown packId (no traversal escape via the packId arg)', () => {
+    assert.equal(getBundledPackPath('../etc', 'planApproval'), null);
+    assert.equal(getBundledPackPath('nonexistent', 'planApproval'), null);
+    assert.equal(getBundledPackPath('', 'planApproval'), null);
+    assert.equal(getBundledPackPath(null, 'planApproval'), null);
+  });
+
+  it('rejects unknown eventKey (preserves existing guard)', () => {
+    assert.equal(getBundledPackPath('default', '../../etc/passwd'), null);
+    assert.equal(getBundledPackPath('sanguo', 'bogusEvent'), null);
+  });
+
+  it('getDefaultPackPath is a thin wrapper equivalent to getBundledPackPath("default", …)', () => {
+    for (const key of EVENT_KEYS) {
+      const direct = getBundledPackPath('default', key);
+      const wrapper = getDefaultPackPath(key);
+      assert.ok(direct && wrapper);
+      assert.equal(direct.path, wrapper.path);
+      assert.equal(direct.format, wrapper.format);
+    }
+  });
+
+  it('listBundledPacks returns metadata for every shipped pack', () => {
+    const all = listBundledPacks();
+    assert.equal(all.length, BUNDLED_PACK_IDS.length);
+    for (const packId of BUNDLED_PACK_IDS) {
+      const entry = all.find(p => p.id === packId);
+      assert.ok(entry, `missing pack ${packId} in listBundledPacks`);
+      assert.equal(typeof entry.displayName, 'string');
+      assert.ok(entry.displayName.length > 0);
+      assert.equal(typeof entry.placeholder, 'boolean');
+      assert.equal(entry.events.length, EVENT_KEYS.length);
+    }
+  });
+
+  it('listBundledPack(packId) returns per-pack event listing', () => {
+    const def = listBundledPack('default');
+    assert.equal(def.length, EVENT_KEYS.length);
+    const san = listBundledPack('sanguo');
+    assert.equal(san.length, EVENT_KEYS.length);
+    // Sanguo's askQuestion ships as ask.MP3 (descriptive filename via manifest)
+    const sanAsk = san.find(e => e.eventKey === 'askQuestion');
+    assert.equal(sanAsk.format, 'mp3');
+    assert.ok(sanAsk.size > 0);
+  });
+
+  it('listBundledPack rejects unknown packId', () => {
+    assert.deepEqual(listBundledPack('nonexistent'), []);
+    assert.deepEqual(listBundledPack('../etc'), []);
+  });
+
+  it('isBundledPackPlaceholder mirrors per-pack pack.json flag', () => {
+    // Both shipped packs declare placeholder:false in pack.json.
+    assert.equal(isBundledPackPlaceholder('default'), false);
+    assert.equal(isBundledPackPlaceholder('sanguo'), false);
+    assert.equal(isBundledPackPlaceholder('nonexistent'), false);
+  });
+
+  it('isDefaultPackPlaceholder back-compat wrapper matches isBundledPackPlaceholder("default")', () => {
+    assert.equal(isDefaultPackPlaceholder(), isBundledPackPlaceholder('default'));
+  });
+});
+
+describe('_resolveBundledPackManifestFile (pack.json file rejection rules)', () => {
+  let tmp;
+  beforeEach(() => { tmp = mkTmp(); });
+  afterEach(() => { try { rmSync(tmp, { recursive: true, force: true }); } catch {} });
+
+  it('resolves a valid file inside the dir', () => {
+    writeFileSync(join(tmp, 'whatever.mp3'), tinyMp3Id3());
+    const hit = _resolveBundledPackManifestFile(tmp, 'whatever.mp3');
+    assert.ok(hit);
+    assert.equal(hit.format, 'mp3');
+    assert.equal(hit.path, join(tmp, 'whatever.mp3'));
+  });
+
+  it('normalises uppercase extension (.MP3 → format=mp3)', () => {
+    writeFileSync(join(tmp, 'Loud.MP3'), tinyMp3Id3());
+    const hit = _resolveBundledPackManifestFile(tmp, 'Loud.MP3');
+    assert.ok(hit);
+    assert.equal(hit.format, 'mp3');
+  });
+
+  it('rejects path-traversal attempts in file field', () => {
+    assert.equal(_resolveBundledPackManifestFile(tmp, '../etc/passwd'), null);
+    assert.equal(_resolveBundledPackManifestFile(tmp, 'sub/dir/file.mp3'), null);
+    assert.equal(_resolveBundledPackManifestFile(tmp, '..\\evil.mp3'), null);
+    assert.equal(_resolveBundledPackManifestFile(tmp, 'has\0null.mp3'), null);
+  });
+
+  it('rejects dotfiles and meta-names', () => {
+    assert.equal(_resolveBundledPackManifestFile(tmp, '.hidden.mp3'), null);
+    assert.equal(_resolveBundledPackManifestFile(tmp, '.'), null);
+    assert.equal(_resolveBundledPackManifestFile(tmp, '..'), null);
+  });
+
+  it('rejects disallowed extensions', () => {
+    writeFileSync(join(tmp, 'evil.exe'), Buffer.from([0]));
+    assert.equal(_resolveBundledPackManifestFile(tmp, 'evil.exe'), null);
+    writeFileSync(join(tmp, 'noext'), Buffer.from([0]));
+    assert.equal(_resolveBundledPackManifestFile(tmp, 'noext'), null);
+  });
+
+  it('rejects non-existent files (no fabricated paths)', () => {
+    assert.equal(_resolveBundledPackManifestFile(tmp, 'ghost.mp3'), null);
+  });
+
+  it('rejects symlinks even when the target is valid', () => {
+    const real = join(tmp, 'real.mp3');
+    const link = join(tmp, 'linked.mp3');
+    writeFileSync(real, tinyMp3Id3());
+    try { symlinkSync(real, link); }
+    catch (err) {
+      if (process.platform === 'win32') return;
+      throw err;
+    }
+    assert.equal(_resolveBundledPackManifestFile(tmp, 'linked.mp3'), null);
+  });
+
+  it('rejects non-string / empty / over-long file fields', () => {
+    assert.equal(_resolveBundledPackManifestFile(tmp, ''), null);
+    assert.equal(_resolveBundledPackManifestFile(tmp, null), null);
+    assert.equal(_resolveBundledPackManifestFile(tmp, 123), null);
+    assert.equal(_resolveBundledPackManifestFile(tmp, 'x'.repeat(201) + '.mp3'), null);
+  });
 });
 
 describe('reconcileVoicePackPrefs', () => {
@@ -226,6 +385,25 @@ describe('reconcileVoicePackPrefs', () => {
     assert.equal(r.events.askQuestion, null);
     assert.equal(r.events.planApproval, null);
     assert.equal(r.events.turnEnd, 'default');
+  });
+
+  it("passes 'sanguo' bundled-pack sentinel through verbatim", () => {
+    // P0 regression guard — previously the literal-string whitelist only matched
+    // 'default', so 'sanguo' fell through to isValidId() (which rejects letters
+    // outside [a-f0-9-]) and got nulled on every preferences save. The fix is
+    // BUNDLED_PACK_IDS.includes(val) — this test fails if anyone reverts it.
+    const vp = { enabled: true, events: { askQuestion: 'sanguo', planApproval: 'sanguo', turnEnd: null } };
+    const r = reconcileVoicePackPrefs(logDir, vp);
+    assert.equal(r.events.askQuestion, 'sanguo', 'sanguo sentinel must survive reconcile');
+    assert.equal(r.events.planApproval, 'sanguo');
+    assert.equal(r.events.turnEnd, null);
+  });
+
+  it("rejects unknown bundled-pack-shaped names (e.g. typos / future packs not yet shipped)", () => {
+    const vp = { enabled: true, events: { askQuestion: 'tang', planApproval: 'sangoo' } };
+    const r = reconcileVoicePackPrefs(logDir, vp);
+    assert.equal(r.events.askQuestion, null, 'unshipped pack name should be reset');
+    assert.equal(r.events.planApproval, null, 'sanguo typo should be reset');
   });
 
   it("keeps live ids", () => {

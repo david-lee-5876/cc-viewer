@@ -65,6 +65,18 @@ describe('mergeVoicePackInto', () => {
     assert.deepEqual(base, baseCopy);
     assert.deepEqual(inc, incCopy);
   });
+
+  it("passes 'sanguo' bundled-pack value through verbatim (no value-domain filtering at merge)", () => {
+    // Merge layer is key-shape-only; value validation is reconcile's job.
+    // This test pins that contract so a future "let's add value whitelist
+    // here too" refactor either updates the test or recognises it duplicates
+    // reconcile work.
+    const base = { enabled: true, events: { askQuestion: 'default', planApproval: 'default', turnEnd: null } };
+    const r = mergeVoicePackInto(base, { events: { askQuestion: 'sanguo', planApproval: 'sanguo' } });
+    assert.equal(r.events.askQuestion, 'sanguo', 'sanguo must merge verbatim — reconcile validates downstream');
+    assert.equal(r.events.planApproval, 'sanguo');
+    assert.equal(r.events.turnEnd, null, 'unrelated keys preserved');
+  });
 });
 
 describe('mergeApprovalModalPrefs', () => {

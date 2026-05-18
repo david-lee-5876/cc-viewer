@@ -5912,25 +5912,65 @@ const i18nData = {
     "ar": "عنصر نائب", "no": "plassholder", "pt-BR": "espaço reservado",
     "th": "ตัวอย่าง", "tr": "yer tutucu", "uk": "заповнювач"
   },
+  "ui.voicePack.pack.default": {
+    "zh": "管家 (内置)", "en": "Butler (built-in)", "zh-TW": "管家 (內建)",
+    "ko": "집사 (내장)", "ja": "執事 (内蔵)", "de": "Butler (eingebaut)",
+    "es": "Mayordomo (integrado)", "fr": "Majordome (intégré)", "it": "Maggiordomo (integrato)",
+    "da": "Butler (indbygget)", "pl": "Lokaj (wbudowany)", "ru": "Дворецкий (встроен)",
+    "ar": "خادم (مدمج)", "no": "Butler (innebygd)", "pt-BR": "Mordomo (embutido)",
+    "th": "บัตเลอร์ (ในตัว)", "tr": "Uşak (yerleşik)", "uk": "Дворецький (вбудовано)"
+  },
+  "ui.voicePack.pack.sanguo": {
+    "zh": "三国 (内置)", "en": "Three Kingdoms (built-in)", "zh-TW": "三國 (內建)",
+    "ko": "삼국지 (내장)", "ja": "三国志 (内蔵)", "de": "Drei Reiche (eingebaut)",
+    "es": "Tres Reinos (integrado)", "fr": "Trois Royaumes (intégré)", "it": "Tre Regni (integrato)",
+    "da": "Tre Kongeriger (indbygget)", "pl": "Trzy Królestwa (wbudowane)", "ru": "Троецарствие (встроен)",
+    "ar": "الممالك الثلاث (مدمج)", "no": "Tre Kongeriker (innebygd)", "pt-BR": "Três Reinos (embutido)",
+    "th": "สามก๊ก (ในตัว)", "tr": "Üç Krallık (yerleşik)", "uk": "Три царства (вбудовано)"
+  },
+  "ui.voicePack.group.bundled": {
+    "zh": "内置", "en": "Bundled", "zh-TW": "內建",
+    "ko": "내장", "ja": "内蔵", "de": "Eingebaut",
+    "es": "Integrado", "fr": "Intégré", "it": "Integrato",
+    "da": "Indbygget", "pl": "Wbudowane", "ru": "Встроенные",
+    "ar": "مدمج", "no": "Innebygd", "pt-BR": "Embutido",
+    "th": "ในตัว", "tr": "Yerleşik", "uk": "Вбудовані"
+  },
+  "ui.voicePack.group.uploaded": {
+    "zh": "已上传", "en": "Uploaded", "zh-TW": "已上傳",
+    "ko": "업로드됨", "ja": "アップロード済み", "de": "Hochgeladen",
+    "es": "Subido", "fr": "Téléversé", "it": "Caricato",
+    "da": "Uploadet", "pl": "Przesłane", "ru": "Загруженные",
+    "ar": "تم الرفع", "no": "Opplastet", "pt-BR": "Enviado",
+    "th": "อัปโหลดแล้ว", "tr": "Yüklendi", "uk": "Завантажені"
+  },
+  "ui.voicePack.group.other": {
+    "zh": "其它", "en": "Other", "zh-TW": "其他",
+    "ko": "기타", "ja": "その他", "de": "Sonstiges",
+    "es": "Otro", "fr": "Autre", "it": "Altro",
+    "da": "Andet", "pl": "Inne", "ru": "Другое",
+    "ar": "أخرى", "no": "Annet", "pt-BR": "Outro",
+    "th": "อื่น ๆ", "tr": "Diğer", "uk": "Інше"
+  },
   "ui.voicePack.eventHint.turnEnd": {
-    "zh": "30 秒内最多一次",
-    "en": "At most once per 30s",
-    "zh-TW": "30 秒內最多一次",
-    "ko": "30초당 최대 1회",
-    "ja": "30秒ごとに最大1回",
-    "de": "Max. 1×/30s",
-    "es": "Máx 1 cada 30 s",
-    "fr": "Max 1 toutes les 30 s",
-    "it": "Max 1 ogni 30s",
-    "da": "Maks. 1 pr. 30s",
-    "pl": "Maks 1 / 30 s",
-    "ru": "≤1 раз/30с",
-    "ar": "مرة واحدة كل 30 ثانية كحد أقصى",
-    "no": "Maks 1 per 30s",
-    "pt-BR": "Máx 1 a cada 30s",
-    "th": "สูงสุด 1 ครั้งต่อ 30 วินาที",
-    "tr": "30s'de en fazla 1",
-    "uk": "≤1 раз/30с"
+    "zh": "10 秒内最多一次",
+    "en": "At most once per 10s",
+    "zh-TW": "10 秒內最多一次",
+    "ko": "10초당 최대 1회",
+    "ja": "10秒ごとに最大1回",
+    "de": "Max. 1×/10s",
+    "es": "Máx 1 cada 10 s",
+    "fr": "Max 1 toutes les 10 s",
+    "it": "Max 1 ogni 10s",
+    "da": "Maks. 1 pr. 10s",
+    "pl": "Maks 1 / 10 s",
+    "ru": "≤1 раз/10с",
+    "ar": "مرة واحدة كل 10 ثوانٍ كحد أقصى",
+    "no": "Maks 1 per 10s",
+    "pt-BR": "Máx 1 a cada 10s",
+    "th": "สูงสุด 1 ครั้งต่อ 10 วินาที",
+    "tr": "10s'de en fazla 1",
+    "uk": "≤1 раз/10с"
   },
   "ui.voicePack.binding.disabled": {
     "zh": "禁用", "en": "Disabled", "zh-TW": "停用",

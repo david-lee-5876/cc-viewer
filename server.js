@@ -61,11 +61,14 @@ import {
   deleteUserAudio as vpDeleteUserAudio,
   getUserAudioPath as vpGetUserAudioPath,
   getDefaultPackPath as vpGetDefaultPackPath,
+  getBundledPackPath as vpGetBundledPackPath,
   listDefaultPack as vpListDefaultPack,
+  listBundledPacks as vpListBundledPacks,
   isDefaultPackPlaceholder as vpIsDefaultPackPlaceholder,
   reconcileVoicePackPrefs as vpReconcile,
   mimeForFormat as vpMime,
   isValidId as vpIsValidId,
+  BUNDLED_PACK_IDS as VP_BUNDLED_PACK_IDS,
   EVENT_KEYS as VP_EVENT_KEYS,
   MAX_AUDIO_BYTES as VP_MAX_BYTES,
 } from './lib/voice-pack-manager.js';
@@ -807,12 +810,17 @@ async function handleRequest(req, res) {
   if (url === '/api/voice-pack/list' && method === 'GET') {
     try {
       const userAudio = vpListUserAudio(LOG_DIR);
+      const bundledPacks = vpListBundledPacks();
+      // SUNSET-MARKER: ccv-voice-pack-defaultPack-flat-shape
+      // Legacy defaultPack / defaultPackPlaceholder fields kept alongside the
+      // new bundledPacks[] for one release so any out-of-tree consumer (mobile
+      // app shell, third-party fork) doesn't break on the shape change.
+      // Drop after 1.6.273+. New code should iterate bundledPacks.
       const defaultPack = vpListDefaultPack();
-      // defaultPackPlaceholder lets Settings UI label the Default option as
-      // "(placeholder)" until real recordings replace the bundled sine-wave WAVs.
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({
         userAudio,
+        bundledPacks,
         defaultPack,
         defaultPackPlaceholder: vpIsDefaultPackPlaceholder(),
         eventKeys: VP_EVENT_KEYS,
@@ -908,17 +916,25 @@ async function handleRequest(req, res) {
   // Serve audio — supports HTTP Range so iOS Safari / mobile players can seek mp3
   // (Safari refuses to start playback when the server returns 200 without Accept-Ranges).
   // Path forms:
-  //   /api/voice-pack/audio/default/<eventKey>   — bundled default pack
+  //   /api/voice-pack/audio/<packId>/<eventKey>  — bundled pack (default, sanguo, …)
   //   /api/voice-pack/audio/<uuid>               — user-uploaded file
   if (url.startsWith('/api/voice-pack/audio/') && method === 'GET') {
     const tail = url.slice('/api/voice-pack/audio/'.length);
     let resolved = null;
-    let isDefault = false;
-    if (tail.startsWith('default/')) {
-      const eventKey = tail.slice('default/'.length);
-      resolved = vpGetDefaultPackPath(eventKey);
-      isDefault = true;
-    } else {
+    let isBundled = false;
+    // Iterate the explicit BUNDLED_PACK_IDS list so an unknown prefix can never
+    // accidentally hit the bundled branch — falls through to the uuid lookup,
+    // which is whitelisted by isValidId.
+    for (const packId of VP_BUNDLED_PACK_IDS) {
+      const prefix = `${packId}/`;
+      if (tail.startsWith(prefix)) {
+        const eventKey = tail.slice(prefix.length);
+        resolved = vpGetBundledPackPath(packId, eventKey);
+        isBundled = true;
+        break;
+      }
+    }
+    if (!isBundled) {
       resolved = vpGetUserAudioPath(LOG_DIR, tail);
     }
     if (!resolved) {
@@ -936,7 +952,7 @@ async function handleRequest(req, res) {
     //   - user audio: content-addressed by UUID (delete + re-upload always mints a
     //     new id), so safe to mark immutable for a full day. Loopback-only writes,
     //     so the LAN audience cannot mutate.
-    const cacheControl = isDefault
+    const cacheControl = isBundled
       ? 'public, max-age=300, must-revalidate'
       : 'private, max-age=86400, immutable';
     try {
@@ -1012,7 +1028,7 @@ async function handleRequest(req, res) {
   // Auth: loopback IP + X-CCViewer-Internal header matching INTERNAL_TOKEN.
   // Defense-in-depth against a same-host malicious page POSTing fake turn_end
   // events (round-3 P1). Internal-only POST → in-process SDK callback skips
-  // this endpoint and calls `_broadcastTurnEnd` directly below.
+  // this endpoint and calls `_scheduleTurnEndBroadcast` directly below.
   if (url === '/api/turn-end-notify' && method === 'POST') {
     if (!isLocal) {
       res.writeHead(403, { 'Content-Type': 'application/json' });
@@ -1036,8 +1052,15 @@ async function handleRequest(req, res) {
         return; // socket already closed by destroy()
       }
       let payload = {};
-      try { payload = JSON.parse(body); } catch { /* tolerate empty / malformed */ }
-      _broadcastTurnEnd(payload.sessionId || null, payload.ts || Date.now());
+      let badJson = false;
+      try { payload = body ? JSON.parse(body) : {}; }
+      catch { badJson = true; console.warn('[turn-end-notify] malformed JSON body'); }
+      if (badJson) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'malformed JSON body' }));
+        return;
+      }
+      _scheduleTurnEndBroadcast(payload.sessionId || null, payload.ts || Date.now());
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: true }));
     });
@@ -1330,6 +1353,16 @@ async function handleRequest(req, res) {
     const pingTimer = setInterval(() => {
       try { res.write('event: ping\ndata: {}\n\n'); } catch {}
     }, 30000);
+
+    // server_config: 给前端推一次性的关键运行时常量，让前端 cooldown / debounce 等
+    // 模块常量能跟随 server env 自动对齐（避免「server 改了 env、前端写死」漂移）。
+    // 见 server.js 顶部 turnEnd debounce 的 SUNSET-MARKER 注释。
+    // write 失败要 warn：之前静默吞会让 env override 漂移到前端硬常量 10s 而无人发觉。
+    try {
+      res.write(`event: server_config\ndata: ${JSON.stringify({ turnEndDebounceMs: TURN_END_DEBOUNCE_MS })}\n\n`);
+    } catch (err) {
+      console.warn(`[server_config] SSE write failed (turnEndDebounceMs=${TURN_END_DEBOUNCE_MS}):`, err && err.message);
+    }
 
     // 如果有待决的 resume 选择，发送 resume_prompt 事件
     if (_resumeState) {
@@ -4317,6 +4350,12 @@ async function handleRequest(req, res) {
 }
 
 export async function startViewer() {
+  // 启动新一轮 → 若上一次 stop 仍在飞行，先 await 它再重置，避免与并发 _doStop 共享状态。
+  if (_stoppingPromise) {
+    try { await _stoppingPromise; } catch { /* stop 内部已 try/catch，最坏继续 */ }
+  }
+  _isStopping = false;
+  _stoppingPromise = null;
   // 加载插件（需要在创建服务器之前，以便通过 hook 获取 HTTPS 证书）
   await loadPlugins();
 
@@ -5073,37 +5112,176 @@ export function getInternalToken() {
 //      directly when SDK's 'result' message fires).
 // Same SSE payload shape regardless of source so the frontend listener doesn't
 // care which path produced it.
-function _broadcastTurnEnd(sessionId, ts) {
-  try {
-    if (clients.length > 0 && sendEventToClients) {
-      sendEventToClients(clients, 'turn_end', {
-        sessionId: sessionId || null,
-        ts: ts || Date.now(),
-      });
-    }
-  } catch (err) {
-    console.warn('[turn-end] broadcast failed:', err.message);
-  }
-}
-export function broadcastTurnEnd(sessionId = null, ts = Date.now()) {
-  _broadcastTurnEnd(sessionId, ts);
+//
+// SUNSET-MARKER: ccv-turn-end-debounce
+// PATCH (2026-05-17): trailing debounce + cancel-on-new-request。
+// Claude Code 官方 `Stop` 钩子是 query() 级而非 user-prompt 级（once per turn；
+// 任何 user-role 注入都会让 query() 多走几轮 → Stop 多触发 → 响铃多次）。本层
+// 是「用户视角任务边界」的近似——**这是补丁，不是终态**。等 Anthropic 出更准确
+// 的 hook（如 Stop 输入带 `is_final_turn:true`、SDK `result` 带 `subtype:'final'`、
+// 或 `onUserTurnEnd` 回调）就拆掉。拆除时一并 grep 上面 SUNSET-MARKER 标签
+// 定位所有相关代码（server / voicePackPlayer / test / history.md）。
+//
+// **用户原始语义**：「等 10 秒钟。如果这 10 秒钟内没有新的请求发起，那么就认为
+// 任务真的已经完成了，开始执行播放」—— 隐含：10s 内**有**新请求 → 不算完成 →
+// **不**播放（取消）。
+//
+// 「新请求」定义：(a) 同 sessionId 又一次 POST → 同桶重排 timer
+//                  (b) streamingState 从 inactive 转 active → **cancel 所有 pending**
+//                      （Claude 又开始新一轮 query()，前一个不算「真任务结束」）
+//
+// ASSUMPTION: one streaming session per server process（Electron tab-worker
+// 一进程一 server / CLI 单 PTY 天然成立）。未来若一个 server 进程支持 multi-PTY，
+// 请把 `_lastCliActive`/`_lastSdkActive` 改成 per-sessionId Map，并把 cancel 改成
+// 「只清匹配 key」。
+//
+// HISTORY: 早期版本在 `_scheduleTurnEndBroadcast` 入口对 `streamingState.active`
+// 做一次同步 race-guard（active=true 直接丢弃 POST，无补播）。该 guard 与 Stop hook
+// 真实时序冲突：Claude Code 在 query() 结束后还会有 housekeeping/telemetry 子请求
+// 让 active 短暂 true，POST 落在该窗口里就会被静默吞。已移除，统一由 rising-edge
+// cancel 兜底——POST 总是入桶排 timer，真有新一轮 query() 才在 rising-edge 时 cancel。
+const _pendingTurnEndTimers = new Map(); // key: sessionId(string) | null → { timer, sessionId, ts }
+// CCV_TURN_END_DEBOUNCE_MS 调整 trailing debounce 窗口。clamp 到 [100, 60_000] 防 footgun
+// （0 会立刻 fire 等于禁用 debounce；2^31 内 Node setTimeout 有 clamp 行为）；
+// 空串 / 非数 / 范围外都回 default + warn 一次。
+const TURN_END_DEBOUNCE_MS = (() => {
+  const raw = process.env.CCV_TURN_END_DEBOUNCE_MS;
+  if (raw === undefined || raw === '' || /^\s*$/.test(raw)) return 10_000;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) { console.warn(`[turn-end] CCV_TURN_END_DEBOUNCE_MS=${raw} not finite, using 10000`); return 10_000; }
+  if (n < 100 || n > 60_000) { console.warn(`[turn-end] CCV_TURN_END_DEBOUNCE_MS=${n} out of [100,60000], using 10000`); return 10_000; }
+  return n;
+})();
+let _isStopping = false;
+let _lastSdkActive = false;
+let _lastCliActive = false;
+let _onTurnEndBroadcastForTests = null;
+
+function _normalizeKey(sessionId) {
+  return (typeof sessionId === 'string' && sessionId) ? sessionId : null;
 }
 
-// 流式状态 SSE 推送定时器：检测 streamingState 变化并广播给所有客户端
+function _emitTurnEnd(sessionId, ts) {
+  const sid = _normalizeKey(sessionId);
+  const t = ts || Date.now();
+  try {
+    if (clients.length > 0 && sendEventToClients) {
+      sendEventToClients(clients, 'turn_end', { sessionId: sid, ts: t });
+    }
+    if (typeof _onTurnEndBroadcastForTests === 'function') {
+      try { _onTurnEndBroadcastForTests({ sessionId: sid, ts: t }); }
+      catch (e) { if (process.env.NODE_ENV === 'test') throw e; /* prod 不让测试桩污染 */ }
+    }
+  } catch (err) {
+    console.warn(`[turn-end] broadcast failed sid=${sid}:`, err && err.message);
+  }
+}
+
+function _scheduleTurnEndBroadcast(sessionId, ts) {
+  if (_isStopping) return;
+  const sid = _normalizeKey(sessionId);
+  const t = ts || Date.now();
+  // 注意：这里不再对 streamingState.active 做同步 race-guard。理由见上方 HISTORY 段。
+  // POST 一律入桶排 timer；真正「新一轮 query()」走 _observeStreamingTick 的 rising-edge
+  // cancel 兜底，不会让无效尾音播出来。
+  const existing = _pendingTurnEndTimers.get(sid);
+  if (existing) clearTimeout(existing.timer);
+  const timer = setTimeout(() => {
+    _pendingTurnEndTimers.delete(sid);
+    _emitTurnEnd(sid, t);
+  }, TURN_END_DEBOUNCE_MS);
+  if (typeof timer.unref === 'function') timer.unref();
+  _pendingTurnEndTimers.set(sid, { timer, ts: t });
+}
+
+// 直接丢弃所有 pending —— 用于两条路径：(1) `_doStop` shutdown，(2) rising-edge 新请求
+// 进入（按用户原始语义不算「真任务结束」，不播放）。
+function _cancelAllPendingTurnEndBroadcasts() {
+  if (_pendingTurnEndTimers.size === 0) return;
+  for (const { timer } of _pendingTurnEndTimers.values()) clearTimeout(timer);
+  _pendingTurnEndTimers.clear();
+}
+
+function _onStreamingActivated() {
+  // rising-edge：Claude 又开始新一轮 query()，按用户原始语义「10s 内有新请求 → 不算完成 →
+  // 不播放」，直接 cancel 所有 pending（**不** flush）。这正是用户键入「请等待 10 秒钟」
+  // 的本意：被打断就当没完成。
+  _cancelAllPendingTurnEndBroadcasts();
+}
+
+// 统一的 streaming-state 观察入口。production polling 和 SDK push 都调它，测试也走它，
+// 不再为「测试桩」单独维护 mirror state（杜绝逻辑漂移）。返回是否检测到 rising edge。
+// `_isStopping` 时直接返回 false：shutdown 中迟到的 tick 不应再去 flush。
+function _observeStreamingTick(activeNow, mode /* 'cli' | 'sdk' */) {
+  if (_isStopping) return false;
+  const isActive = !!activeNow;
+  const wasActive = mode === 'sdk' ? _lastSdkActive : _lastCliActive;
+  if (mode === 'sdk') _lastSdkActive = isActive; else _lastCliActive = isActive;
+  if (isActive && !wasActive) {
+    _onStreamingActivated();
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Test-only hooks. **External code MUST NOT import this.** 见 SUNSET-MARKER 注释。
+ * 运行时通过 `NODE_ENV === 'test'` 守卫：非 test 环境下所有方法都是 frozen no-op，
+ * 不让生产 import 误用扰乱 turnEnd 行为。
+ * @private
+ */
+export const __testing = (process.env.NODE_ENV === 'test') ? {
+  reset() {
+    _cancelAllPendingTurnEndBroadcasts();
+    _isStopping = false;
+    _lastSdkActive = false;
+    _lastCliActive = false;
+    _stoppingPromise = null;
+    _onTurnEndBroadcastForTests = null;
+  },
+  onBroadcast(fn) { _onTurnEndBroadcastForTests = fn; },
+  getPendingKeys() { return [..._pendingTurnEndTimers.keys()]; },
+  setIsStopping(v) { _isStopping = !!v; },
+  observeStreamingTick(activeNow, mode = 'cli') { return _observeStreamingTick(activeNow, mode); },
+  scheduleTurnEnd(sessionId, ts) { _scheduleTurnEndBroadcast(sessionId, ts); },
+  getDebounceMs() { return TURN_END_DEBOUNCE_MS; },
+} : Object.freeze({
+  reset() {},
+  onBroadcast() {},
+  getPendingKeys() { return []; },
+  setIsStopping() {},
+  observeStreamingTick() { return false; },
+  scheduleTurnEnd() {},
+  getDebounceMs() { return TURN_END_DEBOUNCE_MS; },
+});
+
+/**
+ * Schedule a debounced turn_end SSE broadcast. **Returns immediately**; actual SSE write
+ * happens up to TURN_END_DEBOUNCE_MS later (default 10s; clamped [100,60000]).
+ * 详细语义见 SUNSET-MARKER patch-note。
+ */
+export function broadcastTurnEnd(sessionId = null, ts = Date.now()) {
+  _scheduleTurnEndBroadcast(sessionId, ts);
+}
+
+// 流式状态 SSE 推送定时器：检测 streamingState 变化并广播给所有客户端。
+// rising-edge → turn_end flush 由 _observeStreamingTick 统一处理。
 let _streamingStatusTimer = null;
-let _lastStreamingActive = false;
 function startStreamingStatusTimer() {
   if (_streamingStatusTimer) return;
   _streamingStatusTimer = setInterval(() => {
     // SDK mode uses its own streaming state (pushed directly via setSdkStreamingState)
     if (isSdkMode) return;
-    const changed = streamingState.active !== _lastStreamingActive;
-    if (changed || streamingState.active) {
-      const data = streamingState.active
+    const isActive = streamingState.active;
+    const wasActive = _lastCliActive;
+    // 统一走 _observeStreamingTick：内部负责 rising-edge cancel（flush pending turn_end）+ 更新 _lastCliActive。
+    _observeStreamingTick(isActive, 'cli');
+    const changed = wasActive !== isActive;
+    if (changed || isActive) {
+      const data = isActive
         ? { ...streamingState, elapsed: Date.now() - streamingState.startTime }
         : { active: false };
       if (clients.length > 0 && sendEventToClients) sendEventToClients(clients, 'streaming_status', data);
-      _lastStreamingActive = streamingState.active;
     }
   }, 500);
   _streamingStatusTimer.unref();
@@ -5116,6 +5294,14 @@ export function stopViewer() {
   return _stoppingPromise;
 }
 async function _doStop() {
+  // _isStopping 设 true 后：①新 schedule 全部入口短路（_scheduleTurnEndBroadcast 入口检查）
+  // ②迟到的 streaming tick 也短路（_observeStreamingTick 入口检查）
+  // → 后续 await 期间 turn-end 状态机彻底冻结，无并发改 Map 的可能。
+  _isStopping = true;
+  _cancelAllPendingTurnEndBroadcasts();
+  // 对称 startViewer：下一次启动后第一次 active 才算 rising edge
+  _lastSdkActive = false;
+  _lastCliActive = false;
   try { await Promise.race([runParallelHook('serverStopping'), new Promise(r => setTimeout(r, 3000))]); } catch { }
   // 如果用户未做选择，将临时文件转为正式文件
   if (_resumeState && _resumeState.tempFile) {
@@ -5167,10 +5353,22 @@ export function pushSdkEntry(entry) {
   if (sendToClients) sendToClients(clients, entry);
 }
 
-/** Update streaming status (for SDK mode). */
+/**
+ * Update streaming status (SDK mode). 调用约定：SDK 每个 chunk 都调一次 `{active:true,...}`，
+ * turn 结束才调 `{active:false}`。rising-edge 检测统一走 `_observeStreamingTick`。
+ * **SSE 推送只在 transition（edge）或仍 active 时发**，避免每 chunk 都放大 streaming_status 流量
+ * （对齐 CLI polling 的 `changed || isActive` 闸门）。
+ * `undefined`/`{}`/`null` 都会被当作 active=false。
+ */
 export function setSdkStreamingState(data) {
-  if (clients.length > 0 && sendEventToClients) {
-    sendEventToClients(clients, 'streaming_status', data);
+  const isActive = !!(data && data.active);
+  const wasActive = _lastSdkActive;
+  _observeStreamingTick(isActive, 'sdk');
+  const changed = wasActive !== isActive;
+  if (changed || isActive) {
+    if (clients.length > 0 && sendEventToClients) {
+      sendEventToClients(clients, 'streaming_status', data);
+    }
   }
 }
 

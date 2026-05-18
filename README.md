@@ -1,5 +1,4 @@
-<img width="1500" height="200" alt="CC-Viewer" src="https://github.com/user-attachments/assets/abec0513-1d56-4244-b7ed-9382b6c09049" />
-
+<img height="200" width="1500" alt="CC-Viewer" src="https://github.com/user-attachments/assets/abec0513-1d56-4244-b7ed-9382b6c09049" />
 
 # CC-Viewer
 
@@ -149,7 +148,7 @@ Click the "Conversation Mode" button at the top right to parse the Main Agent's 
 * Agent Team display is not yet supported
 * User messages are right-aligned (blue bubbles), Main Agent replies are left-aligned (dark bubbles)
 * `thinking` blocks are collapsed by default and rendered as Markdown — click to expand and view the reasoning; one-click translation is supported (still unstable)
-* User-selection messages (AskUserQuestion) are displayed in Q&A form
+* User-selection messages (AskUserQuestion) are displayed in Q\&A form
 * Two-way mode sync: switching to Conversation mode auto-scrolls to the conversation that matches the selected request; switching back to the raw mode auto-scrolls to the selected request
 * Settings panel: toggle the default collapsed state of tool results and thinking blocks
 * Mobile conversation browsing: in mobile CLI mode, tap the "Conversation Browse" button in the top bar to slide out a read-only conversation view and browse the full history on your phone
@@ -194,19 +193,6 @@ You can customize plugins directly, manage all cc-viewer processes, and cc-viewe
 <img height="746" width="1500" alt="image" src="https://github.com/user-attachments/assets/b1f60c7c-1438-4ecc-8c64-193d21ee3445" />
 
 More features waiting for you to discover... for example: the system supports Agent Team and ships with a built-in Code Reviewer. Codex Code Reviewer integration is coming very soon (I strongly recommend using Codex to review Claude Code's code).
-
-***
-
-**Voice pack** — bind custom audio to Claude lifecycle events. Open *Settings → Sound on approval* (toggle on to reveal the binding panel) to pick a sound for plan approvals, askUserQuestion popups, 60-min timeout warnings (5-min and 60-s tiers are separate bindings — set both for full coverage), and turn-end notifications. In CLI/PTY mode turnEnd fires via Claude Code's Stop hook (the hook auto-installs into `~/.claude/settings.json`); in SDK mode it fires from the SDK `result` event directly. Either way, it lands at the real end of a user-prompt turn — not after each individual API call.
-
-**Uninstalling cc-viewer hooks** — cc-viewer writes three entries into `~/.claude/settings.json` (`PreToolUse` × 2, `Stop` × 1), each tagged with the marker comment `# cc-viewer-managed`. If you uninstall cc-viewer (`npm uninstall -g cc-viewer`), strip the stale entries by hand or with:
-
-```bash
-jq '(.hooks // {}) |= with_entries(.value |= map(select((.hooks[]?.command // "") | contains("cc-viewer-managed") | not)))' \
-  ~/.claude/settings.json > /tmp/settings.json && mv /tmp/settings.json ~/.claude/settings.json
-```
-
-This removes only the entries cc-viewer added; any third-party hooks you've configured are left alone. The bundled default pack ships with a **Pixel-Buddy chiptune SFX set** (5 short 8-bit cues, ~100 KB total). Drop your own recording into `public/voice-packs/default/<eventKey>.{wav|mp3|ogg|m4a}` to override, or upload via the Settings panel for a per-user binding. Each file ≤ 2 MB. Plays on iPad and phone too, with HTTP Range support for iOS Safari and an autoplay-block chime fallback.
 
 ## License
 

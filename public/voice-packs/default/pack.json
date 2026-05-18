@@ -1,24 +1,24 @@
 {
-  "name": "default-pixel-buddy",
-  "displayName": "Pixel Buddy · 像素小宠物 (默认)",
+  "name": "default-butler",
+  "displayName": "Butler · 皇上系列 (默认)",
   "placeholder": false,
   "events": {
     "planApproval": {
-      "file": "planApproval.wav",
-      "size": 16362
+      "file": "The_plan_awaits_your_approval_sir.MP3",
+      "size": 52712
     },
     "askQuestion": {
-      "file": "askQuestion.wav",
-      "size": 9748
+      "file": "A_choice_for_your_consideration_sir.MP3",
+      "size": 60236
     },
     "turnEnd": {
-      "file": "turnEnd.wav",
-      "size": 24744
+      "file": "It_is_done_sir.MP3",
+      "size": 45816
     }
   },
-  "cues": {
-    "planApproval": "Bi-poop?  (短低 + 上扬\"问\"句)",
-    "askQuestion": "Pip pip!  (两短促跳跳)",
-    "turnEnd": "Wee-doo~ ♪  (下行小调，满足)"
+  "voiceLines": {
+    "planApproval": "The plan awaits your approval, sir.",
+    "askQuestion": "A choice for your consideration, sir.",
+    "turnEnd": "It is done, sir."
   }
 }

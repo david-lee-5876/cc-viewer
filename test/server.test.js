@@ -298,6 +298,56 @@ describe('server API endpoints', { concurrency: false }, () => {
     });
   });
 
+  // --- Voice-pack /list shape lock ---
+  // Pins the response shape so a future refactor can't silently drop fields the
+  // mobile app shell / third-party forks rely on. Both the new bundledPacks[]
+  // and the legacy defaultPack / defaultPackPlaceholder fields must coexist
+  // until the SUNSET marker fires (see server.js list handler).
+  it('GET /api/voice-pack/list returns bundledPacks[] + legacy defaultPack fields together', async () => {
+    const res = await httpRequest(port, '/api/voice-pack/list');
+    assert.equal(res.status, 200);
+    const body = res.json();
+
+    // Legacy fields — SUNSET-MARKER ccv-voice-pack-defaultPack-flat-shape
+    assert.ok(Array.isArray(body.defaultPack), 'legacy defaultPack[] must persist');
+    assert.equal(typeof body.defaultPackPlaceholder, 'boolean');
+
+    // New shape
+    assert.ok(Array.isArray(body.bundledPacks), 'bundledPacks[] required');
+    assert.ok(body.bundledPacks.length >= 2, 'at least default + sanguo should ship');
+    const ids = body.bundledPacks.map(p => p.id);
+    assert.ok(ids.includes('default'), 'default pack missing from bundledPacks');
+    assert.ok(ids.includes('sanguo'), 'sanguo pack missing from bundledPacks');
+
+    // Each pack metadata is well-formed
+    for (const pack of body.bundledPacks) {
+      assert.equal(typeof pack.id, 'string');
+      assert.equal(typeof pack.displayName, 'string');
+      assert.equal(typeof pack.placeholder, 'boolean');
+      assert.ok(Array.isArray(pack.events));
+      assert.ok(pack.events.length > 0, `pack ${pack.id} has no event entries`);
+    }
+
+    // Shared bookkeeping
+    assert.ok(Array.isArray(body.userAudio));
+    assert.ok(Array.isArray(body.eventKeys));
+    assert.equal(typeof body.maxBytes, 'number');
+  });
+
+  it('GET /api/voice-pack/audio/sanguo/<event> serves bundled audio (P0 route guard)', async () => {
+    // Regression guard for the P0 route fix — pre-fix, only "default/" was
+    // dispatched as bundled; "sanguo/" fell into the uuid branch → 404.
+    const res = await httpRequest(port, '/api/voice-pack/audio/sanguo/planApproval');
+    assert.equal(res.status, 200, `sanguo planApproval should be served, got ${res.status}`);
+    assert.ok(res.headers['content-type']?.includes('audio/'), 'must serve audio mime type');
+    // Bundled-pack cache policy is must-revalidate (not "immutable" — bundled
+    // audio CAN change when pack.json is updated).
+    assert.ok(
+      res.headers['cache-control']?.includes('must-revalidate'),
+      `sanguo response should use bundled-pack cache policy, got: ${res.headers['cache-control']}`,
+    );
+  });
+
   // --- Unknown route handling ---
   it('Unknown API routes return 404, others fall through to SPA', async () => {
     // Note: SPA fallback logic in server.js:

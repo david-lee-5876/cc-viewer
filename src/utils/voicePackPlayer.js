@@ -15,6 +15,12 @@
 // that's fine: each tab unlocks its own audio independently per browser policy.
 
 import { apiUrl } from './apiUrl.js';
+import { BUNDLED_PACK_IDS } from '../../lib/voice-pack-events.js';
+
+// Mirror BUNDLED_PACK_IDS into a Set for O(1) lookup in the hot URL-building
+// path. Frozen array ↔ Set conversion at module load is fine; the source list
+// is itself frozen so the Set can't drift.
+const BUNDLED_PACK_ID_SET = new Set(BUNDLED_PACK_IDS);
 
 let mainAudio = null;
 let previewAudio = null;
@@ -26,8 +32,15 @@ const lastDedupeKey = new Map(); // eventKey → caller-supplied dedupe key
 
 function urlForBinding(eventKey, binding) {
   const head = '/api/voice-pack/audio';
-  const path = (!binding || binding === 'default')
-    ? `${head}/default/${encodeURIComponent(eventKey)}`
+  // Bundled packs route as /<packId>/<eventKey>; user uploads as /<uuid>.
+  // null / undefined binding falls back to 'default' so the chime-fallback layer
+  // still gets a real URL to attempt (404 → chime is handled in startPlay).
+  // The Set check (not equality with 'default') is critical — without it,
+  // binding='sanguo' would route to /api/voice-pack/audio/sanguo (no event
+  // suffix), hit the uuid branch, fail isValidId, and 404 → silent chime.
+  const packId = (!binding) ? 'default' : binding;
+  const path = BUNDLED_PACK_ID_SET.has(packId)
+    ? `${head}/${packId}/${encodeURIComponent(eventKey)}`
     : `${head}/${encodeURIComponent(binding)}`;
   // apiUrl injects the ?token=... LAN auth query when present — same path other API calls use.
   return apiUrl(path);
@@ -99,9 +112,30 @@ function startPlay({ url, volume }) {
 // The previous prefs.cooldownMs override was phantom config — neither persisted
 // nor exposed in Settings — so it was removed to avoid half-built
 // flexibility users couldn't actually use).
+// SUNSET-MARKER: ccv-turn-end-debounce
+// Frontend caller-side cooldown，作为 server 端 trailing debounce 漏掉时的兜底二保险
+// （SSE 重连重发、server 罕见广播失序等）。**与 server `CCV_TURN_END_DEBOUNCE_MS`
+// 自动对齐**：AppBase.jsx 监听 SSE `server_config` 事件并调 `setTurnEndCooldownMs` 注入
+// server 实际生效的 debounce 值，无需运维手工同步两边常量。
 const COOLDOWN_MS = {
-  turnEnd: 30_000,
+  turnEnd: 10_000,
 };
+
+/**
+ * Update the turnEnd caller-side cooldown at runtime — called by AppBase on
+ * receipt of `server_config` SSE event. Keeps frontend in sync with the server's
+ * `CCV_TURN_END_DEBOUNCE_MS` env override without redeploy.
+ * Mirrors server clamp [100, 60000] so a malformed/tampered server_config payload
+ * (n=0 disables cooldown → voice spam) can't kill the二保险.
+ */
+export function setTurnEndCooldownMs(ms) {
+  const n = Number(ms);
+  if (!Number.isFinite(n) || n < 100 || n > 60_000) {
+    try { console.warn(`[voicePack] setTurnEndCooldownMs(${ms}) out of [100,60000]; keeping`, COOLDOWN_MS.turnEnd); } catch {}
+    return;
+  }
+  COOLDOWN_MS.turnEnd = n;
+}
 
 // Main entry point.
 //   eventKey:  'planApproval' | 'askQuestion' | 'turnEnd'

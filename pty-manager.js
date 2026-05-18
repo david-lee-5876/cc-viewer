@@ -248,7 +248,7 @@ export async function spawnClaude(proxyPort, cwd, extraArgs = [], claudePath = n
     if (hasContinue && exitCode !== 0 && outputBuffer.includes('No conversation found')) {
       console.error('[CC Viewer] -c failed (no conversation), retrying without -c');
       const retryArgs = extraArgs.filter(a => a !== '-c' && a !== '--continue');
-      spawnClaude(proxyPort, cwd, retryArgs, claudePath, isNpmVersion, serverPort, serverProtocol);
+      spawnClaude(proxyPort, cwd, retryArgs, claudePath, isNpmVersion, serverPort, serverProtocol, internalToken);
       return;
     }
 
@@ -264,7 +264,7 @@ export async function spawnClaude(proxyPort, cwd, extraArgs = [], claudePath = n
     if (flagRejected) {
       console.error('[CC Viewer] claude rejected --thinking-display, marking as unsupported and retrying without flag');
       _thinkingDisplayRejectedPaths.add(claudePath);
-      spawnClaude(proxyPort, cwd, extraArgs, claudePath, isNpmVersion, serverPort, serverProtocol);
+      spawnClaude(proxyPort, cwd, extraArgs, claudePath, isNpmVersion, serverPort, serverProtocol, internalToken);
       return;
     }
 

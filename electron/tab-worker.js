@@ -103,7 +103,7 @@ async function launch({ path: projectPath, extraArgs = [], claudePath, isNpmVers
   if (claudePath) {
     try {
       console.log('[worker] spawnClaude proxyPort:', proxyPort, 'serverPort:', port, 'path:', projectPath);
-      await spawnClaude(proxyPort, projectPath, extraArgs, claudePath, isNpmVersion, port);
+      await spawnClaude(proxyPort, projectPath, extraArgs, claudePath, isNpmVersion, port, serverMod.getProtocol(), serverMod.getInternalToken());
       // 等首条 PTY 数据 或 超时兜底（claude TUI 启动通常 200-400ms 内首帧）
       await new Promise((resolve) => {
         let done = false;

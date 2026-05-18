@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 1.6.271 (2026-05-18)
+
+- feat(voice-pack): 新增 sanguo（三国）内置语音包，与 default（butler）并列；zh / zh-TW 新用户首次默认 sanguo，其它 locale 仍 default；Settings 可自由切换；老用户 binding='default' 语义不变
+- feat(voice-pack): default 内置音从 sine-wave 占位 WAV 替换为 butler 真人 MP3（"The plan awaits your approval, sir." 等）；老用户 binding='default' 的事件提示音内容会变
+- chore(voice-pack): 降级到 < 本版本前请先在 Settings 把 binding='sanguo' 改回 default 或 disabled，否则老 server 的 reconcile 白名单会清空该绑定
+- fix(turn-end): Stop hook 不再被 streaming race-guard 吞掉；server 加 10s trailing debounce（`CCV_TURN_END_DEBOUNCE_MS` 可覆盖，clamp [100,60000]），rising-edge cancel 兜底
+- fix(turn-end): 三处 PTY 自重试补传 `CCVIEWER_INTERNAL_TOKEN`，turn-end POST 不再 403
+- fix(voice-pack): 前端 turnEnd cooldown 30s → 10s，通过 SSE `server_config` 自动同步 server 端实际 debounce；i18n 18 语言 hint 同步改 10s；`setTurnEndCooldownMs` 同步 clamp [100,60000]
+- fix(server): `/api/turn-end-notify` malformed JSON 改 400；`startViewer` 入口 await in-flight `_stoppingPromise`；`server_config` SSE write 失败改 warn 不再静默
+- perf(sdk): `setSdkStreamingState` 增加 transition gate，非 edge 且非 active 时不再推 SSE
+- fix(sdk): cli.js onTurnEnd 显式 `typeof` 检查，export 缺失时打 warn 不再被可选链静默吞
+
 ## 1.6.270 (2026-05-16)
 
 - fix(voice-pack): turnEnd 剔除「仅窗口失焦时响」门控，任务结束就响（保留 30s 节流 + dedupeKey）；17 语言 hint 文案同步精简

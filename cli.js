@@ -370,7 +370,7 @@ async function runCliMode(extraClaudeArgs = [], cwd, noOpen = false) {
   // 3. 启动 PTY 中的 claude
   const { spawnClaude, killPty } = await import('./pty-manager.js');
   try {
-    await spawnClaude(proxyPort, workingDir, extraClaudeArgs, claudePath, isNpmVersion, port, serverProtocol);
+    await spawnClaude(proxyPort, workingDir, extraClaudeArgs, claudePath, isNpmVersion, port, serverProtocol, serverMod.getInternalToken());
   } catch (err) {
     console.error('[CC Viewer] Failed to spawn Claude:', err.message);
     await serverMod.stopViewer();
@@ -471,7 +471,18 @@ async function runSdkMode(extraClaudeArgs = [], cwd, noOpen = false) {
     // Round-3 P0: SDK mode has no Stop hook (ensureHooks() skipped above), so
     // the only place we learn a turn ended is the SDK 'result' message. Forward
     // it to the same SSE channel the Stop hook bridge uses in PTY mode.
-    onTurnEnd: ({ sessionId, ts }) => serverMod.broadcastTurnEnd?.(sessionId, ts),
+    // 包 try/catch + warn：rising-edge flush 假设「下一轮 active 之前 onTurnEnd 已到」，
+    // 若 SDK 内部异常吞掉了 result 消息这条信号就丢了 —— 至少打个 warn 让排查时有线索。
+    // 显式 typeof 检查：以前用可选链 `?.()` 在 export 缺失时返回 undefined → catch 永远不触发
+    // → 「至少 warn」承诺落空，turn-end 静默丢，bug 极难追。
+    onTurnEnd: ({ sessionId, ts }) => {
+      if (typeof serverMod.broadcastTurnEnd !== 'function') {
+        console.warn('[sdk] serverMod.broadcastTurnEnd is not a function (export missing?); turn-end signal dropped');
+        return;
+      }
+      try { serverMod.broadcastTurnEnd(sessionId, ts); }
+      catch (err) { console.warn('[sdk] broadcastTurnEnd threw:', err?.message); }
+    },
   });
 
   // 注册 SDK 回调到 server.js（WS 消息路由用）

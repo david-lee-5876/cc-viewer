@@ -157,6 +157,17 @@ describe('playEvent — URL building', () => {
     assert.match(a.src, /\/api\/voice-pack\/audio\/a1b2c3d4-e5f6-7890-abcd-ef0123456789$/);
   });
 
+  it("sanguo binding hits /api/voice-pack/audio/sanguo/<eventKey> (P0 — Set check, not equality)", () => {
+    // Regression guard for P0-A: pre-fix, urlForBinding only matched
+    // binding === 'default'. binding === 'sanguo' fell into the uuid branch →
+    // /api/voice-pack/audio/sanguo (no event suffix) → 404 → silent chime.
+    const prefs = prefsAllOn();
+    prefs.events.planApproval = 'sanguo';
+    assert.equal(player.playEvent('planApproval', prefs), true);
+    const a = MockAudio.instances[0];
+    assert.match(a.src, /\/api\/voice-pack\/audio\/sanguo\/planApproval$/);
+  });
+
   it('clamps volume to 0..1 and applies it to the audio element', () => {
     const prefs = prefsAllOn();
     prefs.volume = 1.7; // out of range high

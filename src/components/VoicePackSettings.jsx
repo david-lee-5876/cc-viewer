@@ -1,10 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Switch, Slider, Select, Button, message, Tooltip } from 'antd';
 import { PlayCircleOutlined, UploadOutlined, DeleteOutlined, ReloadOutlined, InfoCircleOutlined } from '@ant-design/icons';
-import { t } from '../i18n';
+import { t, getLang } from '../i18n';
 import { apiUrl } from '../utils/apiUrl';
 import { previewEvent, stopPreview, unlockAudio } from '../utils/voicePackPlayer';
-import { EVENT_KEYS, DEFAULT_BINDINGS } from '../../lib/voice-pack-events';
+import { EVENT_KEYS, DEFAULT_BINDINGS, getDefaultBindingsForLocale } from '../../lib/voice-pack-events';
 import styles from './VoicePackSettings.module.css';
 
 // User-visible list — order matters (rendered top to bottom). EVENT_KEYS is the
@@ -38,11 +38,10 @@ export default function VoicePackSettings({ prefs, onChange, embedded = false })
   const events = safePrefs.events || {};
 
   const [userAudio, setUserAudio] = useState([]);
-  // defaultPack: array of { eventKey, format, size, placeholder? } — populated from
-  // /api/voice-pack/list which reads pack.json. Drives the "(placeholder)" suffix
-  // shown next to the Default option so users know the bundled sine-wave WAVs
-  // aren't the real "皇上系列" recording().
-  const [defaultPackIsPlaceholder, setDefaultPackIsPlaceholder] = useState(false);
+  // bundledPacks: array of { id, displayName, placeholder, events: [...] } from
+  // /api/voice-pack/list. Drives the dropdown's bundled section so adding a new
+  // pack on the server side surfaces automatically without front-end edits.
+  const [bundledPacks, setBundledPacks] = useState([]);
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef(null);
@@ -54,7 +53,18 @@ export default function VoicePackSettings({ prefs, onChange, embedded = false })
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const data = await r.json();
       setUserAudio(Array.isArray(data.userAudio) ? data.userAudio : []);
-      setDefaultPackIsPlaceholder(!!data.defaultPackPlaceholder);
+      // Prefer new bundledPacks shape; fall back to legacy defaultPack /
+      // defaultPackPlaceholder fields if an older server is still on the wire.
+      if (Array.isArray(data.bundledPacks) && data.bundledPacks.length > 0) {
+        setBundledPacks(data.bundledPacks);
+      } else {
+        setBundledPacks([{
+          id: 'default',
+          displayName: _tr('ui.voicePack.binding.default', null, 'Default (built-in)'),
+          placeholder: !!data.defaultPackPlaceholder,
+          events: Array.isArray(data.defaultPack) ? data.defaultPack : [],
+        }]);
+      }
     } catch (e) {
       // Silently degrade — only show toast on user-initiated actions, not background fetch.
       console.warn('[voicePack] list failed:', e);
@@ -138,9 +148,11 @@ export default function VoicePackSettings({ prefs, onChange, embedded = false })
         return;
       }
       // Local optimistic update for the events table — any event that referenced the
-      // freshly-deleted id falls back to its per-event default (turnEnd's
-      // default is null/off; using 'default' for everything would silently re-enable
-      // turnEnd audio that the user never asked for).
+      // freshly-deleted id falls back to the static DEFAULT_BINDINGS (not locale-aware).
+      // 用 schema 字面量而非 getDefaultBindingsForLocale(getLang()) — 删除 uploaded
+      // audio 是局部清理动作,不该把用户曾经手动选过的 pack 再 re-seed 成 locale 默认
+      // (zh 用户手动切回 butler 后再删自定义音,不应突然回到 sanguo)。Reset 走另一条
+      // 路径(handleResetAll),那里 locale-aware 是合理的("回出厂"语义)。
       const patchEvents = {};
       for (const k of EVENT_LIST) {
         if (events[k] === id) patchEvents[k] = DEFAULT_BINDINGS[k];
@@ -155,31 +167,45 @@ export default function VoicePackSettings({ prefs, onChange, embedded = false })
   };
 
   const handleResetAll = () => {
-    // Restore default bindings for every event (shared schema in voice-pack-events.js).
+    // Restore default bindings for every event — locale-aware so a zh user gets
+    // sanguo back, an en user gets butler back. Pure function; safe to call here.
     if (!onChange) return;
-    onChange({ events: { ...DEFAULT_BINDINGS }, volume: 0.3 });
+    onChange({ events: { ...getDefaultBindingsForLocale(getLang()) }, volume: 0.3 });
   };
 
-  // Build select options once per userAudio change.
+  // Build select options as antd OptGroup-style nested options.
+  // Order: Bundled (default + sanguo + …) → Uploaded → Disabled. Disabled lives
+  // at the bottom since it's the destructive-ish action.
   const audioOptions = useMemo(() => {
-    const defaultBase = _tr('ui.voicePack.binding.default', null, 'Default (built-in)');
-    // Surface "(placeholder)" when the bundled pack is the developer placeholder
-    // (sine-wave WAVs) rather than real recordings — review.
-    const defaultLabel = defaultPackIsPlaceholder
-      ? `${defaultBase} · ${_tr('ui.voicePack.binding.placeholder', null, 'placeholder')}`
-      : defaultBase;
-    const opts = [
-      { value: 'default', label: defaultLabel },
-      { value: 'disabled', label: _tr('ui.voicePack.binding.disabled', null, 'Disabled') },
-    ];
-    for (const a of userAudio) {
-      opts.push({
-        value: a.id,
-        label: `📁 ${a.originalName}`,
+    const placeholderSuffix = _tr('ui.voicePack.binding.placeholder', null, 'placeholder');
+    const bundledOptions = bundledPacks.map((pack) => {
+      // Per-pack i18n key first (ui.voicePack.pack.<id>), then server-provided
+      // displayName, then the pack id as last-resort.
+      const i18nLabel = _tr(`ui.voicePack.pack.${pack.id}`, null, '');
+      const baseLabel = i18nLabel || pack.displayName || pack.id;
+      const label = pack.placeholder ? `${baseLabel} · ${placeholderSuffix}` : baseLabel;
+      return { value: pack.id, label };
+    });
+    const uploadedOptions = userAudio.map((a) => ({
+      value: a.id,
+      label: `📁 ${a.originalName}`,
+    }));
+    const groups = [{
+      label: _tr('ui.voicePack.group.bundled', null, 'Bundled'),
+      options: bundledOptions,
+    }];
+    if (uploadedOptions.length > 0) {
+      groups.push({
+        label: _tr('ui.voicePack.group.uploaded', null, 'Uploaded'),
+        options: uploadedOptions,
       });
     }
-    return opts;
-  }, [userAudio, defaultPackIsPlaceholder]);
+    groups.push({
+      label: _tr('ui.voicePack.group.other', null, 'Other'),
+      options: [{ value: 'disabled', label: _tr('ui.voicePack.binding.disabled', null, 'Disabled') }],
+    });
+    return groups;
+  }, [userAudio, bundledPacks]);
 
   return (
     <div className={styles.container}>
@@ -211,8 +237,7 @@ export default function VoicePackSettings({ prefs, onChange, embedded = false })
               const binding = events[eventKey];
               const selectValue = binding === null || binding === undefined
                 ? 'disabled'
-                : binding; // 'default' | <uuid>
-              const isCustomBound = selectValue !== 'default' && selectValue !== 'disabled';
+                : binding; // 'default' | 'sanguo' | <uuid>
               const eventHint = _tr(`ui.voicePack.eventHint.${eventKey}`, null, '');
               const labelText = _tr(`ui.voicePack.event.${eventKey}`, null, eventKey);
               // Move per-event explanatory text (e.g. turnEnd's 30s cooldown wording)
