@@ -99,6 +99,17 @@
   color: inherit;
   white-space: nowrap;
 }
+/* Reveal the inline alias edit pencil when the user hovers the project name
+   label (or when keyboard focus enters the label region — focus-within covers
+   the button itself receiving Tab focus). Stable [data-alias-edit-trigger]
+   attr instead of CSS-Modules-hashed class so this rule survives renames.
+   Once revealed at 55% opacity, the pencil's own :hover / :focus-visible
+   rules (in ProjectAliasEditor.module.css) take it to 100%. */
+.headerProjectName:hover [data-alias-edit-trigger],
+.headerProjectName:focus-within [data-alias-edit-trigger] {
+  opacity: 0.55;
+}
+
 
 .liveTagFill {
   position: absolute;

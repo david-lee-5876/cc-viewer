@@ -23,10 +23,22 @@ import ProxyModal from './components/ProxyModal';
 import OpenFolderIcon from './components/OpenFolderIcon';
 import appConfig from './config.json';
 import { t, getLang, setLang, LANG_OPTIONS } from './i18n';
+import { useProjectAlias } from './hooks/useProjectAlias';
 import { apiUrl } from './utils/apiUrl';
 import * as SeqLoaders from './utils/seqResourceLoaders';
 
 const CALIBRATION_MODELS = appConfig.calibrationModels;
+
+// Bridge useProjectAlias into the mobile ctx label. Mobile-side is read-only
+// for phase 1 — edit entry lives in AppHeader only because the mobile bar is
+// tight and aliasing on mobile is less common. Cross-tab / same-tab updates
+// still propagate here via the hook so a desktop alias edit reflects on
+// mobile without reload.
+function MobileCtxLabelText({ projectName }) {
+  const alias = useProjectAlias(projectName);
+  const base = `${t('ui.liveMonitoring')}${projectName ? `: ${projectName}` : ''}`;
+  return <>{base}{alias ? ` (${alias})` : ''}</>;
+}
 
 class Mobile extends AppBase {
   constructor(props) {
@@ -691,6 +703,10 @@ class Mobile extends AppBase {
               const contextPercent = mobileContextPercent;
               const ctxColor = contextPercent >= 80 ? 'var(--color-error-light)' : contextPercent >= 60 ? 'var(--color-warning-light)' : 'var(--color-success)';
               const ctxLabel = `${t('ui.liveMonitoring')}${this.state.projectName ? `: ${this.state.projectName}` : ''}`;
+              // ctxLabel is also used in `title` (PC hover tooltip). Alias is
+              // only rendered in the VISIBLE content via MobileCtxLabelText
+              // (using useProjectAlias for cross-tab reactivity); the tooltip
+              // can stay alias-less since mobile has no hover anyway.
               // 血条本体——iPad 与手机一致，作为按钮触发左侧抽屉（mobileCachePanelOverlay）。
               // mobileCachePanelVisible=true 时才 mount CachePopoverContent，维持 commit 0914cc5
               // 的"打开才解析 200 条"性能修复。
@@ -718,7 +734,7 @@ class Mobile extends AppBase {
                 >
                   <span className={styles.mobileCtxTagFill} style={{ width: `${contextPercent}%`, backgroundColor: ctxColor }} />
                   <span className={styles.mobileCtxTagContent}>
-                    {ctxLabel}
+                    <MobileCtxLabelText projectName={this.state.projectName} />
                   </span>
                 </span>
               );

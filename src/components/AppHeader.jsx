@@ -21,6 +21,8 @@ import PluginModal from './PluginModal';
 import ProcessModal from './ProcessModal';
 import ProxyModal from './ProxyModal';
 import VoicePackSettings from './VoicePackSettings';
+import ProjectAliasEditor from './ProjectAliasEditor';
+import { useProjectAlias } from '../hooks/useProjectAlias';
 import appConfig from '../config.json';
 import { OPTIMISTIC_CLEAR_PERCENT } from '../AppBase';
 const CALIBRATION_MODELS = appConfig.calibrationModels;
@@ -43,6 +45,20 @@ import styles from './AppHeader.module.css';
 
 
 // countryToFlag 已随地理位置控件一起迁到 src/components/CountryFlag.jsx
+
+// Bridges the useProjectAlias hook into AppHeader (class component). Renders
+// `${liveMonitoringPrefix}${projectName}${alias ? ` (${alias})` : ''}` followed
+// by the inline pencil editor (hidden when isLocalLog / no projectName).
+function HeaderProjectLabel({ projectName, isLocalLog }) {
+  const alias = useProjectAlias(projectName);
+  return (
+    <span className={styles.headerProjectName}>
+      {t('ui.liveMonitoring')}{projectName ? `:${projectName}` : ''}
+      {alias ? ` (${alias})` : ''}
+      <ProjectAliasEditor projectName={projectName} isLocalLog={isLocalLog} />
+    </span>
+  );
+}
 
 class AppHeader extends React.Component {
   static contextType = SettingsContext;
@@ -1148,9 +1164,7 @@ class AppHeader extends React.Component {
               </Tag>
             ) : null;
           })()}
-          <span className={styles.headerProjectName}>
-            {t('ui.liveMonitoring')}{projectName ? `:${projectName}` : ''}
-          </span>
+          <HeaderProjectLabel projectName={projectName} isLocalLog={isLocalLog} />
           {this.renderContextBarPortal()}
         </Space>
 

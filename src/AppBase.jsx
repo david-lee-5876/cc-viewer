@@ -8,6 +8,7 @@ import LogTable from './components/LogTable';
 import { t, getLang, setLang } from './i18n';
 import { SettingsContext } from './contexts/SettingsContext';
 import { formatTokenCount, filterRelevantRequests, isRelevantRequest, appendCacheLossMap, extractCachedContent } from './utils/helpers';
+import { getProjectAlias, subscribeToAlias } from './utils/projectAlias';
 import { isMainAgent, isPostClearCheckpoint } from './utils/contentFilter';
 import { apiUrl } from './utils/apiUrl';
 import { playEvent as playVoiceEvent, unlockAudio, setTurnEndCooldownMs } from './utils/voicePackPlayer';
@@ -191,6 +192,42 @@ class AppBase extends React.Component {
 
   /** 批量剪枝 entries：清空旧 MainAgent 的 body.messages，保留最后一条完整。
    *  v3: intern body.tools / body.system 让所有 entry 共享 pool 引用 */
+  // Centralised document.title writer. All paths that used to do
+  //   document.title = projectName
+  //   document.title = `${projectName} - CC Viewer`
+  // route through here so a user-configured per-project alias (utils/projectAlias)
+  // can override consistently. Without this, the SSE workspace_started handler
+  // would clobber alias on every switch.
+  // Empty / missing projectName falls back to the literal app name to keep the
+  // browser tab from showing a stale name across reloads.
+  _applyDocTitle = (projectName) => {
+    try {
+      if (typeof document === 'undefined') return;
+      const alias = getProjectAlias(projectName);
+      if (alias) {
+        document.title = alias;
+      } else if (projectName) {
+        document.title = projectName;
+      } else {
+        document.title = 'CC Viewer';
+      }
+    } catch { /* ignore — title is cosmetic, never block */ }
+  };
+
+  // Subscribe the current projectName to alias mutations (same-tab pubsub +
+  // cross-tab storage event). Re-called whenever projectName changes so we
+  // don't end up listening to an old project's key.
+  _resubscribeAlias = (projectName) => {
+    if (typeof this._aliasOff === 'function') {
+      try { this._aliasOff(); } catch {}
+      this._aliasOff = null;
+    }
+    if (!projectName) return;
+    this._aliasOff = subscribeToAlias(projectName, () => {
+      this._applyDocTitle(projectName);
+    });
+  };
+
   _batchSlim(entries) {
     for (let i = 0; i < entries.length; i++) entries[i] = internEntryBigFields(entries[i]);
     const slimmer = createEntrySlimmer(isMainAgent);
@@ -492,7 +529,8 @@ class AppBase extends React.Component {
       .then(data => {
         const projectName = data.projectName || '';
         this.setState({ projectName });
-        if (projectName) document.title = projectName;
+        this._applyDocTitle(projectName);
+        this._resubscribeAlias(projectName);
         // 移动端：从缓存恢复数据，在 SSE 数据到达前立即渲染
         if (isMobile && projectName && !logfile && this.state.requests.length === 0) {
           loadEntries(projectName).then(cached => {
@@ -594,6 +632,7 @@ class AppBase extends React.Component {
     if (this._streamingOffTimer) clearTimeout(this._streamingOffTimer);
     if (this._streamingRaf) { cancelAnimationFrame(this._streamingRaf); this._streamingRaf = null; }
     if (this._clearOptimisticTimer) clearTimeout(this._clearOptimisticTimer);
+    if (typeof this._aliasOff === 'function') { try { this._aliasOff(); } catch {} this._aliasOff = null; }
     this._pendingStreamingLatest = null;
   }
 
@@ -1023,7 +1062,14 @@ class AppBase extends React.Component {
             this._loadingCountTimer = null;
           }
           this._rebuildRequestIndex([]);
-          if (data.projectName) document.title = `${data.projectName} - CC Viewer`;
+          // SSE workspace switch — rebind alias subscription to the new
+          // project before writing the title so the title reflects the new
+          // alias if one exists. _applyDocTitle handles the "no alias"
+          // fallback (used to be `${projectName} - CC Viewer` here; that
+          // suffix is dropped — pure projectName for consistency with the
+          // initial mount path).
+          this._resubscribeAlias(data.projectName || '');
+          this._applyDocTitle(data.projectName || '');
           // Reset isStreaming alongside streamingLatest — workspace switches happen
           // between user prompts and shouldn't leave streaming flags stuck. (turnEnd
           // false-fire on this transition is no longer a concern since we hook

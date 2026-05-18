@@ -5904,6 +5904,70 @@ const i18nData = {
     "ar": "افتراضي (مدمج)", "no": "Standard (innebygd)", "pt-BR": "Padrão (embutido)",
     "th": "ค่าเริ่มต้น (ในตัว)", "tr": "Varsayılan (yerleşik)", "uk": "За замовчуванням"
   },
+  "ui.projectAlias.tooltip": {
+    "zh": "设置项目别名", "en": "Set project alias", "zh-TW": "設定專案別名",
+    "ko": "프로젝트 별칭 설정", "ja": "プロジェクト別名を設定", "de": "Projekt-Alias festlegen",
+    "es": "Establecer alias del proyecto", "fr": "Définir l'alias du projet", "it": "Imposta alias progetto",
+    "da": "Angiv projektalias", "pl": "Ustaw alias projektu", "ru": "Задать псевдоним проекта",
+    "ar": "تعيين اسم مستعار للمشروع", "no": "Sett prosjektalias", "pt-BR": "Definir apelido do projeto",
+    "th": "ตั้งชื่อเล่นโปรเจกต์", "tr": "Proje takma adı belirle", "uk": "Задати псевдонім проєкту"
+  },
+  "ui.projectAlias.modalTitle": {
+    "zh": "项目别名", "en": "Project alias", "zh-TW": "專案別名",
+    "ko": "프로젝트 별칭", "ja": "プロジェクト別名", "de": "Projekt-Alias",
+    "es": "Alias del proyecto", "fr": "Alias du projet", "it": "Alias del progetto",
+    "da": "Projektalias", "pl": "Alias projektu", "ru": "Псевдоним проекта",
+    "ar": "اسم مستعار للمشروع", "no": "Prosjektalias", "pt-BR": "Apelido do projeto",
+    "th": "ชื่อเล่นโปรเจกต์", "tr": "Proje takma adı", "uk": "Псевдонім проєкту"
+  },
+  "ui.projectAlias.projectLabel": {
+    "zh": "项目", "en": "Project", "zh-TW": "專案",
+    "ko": "프로젝트", "ja": "プロジェクト", "de": "Projekt",
+    "es": "Proyecto", "fr": "Projet", "it": "Progetto",
+    "da": "Projekt", "pl": "Projekt", "ru": "Проект",
+    "ar": "المشروع", "no": "Prosjekt", "pt-BR": "Projeto",
+    "th": "โปรเจกต์", "tr": "Proje", "uk": "Проєкт"
+  },
+  "ui.projectAlias.placeholder": {
+    "zh": "比如:三农优化(留空清除)", "en": "e.g. work-prod (empty to clear)", "zh-TW": "例如:三農優化（留空清除）",
+    "ko": "예: work-prod (비우면 삭제)", "ja": "例: work-prod（空欄でクリア）", "de": "z. B. work-prod (leer = entfernen)",
+    "es": "p. ej. work-prod (vacío para limpiar)", "fr": "ex. work-prod (vide = effacer)", "it": "es. work-prod (vuoto = cancella)",
+    "da": "f.eks. work-prod (tom = ryd)", "pl": "np. work-prod (pusty = wyczyść)", "ru": "напр. work-prod (пусто = удалить)",
+    "ar": "مثلاً work-prod (فارغ للمسح)", "no": "f.eks. work-prod (tom = fjern)", "pt-BR": "ex. work-prod (vazio = limpar)",
+    "th": "เช่น work-prod (เว้นว่าง = ล้าง)", "tr": "ör. work-prod (boş = temizle)", "uk": "напр. work-prod (порожнє = очистити)"
+  },
+  "ui.projectAlias.save": {
+    "zh": "保存", "en": "Save", "zh-TW": "儲存",
+    "ko": "저장", "ja": "保存", "de": "Speichern",
+    "es": "Guardar", "fr": "Enregistrer", "it": "Salva",
+    "da": "Gem", "pl": "Zapisz", "ru": "Сохранить",
+    "ar": "حفظ", "no": "Lagre", "pt-BR": "Salvar",
+    "th": "บันทึก", "tr": "Kaydet", "uk": "Зберегти"
+  },
+  "ui.projectAlias.cancel": {
+    "zh": "取消", "en": "Cancel", "zh-TW": "取消",
+    "ko": "취소", "ja": "キャンセル", "de": "Abbrechen",
+    "es": "Cancelar", "fr": "Annuler", "it": "Annulla",
+    "da": "Annuller", "pl": "Anuluj", "ru": "Отмена",
+    "ar": "إلغاء", "no": "Avbryt", "pt-BR": "Cancelar",
+    "th": "ยกเลิก", "tr": "İptal", "uk": "Скасувати"
+  },
+  "ui.projectAlias.clear": {
+    "zh": "清除别名", "en": "Clear alias", "zh-TW": "清除別名",
+    "ko": "별칭 삭제", "ja": "別名を削除", "de": "Alias entfernen",
+    "es": "Borrar alias", "fr": "Effacer l'alias", "it": "Cancella alias",
+    "da": "Ryd alias", "pl": "Usuń alias", "ru": "Удалить псевдоним",
+    "ar": "مسح الاسم المستعار", "no": "Fjern alias", "pt-BR": "Limpar apelido",
+    "th": "ล้างชื่อเล่น", "tr": "Takma adı temizle", "uk": "Очистити псевдонім"
+  },
+  "ui.projectAlias.saveFailed": {
+    "zh": "保存失败,可能是浏览器隐身模式或存储已满", "en": "Save failed — private mode or storage full?", "zh-TW": "儲存失敗,可能是瀏覽器隱身模式或儲存空間已滿",
+    "ko": "저장 실패 — 비공개 모드이거나 저장 공간 부족", "ja": "保存に失敗しました（プライベートモード/容量不足？）", "de": "Speichern fehlgeschlagen — Inkognito-Modus oder voller Speicher?",
+    "es": "Fallo al guardar — ¿modo privado o almacenamiento lleno?", "fr": "Échec — mode privé ou stockage plein ?", "it": "Salvataggio fallito — modalità privata o spazio esaurito?",
+    "da": "Lagring mislykkedes — privat tilstand eller fuld?", "pl": "Zapis nieudany — tryb prywatny lub brak miejsca", "ru": "Не удалось сохранить — приватный режим или нет места",
+    "ar": "فشل الحفظ — وضع خاص أو ذاكرة ممتلئة؟", "no": "Lagring mislyktes — privat modus eller fullt?", "pt-BR": "Falha ao salvar — modo privado ou armazenamento cheio?",
+    "th": "บันทึกไม่สำเร็จ — โหมดส่วนตัวหรือพื้นที่เต็ม?", "tr": "Kaydetme başarısız — gizli mod veya depolama dolu?", "uk": "Не вдалося зберегти — приватний режим або немає місця"
+  },
   "ui.voicePack.binding.placeholder": {
     "zh": "占位音", "en": "placeholder", "zh-TW": "佔位音",
     "ko": "임시 음원", "ja": "プレースホルダー", "de": "Platzhalter",

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 1.6.272 (2026-05-18)
+
+- feat(header): per-project 别名支持 — 「当前项目」标题 hover 时浮出铅笔图标,弹 Modal 设置别名,浏览器 `<title>` 用别名、UI 头部追加 `(别名)`;存 localStorage(key 含 projectName basename,同名不同路径项目会共享别名);跨/同 tab 自动同步;键盘 Tab 可达;BiDi/控制字符 strip 防 paste 攻击;Electron 多 tab strip 与主窗口 setTitle 暂不在覆盖范围
+- chore(header): 浏览器 tab 标题去掉 ` - CC Viewer` 后缀,workspace 切换后只显示 projectName 或 alias(原 SSE workspace_started 写的是 `${projectName} - CC Viewer`)
+
 ## 1.6.271 (2026-05-18)
 
 - feat(voice-pack): 新增 sanguo（三国）内置语音包，与 default（butler）并列；zh / zh-TW 新用户首次默认 sanguo，其它 locale 仍 default；Settings 可自由切换；老用户 binding='default' 语义不变
