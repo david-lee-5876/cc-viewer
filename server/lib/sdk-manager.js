@@ -397,7 +397,7 @@ async function _handleCanUseTool(toolName, input, options) {
       } catch {}
     }
     // 24h — 与 hook 路径（server.js ASK_HOOK_TIMEOUT_MS）同源，履行"GUI 实质无超时"承诺。
-    // 实际常量定义在 lib/ask-constants.js。
+    // 实际常量定义在 server/lib/ask-constants.js。
     const askTimeoutMs = ASK_TIMEOUT_MS;
     const askStartedAt = Date.now();
     if (_broadcastWs) {

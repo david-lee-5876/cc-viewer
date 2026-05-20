@@ -7,6 +7,11 @@ import { threadId } from 'node:worker_threads';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 
+// cc-viewer 同级 node_modules/。生产 npm install 时是真 node_modules；
+// `npm link` / git clone dev 场景下可能算错位置，由 getGlobalNodeModulesDir() 兜底。
+// 自己计算而非 import 自 server/_paths.js，避免 root 文件反向依赖 server 内部模块。
+const NODE_MODULES = resolve(__dirname, '..');
+
 // ============ 配置区（第三方适配只需修改此处）============
 
 /**
@@ -57,7 +62,7 @@ export function setLogDir(dir) {
   LOG_DIR = resolved;
   // workspace registry 文件位置随 LOG_DIR 变化,allowlist 缓存(含 registered workspaces)需失效。
   // lazy import 避免循环依赖(file-access-policy 依赖 findcc 和 workspace-registry)。
-  import('./lib/file-access-policy.js')
+  import('./server/lib/file-access-policy.js')
     .then(m => m.bumpWorkspacesVersion?.())
     .catch(() => { /* CLI-only 入口可能未加载 policy 模块,无副作用即可 */ });
 }
@@ -79,8 +84,22 @@ const NATIVE_CANDIDATES = [
 // 用于 which/command -v 查找的命令名
 export const BINARY_NAME = 'claude';
 
-// 注入到 cli.js 的 import 语句（相对路径，基于 cli.js 所在位置）
-export const INJECT_IMPORT = "import '../../cc-viewer/interceptor.js';";
+// 注入到 @anthropic-ai/claude-code/cli.js 顶部的 import 语句。
+// EXTERNAL CONTRACT: 走 bare specifier 经 package.json `exports` 解析 ——
+// 物理路径再改不用动这里；同步改 cli.js::removeCliJsInjection 的老 marker 迁移逻辑。
+export const INJECT_IMPORT = "import 'cc-viewer/interceptor.js';";
+
+// 历史使用过的 INJECT_IMPORT 形式，用于卸载/重装时清理旧 marker。
+// 任何变更 INJECT_IMPORT 时都要把旧值加进来，否则老用户升级时新版本看不到老 marker
+// → 注入幂等失败，老注入残留 + 新注入失败 = 双重坏。
+//
+// Prune 策略：每条记录添加时的版本；当某条 legacy 添加后已过 4 个 major release
+// （即用户至少有机会跑 `ccv -logger` 多次自动 rewrite），可考虑删除。
+// 删除前检查 npm registry 还在使用旧版本的下载量。
+export const LEGACY_INJECT_IMPORTS = [
+  // added in 1.6.273 — relative path form before bare-specifier migration
+  "import '../../cc-viewer/interceptor.js';",
+];
 
 // ============ 导出函数 ============
 
@@ -93,10 +112,10 @@ export function getGlobalNodeModulesDir() {
 }
 
 export function resolveCliPath() {
-  // 候选基础目录：__dirname 的上级（适用于常规 npm 安装）+ 全局 node_modules（适用于符号链接安装）
-  const baseDirs = [resolve(__dirname, '..')];
+  // 候选基础目录：本地 node_modules（cc-viewer 的同级）+ 全局 node_modules
+  const baseDirs = [NODE_MODULES];
   const globalRoot = getGlobalNodeModulesDir();
-  if (globalRoot && globalRoot !== resolve(__dirname, '..')) {
+  if (globalRoot && globalRoot !== NODE_MODULES) {
     baseDirs.push(globalRoot);
   }
 
@@ -109,7 +128,7 @@ export function resolveCliPath() {
     }
   }
   // 兜底：返回全局目录下的默认路径，便于错误提示
-  return join(globalRoot || resolve(__dirname, '..'), PACKAGES[0], CLI_ENTRY);
+  return join(globalRoot || NODE_MODULES, PACKAGES[0], CLI_ENTRY);
 }
 
 /**

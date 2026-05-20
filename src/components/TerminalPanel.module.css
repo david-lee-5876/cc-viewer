@@ -739,10 +739,70 @@
 }
 
 /* ── ultraplan floating panel ── */
+/* antd Popover 的 .ant-popover-inner 把 overlayInnerStyle.height 设到自己,
+   .ant-popover-inner-content 默认 height: auto(content-driven),会断 flex 链:
+   .ultraplanPanel { height: 100% } 算成「相对 content 高度的 100%」= 等于自己 = 没设。
+   用 overlayClassName 精准 scope,让 inner-content 也撑满 inner 高度。 */
+:global(.ccv-ultraplan-popover) :global(.ant-popover-inner),
+:global(.ccv-ultraplan-popover) :global(.ant-popover-inner-content) {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
 .ultraplanPanel {
   display: flex;
   flex-direction: column;
   gap: 0;
+  /* resize handle absolute 锚点 + flex grow 占满 popover */
+  position: relative;
+  min-height: 0;
+  flex: 1 1 auto;
+  width: 100%;
+}
+
+/* 内容容器:跟 .ultraplanResizeHandle(absolute)解耦,把 header + variantRow +
+   fileList + textarea + footer 包起来,内部独立 flex column。
+   flex grow 算法只在这一层算,不受 antd Popover wrapper layout 干扰。 */
+.ultraplanContent {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  width: 100%;
+}
+
+/* Popover 左上角 SVG resize handle:跟 UltraPlanModal 同款几何/视觉/交互。
+   直角三角形,左上顶点 rounded(r=4),斜边右上→左下,nwse-resize 光标。
+   位置 top:6 left:6 跟 popover 圆角错开。 */
+.ultraplanResizeHandle {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  width: 16px;
+  height: 16px;
+  cursor: nwse-resize;
+  z-index: 5;
+  touch-action: none;
+  /* 跟 UltraPlanModal.module.css .resizeHandle 同款 token,自动适配深浅主题。
+     --text-disabled-faint 已自带 alpha,再 opacity:0.7 合成 ~0.25 alpha,「很淡」质感。 */
+  color: var(--text-disabled-faint);
+  opacity: 0.7;
+  transition: opacity 0.15s ease;
+  display: block;
+  line-height: 0;
+}
+
+.ultraplanResizeHandle svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.ultraplanResizeHandle:hover,
+.ultraplanResizeHandle:active {
+  opacity: 1;
 }
 
 .ultraplanHeader {
@@ -909,10 +969,12 @@
   font-size: 13px;
   line-height: 1.5;
   font-family: inherit;
-  resize: vertical;
+  /* popover 整体可拖大,textarea 通过 flex 接管所有剩余高度;flex: 1 1 0 + min-height: 0
+     严格按余量拉伸,不受 rows intrinsic 干扰;关原生 resize 让位左上 handle。 */
+  resize: none;
   outline: none;
-  min-height: 100px;
-  max-height: 300px;
+  flex: 1 1 0;
+  min-height: 0;
 }
 
 .ultraplanTextarea:focus {

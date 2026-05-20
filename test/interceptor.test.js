@@ -13,7 +13,7 @@ import {
   isPreflightEntry,
   migrateConversationContext,
   rotateLogFile,
-} from '../lib/interceptor-core.js';
+} from '../server/lib/interceptor-core.js';
 
 // ============================================================================
 // Test helpers

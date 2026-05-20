@@ -9,11 +9,11 @@
 // - 启动时 hydrate 出的 entry 的 res 字段为 null（旧连接已死），
 //   等待新的 ask-bridge 重新 POST 同 toolUseId 时复用（已在 server.js:2727 实现）
 //   或浏览器通过 /api/pending-asks 拉取展示。
-import { readFileSync, writeFileSync, existsSync, mkdirSync, statSync, openSync, closeSync, unlinkSync } from 'node:fs';
+import { readFileSync, writeFileSync, writeSync, existsSync, mkdirSync, statSync, openSync, closeSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { renameSyncWithRetry } from './file-api.js';
-import { LOG_DIR } from '../findcc.js';
+import { LOG_DIR } from '../../findcc.js';
 
 const SCHEMA_VERSION = 1;
 
@@ -28,6 +28,46 @@ function sleep(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
+// Lock body 含 owner pid，让其它进程精确判断 owner 是否仍活着 —— 避免 mtime-only stale
+// 判定在 Electron 多 Tab + 慢盘场景下误删活跃锁（持锁方 fn 跑 >5s 时旧实现会被偷锁）。
+// Body 不可读（老格式 / openSync 与 writeSync 之间的瞬间 race）时退回 mtime 阈值兜底。
+function readLockOwnerPid(path) {
+  try {
+    const raw = readFileSync(path, 'utf-8');
+    if (!raw) return null;
+    const obj = JSON.parse(raw);
+    if (obj && Number.isInteger(obj.pid)) return obj.pid;
+  } catch {}
+  return null;
+}
+
+function isPidAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    // ESRCH = 进程不存在；EPERM = 存在但不同 user（仍算活）
+    return err && err.code === 'EPERM';
+  }
+}
+
+function isLockStale(path, mtimeFallbackMs) {
+  const pid = readLockOwnerPid(path);
+  if (pid !== null) {
+    // 自己 pid 见到 = 必然 stale（理论不可能：try/finally 保证 unlink；
+    // 若发生 → 视作可回收，避免 2 秒死锁）
+    if (pid === process.pid) return true;
+    return !isPidAlive(pid);
+  }
+  try {
+    const stats = statSync(path);
+    return Date.now() - stats.mtimeMs > mtimeFallbackMs;
+  } catch {
+    return false;
+  }
+}
+
 function withLock(fn) {
   mkdirSync(LOG_DIR, { recursive: true });
   const deadline = Date.now() + 2000;
@@ -35,18 +75,19 @@ function withLock(fn) {
   while (true) {
     try {
       const fd = openSync(getLockFile(), 'wx');
-      closeSync(fd);
+      try {
+        writeSync(fd, JSON.stringify({ pid: process.pid, ts: Date.now() }));
+      } finally {
+        closeSync(fd);
+      }
       break;
     } catch (err) {
       if (err?.code === 'EEXIST') {
         if (Date.now() < deadline) {
-          try {
-            const stats = statSync(getLockFile());
-            if (Date.now() - stats.mtimeMs > STALE_THRESHOLD) {
-              try { unlinkSync(getLockFile()); } catch {}
-              continue;
-            }
-          } catch {}
+          if (isLockStale(getLockFile(), STALE_THRESHOLD)) {
+            try { unlinkSync(getLockFile()); } catch {}
+            continue;
+          }
           sleep(25);
           continue;
         }

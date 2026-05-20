@@ -18,7 +18,7 @@ Hot-Switch Proxy lets you dynamically redirect API requests to a different endpo
 
 ## How It Works
 
-When a proxy is active, `interceptor.js` performs the following before each API request:
+When a proxy is active, `server/interceptor.js` performs the following before each API request:
 
 1. **URL Rewrite** — Replaces the request origin with the proxy's Base URL
 2. **Auth Replace** — Replaces `x-api-key` or `Authorization` header with the proxy's API Key

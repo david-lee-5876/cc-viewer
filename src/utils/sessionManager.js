@@ -271,7 +271,7 @@ export function mergeSessionIndices(oldIndex, newIndex) {
  * （`test/interceptor-delta-tail-fp.test.js` + `test/session-manager.test.js`）。
  *
  * 双端 fp 函数互相独立、用途不同，**不要试图共用**：
- *  - 服务端 `lib/interceptor-core.js::fingerprintMsg` 用于 Plan C 检测末位 tail fp 异
+ *  - 服务端 `server/lib/interceptor-core.js::fingerprintMsg` 用于 Plan C 检测末位 tail fp 异
  *  - 客户端 `src/utils/sessionMerge.js::messageFingerprint` 已升级为 `length + first32 + last32`
  *    三元组（旧格式 `slice(0,64)` 单条 fp 已淘汰）；用于反向锚点对齐时的多块 fp 等价校验。
  *

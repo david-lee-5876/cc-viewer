@@ -12,7 +12,7 @@
  */
 import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { fingerprintMsg } from '../lib/interceptor-core.js';
+import { fingerprintMsg } from '../server/lib/interceptor-core.js';
 // 别名保持原测试代码可读性（之前按 _fingerprintMsg 写的 case 名）
 const _fingerprintMsg = fingerprintMsg;
 

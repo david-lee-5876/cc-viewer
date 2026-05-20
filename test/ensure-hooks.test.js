@@ -1,4 +1,4 @@
-// Unit tests for lib/ensure-hooks.js — focus on the v3 timeout-field migration
+// Unit tests for server/lib/ensure-hooks.js — focus on the v3 timeout-field migration
 // (P0 root-cause fix for "Claude Code 10min 后 SIGTERM ask-bridge → TUI 接管").
 import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
@@ -13,7 +13,7 @@ process.env.CLAUDE_CONFIG_DIR = tmpHome;
 // ensureHooks 自动获取 timeout 值的辅助：每次 import 都重新读 env
 async function freshImport() {
   // Node ESM 不支持 invalidating module cache 简单地；改用 query string busting
-  const url = new URL('../lib/ensure-hooks.js', import.meta.url);
+  const url = new URL('../server/lib/ensure-hooks.js', import.meta.url);
   url.searchParams.set('t', String(Math.random()));
   return await import(url.href);
 }
@@ -68,7 +68,7 @@ describe('lib/ensure-hooks.js — timeout field v3 migration', () => {
   describe('upgrade path: 老用户已有缺 timeout 的 hook → 必须被重写', () => {
     it('已有 AskUserQuestion hook 缺 timeout → ensureHooks 必须把 timeout 加上（核心升级保证）', async () => {
       // 模拟旧 cc-viewer 版本写的 settings.json：command 完全匹配但缺 timeout 字段
-      const askBridgePath = resolve(import.meta.url ? new URL('..', import.meta.url).pathname : process.cwd(), 'lib/ask-bridge.js');
+      const askBridgePath = resolve(import.meta.url ? new URL('..', import.meta.url).pathname : process.cwd(), 'server/lib/ask-bridge.js');
       const oldCmd = `[ -n "$CCVIEWER_PORT" ] && node "${askBridgePath}" || true # cc-viewer-managed`;
       writeSettings({
         hooks: {
@@ -172,7 +172,7 @@ describe('lib/ensure-hooks.js — timeout field v3 migration', () => {
   describe('对称升级路径：perm / turn-end 缺 timeout → 自动升级', () => {
     it('perm-bridge hook 缺 timeout → ensureHooks 必须加上', async () => {
       const repoRoot = new URL('..', import.meta.url).pathname;
-      const permPath = `${repoRoot}lib/perm-bridge.js`;
+      const permPath = `${repoRoot}server/lib/perm-bridge.js`;
       const oldCmd = `[ -n "$CCVIEWER_PORT" ] && node "${permPath}" || true # cc-viewer-managed`;
       writeSettings({
         hooks: {
@@ -190,7 +190,7 @@ describe('lib/ensure-hooks.js — timeout field v3 migration', () => {
 
     it('turn-end-bridge hook 缺 timeout → ensureHooks 必须加上', async () => {
       const repoRoot = new URL('..', import.meta.url).pathname;
-      const turnEndPath = `${repoRoot}lib/turn-end-bridge.js`;
+      const turnEndPath = `${repoRoot}server/lib/turn-end-bridge.js`;
       const oldCmd = `[ -n "$CCVIEWER_PORT" ] && node "${turnEndPath}" || true # cc-viewer-managed`;
       writeSettings({
         hooks: {
@@ -210,7 +210,7 @@ describe('lib/ensure-hooks.js — timeout field v3 migration', () => {
   describe('错值 timeout 被纠正', () => {
     it('已有 timeout=999 (用户手编 / 老版本残留) → ensureHooks 改回当前 HOOK_TIMEOUT_S', async () => {
       const repoRoot = new URL('..', import.meta.url).pathname;
-      const askPath = `${repoRoot}lib/ask-bridge.js`;
+      const askPath = `${repoRoot}server/lib/ask-bridge.js`;
       const cmd = `[ -n "$CCVIEWER_PORT" ] && node "${askPath}" || true # cc-viewer-managed`;
       writeSettings({
         hooks: {
@@ -232,7 +232,7 @@ describe('lib/ensure-hooks.js — timeout field v3 migration', () => {
   describe('merge 而非 replace：保留第三方追加字段', () => {
     it('已有 hook 带 if/once/async 等 schema 合法字段 → rewrite 时必须保留', async () => {
       const repoRoot = new URL('..', import.meta.url).pathname;
-      const askPath = `${repoRoot}lib/ask-bridge.js`;
+      const askPath = `${repoRoot}server/lib/ask-bridge.js`;
       const cmd = `[ -n "$CCVIEWER_PORT" ] && node "${askPath}" || true # cc-viewer-managed`;
       writeSettings({
         hooks: {
@@ -265,7 +265,7 @@ describe('lib/ensure-hooks.js — timeout field v3 migration', () => {
 
     it('CCV_HOOK_TIMEOUT_S=0 时 rewrite 必须 delete 老 timeout 字段', async () => {
       const repoRoot = new URL('..', import.meta.url).pathname;
-      const askPath = `${repoRoot}lib/ask-bridge.js`;
+      const askPath = `${repoRoot}server/lib/ask-bridge.js`;
       const cmd = `[ -n "$CCVIEWER_PORT" ] && node "${askPath}" || true # cc-viewer-managed`;
       writeSettings({
         hooks: {
@@ -349,6 +349,185 @@ describe('lib/ensure-hooks.js — timeout field v3 migration', () => {
       const existing = { type: 'command', command: 'x', timeout: 999 };
       const desired = _buildHookObj('x');
       assert.equal(_hookObjEqual(existing, desired), false);
+    });
+  });
+
+  describe('stale-path purge: lib/ → server/lib/ 升级路径', () => {
+    it('老 entry 含 cc-viewer/lib/ask-bridge.js（无 server/）且带 marker → 被清除并重建为 server/lib/', async () => {
+      delete process.env.CCV_HOOK_TIMEOUT_S;
+      writeSettings({
+        hooks: {
+          PreToolUse: [
+            {
+              matcher: 'AskUserQuestion',
+              hooks: [{
+                type: 'command',
+                command: '[ -n "$CCVIEWER_PORT" ] && node "/abs/cc-viewer/lib/ask-bridge.js" || true # cc-viewer-managed',
+                timeout: 86400,
+              }],
+            },
+            {
+              matcher: '',
+              hooks: [{
+                type: 'command',
+                command: '[ -n "$CCVIEWER_PORT" ] && node "/abs/cc-viewer/lib/perm-bridge.js" || true # cc-viewer-managed',
+                timeout: 86400,
+              }],
+            },
+          ],
+          Stop: [
+            {
+              hooks: [{
+                type: 'command',
+                command: '[ -n "$CCVIEWER_PORT" ] && node "/abs/cc-viewer/lib/turn-end-bridge.js" || true # cc-viewer-managed',
+                timeout: 86400,
+              }],
+            },
+          ],
+        },
+      });
+      const { ensureHooks } = await freshImport();
+      ensureHooks();
+      const s = loadSettings();
+      const ask = s.hooks.PreToolUse.find(h => h.matcher === 'AskUserQuestion');
+      const perm = s.hooks.PreToolUse.find(h => h.matcher === '');
+      const turnEnd = s.hooks.Stop[0];
+      assert.match(ask.hooks[0].command, /server\/lib\/ask-bridge\.js/, 'ask path 应升级为 server/lib/');
+      assert.doesNotMatch(ask.hooks[0].command, /cc-viewer\/lib\/ask-bridge\.js/, 'stale lib/ 路径应被清除');
+      assert.match(perm.hooks[0].command, /server\/lib\/perm-bridge\.js/);
+      assert.match(turnEnd.hooks[0].command, /server\/lib\/turn-end-bridge\.js/);
+    });
+
+    it('purge 仅命中带 cc-viewer-managed marker 的条目，未带 marker 的同名路径 entry 不动', async () => {
+      delete process.env.CCV_HOOK_TIMEOUT_S;
+      writeSettings({
+        hooks: {
+          PreToolUse: [
+            // 第三方 entry：matcher 不与 cc-viewer 冲突（Read），即使 command 含 stale path 也不该被 purge
+            {
+              matcher: 'Read',
+              hooks: [{
+                type: 'command',
+                command: 'node "/some/third-party/cc-viewer/lib/ask-bridge.js"',
+              }],
+            },
+          ],
+          Stop: [],
+        },
+      });
+      const { ensureHooks } = await freshImport();
+      ensureHooks();
+      const s = loadSettings();
+      const thirdParty = s.hooks.PreToolUse.find(h => h.matcher === 'Read');
+      assert.ok(thirdParty, '未带 marker 的 Read entry 必须保留');
+      assert.equal(
+        thirdParty.hooks[0].command,
+        'node "/some/third-party/cc-viewer/lib/ask-bridge.js"',
+        '第三方 command 不能被改写'
+      );
+    });
+
+    // P1-5: pre-marker era (1.6.215 之前) — 无 marker / 无 CCVIEWER_PORT guard / 老 matcher
+    it('pre-marker era 老 perm-bridge entry（matcher=Bash|Write|...）被 legacy cleanup 删除并由主流程重建', async () => {
+      delete process.env.CCV_HOOK_TIMEOUT_S;
+      writeSettings({
+        hooks: {
+          PreToolUse: [
+            // 1.6.215 之前的 perm-bridge：matcher 是工具列表，command 无 marker / 无 guard
+            {
+              matcher: 'Bash|Write|Edit|NotebookEdit',
+              hooks: [{
+                type: 'command',
+                command: 'node "/abs/cc-viewer/lib/perm-bridge.js"',
+              }],
+            },
+          ],
+          Stop: [],
+        },
+      });
+      const { ensureHooks } = await freshImport();
+      ensureHooks();
+      const s = loadSettings();
+      // 老 entry 必须被 legacy cleanup（ensure-hooks.js:130-144）按 'perm-bridge.js' 子串 + 非 '' matcher 删除
+      const oldEntry = s.hooks.PreToolUse.find(h => h.matcher === 'Bash|Write|Edit|NotebookEdit');
+      assert.equal(oldEntry, undefined, 'pre-marker era 老 matcher entry 必须被清除');
+      // 主流程重建新 entry：matcher '' + 含 marker + 含 server/lib/ path + 含 CCVIEWER_PORT guard
+      const fresh = s.hooks.PreToolUse.find(h => h.matcher === '');
+      assert.ok(fresh, '新格式 perm-bridge entry 必须被重新插入');
+      assert.match(fresh.hooks[0].command, /server\/lib\/perm-bridge\.js/);
+      assert.match(fresh.hooks[0].command, /# cc-viewer-managed/);
+      assert.match(fresh.hooks[0].command, /\$CCVIEWER_PORT/);
+    });
+
+    // Boundary: 同 matcher 一 stale 一 fresh 共存 — fresh 必须保留，stale 必须 purge
+    it('同 matcher 一 stale 一 fresh 共存：stale 被 purge，fresh 保留', async () => {
+      delete process.env.CCV_HOOK_TIMEOUT_S;
+      writeSettings({
+        hooks: {
+          PreToolUse: [
+            // 老 stale entry（path 不存在）
+            {
+              matcher: 'AskUserQuestion',
+              hooks: [{
+                type: 'command',
+                command: '[ -n "$CCVIEWER_PORT" ] && node "/nonexistent/cc-viewer/lib/ask-bridge.js" || true # cc-viewer-managed',
+                timeout: 86400,
+              }],
+            },
+          ],
+          Stop: [],
+        },
+      });
+      const { ensureHooks } = await freshImport();
+      ensureHooks();
+      const s = loadSettings();
+      // 期望：stale 被 purge → 主流程重建 → 最终只有一条 AskUserQuestion entry 且指向真实 server/lib/ 路径
+      const asks = s.hooks.PreToolUse.filter(h => h.matcher === 'AskUserQuestion');
+      assert.equal(asks.length, 1, '应该只有一条 AskUserQuestion entry');
+      assert.match(asks[0].hooks[0].command, /server\/lib\/ask-bridge\.js/);
+      assert.doesNotMatch(asks[0].hooks[0].command, /nonexistent/);
+    });
+
+    // Boundary: settings.json 完全无 hooks key — _purge 不崩
+    it('settings 无 hooks key → ensureHooks 不崩，正常初始化', async () => {
+      delete process.env.CCV_HOOK_TIMEOUT_S;
+      writeSettings({});
+      const { ensureHooks } = await freshImport();
+      ensureHooks();
+      const s = loadSettings();
+      assert.ok(Array.isArray(s.hooks.PreToolUse));
+      assert.ok(Array.isArray(s.hooks.Stop));
+      assert.ok(s.hooks.PreToolUse.find(h => h.matcher === 'AskUserQuestion'));
+    });
+  });
+
+  describe('removeAllManagedHooks: uninstall 路径', () => {
+    it('清除所有带 cc-viewer-managed marker 的 entry（Pre + Stop），不论 path 状态', async () => {
+      delete process.env.CCV_HOOK_TIMEOUT_S;
+      writeSettings({
+        hooks: {
+          PreToolUse: [
+            {
+              matcher: 'AskUserQuestion',
+              hooks: [{ type: 'command', command: 'node "/path/ok.js" # cc-viewer-managed', timeout: 86400 }],
+            },
+            {
+              matcher: 'Read',
+              hooks: [{ type: 'command', command: 'node "/some-third-party.js"' }],  // 无 marker
+            },
+          ],
+          Stop: [
+            { hooks: [{ type: 'command', command: 'node "/another.js" # cc-viewer-managed' }] },
+          ],
+        },
+      });
+      const { removeAllManagedHooks } = await freshImport();
+      const settings = loadSettings();
+      const removed = removeAllManagedHooks(settings);
+      assert.equal(removed, 2, '2 条 cc-viewer-managed entry 必须被清除');
+      assert.equal(settings.hooks.PreToolUse.length, 1, '仅第三方 Read entry 留下');
+      assert.equal(settings.hooks.PreToolUse[0].matcher, 'Read');
+      assert.equal(settings.hooks.Stop.length, 0, 'Stop section 全清');
     });
   });
 });

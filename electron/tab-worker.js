@@ -53,17 +53,17 @@ let killPtyFn = null;
 async function launch({ path: projectPath, extraArgs = [], claudePath, isNpmVersion }) {
   console.log('[worker] launch:', projectPath, 'claude:', claudePath, 'npm:', isNpmVersion);
   // 1. Register hooks (idempotent)
-  const { ensureHooks } = await importAbs(join(rootDir, 'lib', 'ensure-hooks.js'));
+  const { ensureHooks } = await importAbs(join(rootDir, 'server', 'lib', 'ensure-hooks.js'));
   ensureHooks();
 
   // 2. Start proxy
-  const { startProxy } = await importAbs(join(rootDir, 'proxy.js'));
+  const { startProxy } = await importAbs(join(rootDir, 'server', 'proxy.js'));
   const proxyPort = await startProxy();
   process.env.CCV_PROXY_PORT = String(proxyPort);
   process.env.CCV_PROJECT_DIR = projectPath;
 
   // 3. Import server.js (workspace mode → skips auto-start)
-  serverMod = await importAbs(join(rootDir, 'server.js'));
+  serverMod = await importAbs(join(rootDir, 'server', 'server.js'));
 
   // 4. Manually start server (like cli.js:542)
   await serverMod.startViewer();
@@ -80,7 +80,7 @@ async function launch({ path: projectPath, extraArgs = [], claudePath, isNpmVers
 
   // 7. Initialize workspace log directory (sets LOG_FILE, _projectName, _logDir)
   //    forceNew: false — 复用最近的日志文件以保留历史数据
-  const { initForWorkspace } = await importAbs(join(rootDir, 'interceptor.js'));
+  const { initForWorkspace } = await importAbs(join(rootDir, 'server', 'interceptor.js'));
   const result = initForWorkspace(projectPath, { forceNew: false });
 
   // 7b. Mark workspace as launched so React app shows chat view instead of workspace selector
@@ -93,7 +93,7 @@ async function launch({ path: projectPath, extraArgs = [], claudePath, isNpmVers
   // 之前是先 send ready 再 spawnClaude；那种顺序下前端 ws 可能在 PTY 启动前就连上，
   // outputBuffer 为空 + claude 等待输入不再重绘 → 主 TerminalPanel 黑屏。
   // 现在等 spawnClaude 完成且首条 PTY 数据落地（或 600ms 兜底超时）后再 send ready。
-  const { spawnClaude, killPty, onPtyExit, onPtyData } = await importAbs(join(rootDir, 'pty-manager.js'));
+  const { spawnClaude, killPty, onPtyExit, onPtyData } = await importAbs(join(rootDir, 'server', 'pty-manager.js'));
   killPtyFn = killPty;
 
   onPtyExit((code) => {

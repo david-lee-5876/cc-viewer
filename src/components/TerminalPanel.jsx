@@ -30,6 +30,28 @@ import ConfirmRemoveButton from './ConfirmRemoveButton';
 import ScratchTerminal from './ScratchTerminal';
 import { darkTerminalTheme, lightTerminalTheme } from './terminalThemes';
 import { resizeImageIfNeeded } from '../utils/imageResize';
+import { calcResizedSize } from '../utils/resizeCalc';
+
+// UltraPlan popover 拖拽尺寸持久化:与 UltraPlanModal 共享语义但 key 分开,因为
+// popover 几何/位置约束不同(浮锚 trigger 按钮、最大约 70vh,modal 居中可到 90vh)。
+const _ULTRAPLAN_POPOVER_W_KEY = 'cc-viewer-ultraplan-popover-width';
+const _ULTRAPLAN_POPOVER_H_KEY = 'cc-viewer-ultraplan-popover-height';
+function _readUltraplanPopoverSize() {
+  try {
+    const w = parseFloat(localStorage.getItem(_ULTRAPLAN_POPOVER_W_KEY));
+    const h = parseFloat(localStorage.getItem(_ULTRAPLAN_POPOVER_H_KEY));
+    if (Number.isFinite(w) || Number.isFinite(h)) {
+      return { w: Number.isFinite(w) ? w : null, h: Number.isFinite(h) ? h : null };
+    }
+  } catch {}
+  return null;
+}
+function _writeUltraplanPopoverSize(size) {
+  try {
+    if (size?.w) localStorage.setItem(_ULTRAPLAN_POPOVER_W_KEY, String(size.w));
+    if (size?.h) localStorage.setItem(_ULTRAPLAN_POPOVER_H_KEY, String(size.h));
+  } catch {}
+}
 
 const SCRATCH_OPEN_KEY = 'cc-viewer-scratch-open';
 const SCRATCH_HEIGHT_KEY = 'cc-viewer-scratch-height';
@@ -218,6 +240,8 @@ class TerminalPanel extends React.Component {
     super(props);
     this.containerRef = React.createRef();
     this.fileInputRef = React.createRef();
+    this._ultraplanPanelRef = React.createRef();
+    this._ultraplanDragRef = null;
     this.terminal = null;
     this.fitAddon = null;
     // ws 现在是 getter(挂在原型),不在 constructor 上设字段,避免覆盖 getter
@@ -232,6 +256,9 @@ class TerminalPanel extends React.Component {
       ultraplanVariant: 'codeExpert',
       ultraplanPrompt: '',
       ultraplanFiles: [],
+      // PC UltraPlan popover 拖拽尺寸,持久化到 localStorage 两 key;手机/iPad 不走这条路径
+      // (那边用 UltraPlanModal),所以无 gate,但 popover 入口本身 isMobile 不显示终端工具栏。
+      ultraplanPopoverSize: _readUltraplanPopoverSize(),
       customUltraplanExperts: [],
       customUltraplanEditOpen: false,
       customUltraplanEditing: null,
@@ -1343,6 +1370,80 @@ class TerminalPanel extends React.Component {
     }));
   };
 
+  // UltraPlan popover resize:左上 handle → 拖拽改 popover overlay 的 width/height。
+  // 拖拽期直接改 .ant-popover-inner 的 inline style 不走 setState(避免高频 re-render);
+  // pointerup 调 setState + 落 localStorage。AbortController 一刀清 listener,防中途关
+  // popover 留残;setPointerCapture 保所有 pointer 事件落 handle 元素。
+  _handleUltraplanResizePointerDown = (e) => {
+    const panel = this._ultraplanPanelRef?.current;
+    if (!panel) return;
+    const inner = panel.closest('.ant-popover-inner');
+    if (!inner || this._ultraplanDragRef) return;
+    e.preventDefault();
+    e.stopPropagation();
+    try { e.currentTarget.setPointerCapture?.(e.pointerId); } catch {}
+    const controller = new AbortController();
+    const clamp = {
+      minW: 360,
+      minH: 280,
+      maxW: Math.round(window.innerWidth * 0.9),
+      maxH: Math.round(window.innerHeight * 0.7),
+    };
+    this._ultraplanDragRef = {
+      startX: e.clientX, startY: e.clientY,
+      startW: inner.offsetWidth, startH: inner.offsetHeight,
+      clamp,
+      pointerId: e.pointerId,
+      handle: e.currentTarget,
+      controller,
+      inner,
+    };
+
+    let pendingXY = null;
+    let rafScheduled = false;
+    const onMove = (ev) => {
+      const d = this._ultraplanDragRef;
+      if (!d) return;
+      pendingXY = { x: ev.clientX, y: ev.clientY };
+      if (rafScheduled) return;
+      rafScheduled = true;
+      requestAnimationFrame(() => {
+        rafScheduled = false;
+        const p = pendingXY;
+        pendingXY = null;
+        const dd = this._ultraplanDragRef;
+        if (!dd || !p) return;
+        const { w, h } = calcResizedSize({
+          startX: dd.startX, startY: dd.startY,
+          curX: p.x, curY: p.y,
+          startW: dd.startW, startH: dd.startH,
+          dirX: -1, dirY: -1,
+          clamp: dd.clamp,
+        });
+        dd.inner.style.width = `${w}px`;
+        dd.inner.style.height = `${h}px`;
+      });
+    };
+
+    const onEnd = () => {
+      const d = this._ultraplanDragRef;
+      if (!d) return;
+      const finalW = d.inner.offsetWidth;
+      const finalH = d.inner.offsetHeight;
+      try { d.handle?.releasePointerCapture?.(d.pointerId); } catch {}
+      d.controller.abort();
+      this._ultraplanDragRef = null;
+      const size = { w: finalW, h: finalH };
+      this.setState({ ultraplanPopoverSize: size });
+      _writeUltraplanPopoverSize(size);
+    };
+
+    const signal = controller.signal;
+    document.addEventListener('pointermove', onMove, { signal });
+    document.addEventListener('pointerup', onEnd, { signal });
+    document.addEventListener('pointercancel', onEnd, { signal });
+  };
+
   handleEnableAgentTeam = () => {
     if (this.state.agentTeamEnabling) return;
     this.setState({ agentTeamEnabling: true });
@@ -1471,9 +1572,34 @@ class TerminalPanel extends React.Component {
                   if (!v && (this.state.lightbox || this.state.ultraplanLightbox || this.state.ultraplanConfirming)) return;
                   if (!v) this.setState({ ultraplanOpen: false });
                 }}
-                overlayInnerStyle={{ background: 'var(--bg-elevated)', border: '1px solid var(--border-hover)', borderRadius: 8, padding: 0, width: 420 }}
+                overlayClassName="ccv-ultraplan-popover"
+                overlayInnerStyle={{
+                  background: 'var(--bg-elevated)',
+                  border: '1px solid var(--border-hover)',
+                  borderRadius: 8,
+                  padding: 0,
+                  // popover 宽高由 state 驱动;拖拽期 _handleUltraplanResizePointerDown 会
+                  // 直接改 .ant-popover-inner inline style(避免高频 setState),pointerup 落 state。
+                  width: this.state.ultraplanPopoverSize?.w || 420,
+                  height: this.state.ultraplanPopoverSize?.h || 520,
+                }}
                 content={
-                  <div className={styles.ultraplanPanel}>
+                  <div className={styles.ultraplanPanel} ref={this._ultraplanPanelRef}>
+                    <div
+                      className={styles.ultraplanResizeHandle}
+                      onPointerDown={this._handleUltraplanResizePointerDown}
+                      aria-label={t('ui.ultraplan.resizeHandle')}
+                      role="separator"
+                      tabIndex={-1}
+                    >
+                      <svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                        <path
+                          d="M 4 0 L 16 0 L 0 16 L 0 4 A 4 4 0 0 1 4 0 Z"
+                          fill="currentColor"
+                        />
+                      </svg>
+                    </div>
+                    <div className={styles.ultraplanContent}>
                     <div className={styles.ultraplanHeader}>
                       <span className={styles.ultraplanHeaderTitle}>{t('ui.ultraplan.title')}<ConceptHelp doc="UltraPlan" zIndex={1100} /></span>
                       <button
@@ -1576,12 +1702,14 @@ class TerminalPanel extends React.Component {
                       onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && (this.state.ultraplanPrompt.trim() || this.state.ultraplanFiles.length > 0)) { e.preventDefault(); this.handleUltraplanSend(); } }}
                       onPaste={this.handleUltraplanPaste}
                       placeholder={t('ui.ultraplan.placeholder')}
-                      rows={5}
+                      /* rows={1} 让 CSS flex 完全控制高度,避免 rows*line-height 作 intrinsic baseline 干扰 grow */
+                      rows={1}
                       autoFocus
                     />
                     <div className={styles.ultraplanFooter}>
                       <button className={styles.ultraplanSendBtn} disabled={!this.state.ultraplanPrompt.trim() && this.state.ultraplanFiles.length === 0} onClick={this.handleUltraplanSend}>{t('ui.ultraplan.send')}</button>
                       <button className={styles.ultraplanUploadBtn} onClick={this.handleUltraplanUpload}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>{t('ui.ultraplan.upload')}</button>
+                    </div>
                     </div>
                   </div>
                 }

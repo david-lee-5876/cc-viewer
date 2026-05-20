@@ -2,6 +2,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join, basename } from 'node:path';
 import { chmodSync, statSync } from 'node:fs';
 import { platform, arch, homedir } from 'node:os';
+import { createRequire } from 'node:module';
 import { prepareEmbeddedShellSpawn } from './lib/terminal-env.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -100,16 +101,27 @@ function flushBatch(s) {
   }
 }
 
+// 见 pty-manager.js::fixSpawnHelperPermissions 同名函数注释；用 createRequire 而非
+// __dirname 相对路径以兼容 pnpm/yarn workspace 的 node-pty hoist 布局。
 function fixSpawnHelperPermissions() {
+  const os = platform();
+  const cpu = arch();
+  const subPath = `node-pty/prebuilds/${os}-${cpu}/spawn-helper`;
+  let helperPath;
   try {
-    const os = platform();
-    const cpu = arch();
-    const helperPath = join(__dirname, 'node_modules', 'node-pty', 'prebuilds', `${os}-${cpu}`, 'spawn-helper');
+    const req = createRequire(import.meta.url);
+    helperPath = req.resolve(subPath);
+  } catch (err) {
+    return;
+  }
+  try {
     const stat = statSync(helperPath);
     if (!(stat.mode & 0o111)) {
       chmodSync(helperPath, stat.mode | 0o755);
     }
-  } catch { }
+  } catch (err) {
+    console.warn('[cc-viewer] fixSpawnHelperPermissions failed:', helperPath, err?.message || err);
+  }
 }
 
 // 注：spawn 失败时 s 留在 Map 但 s.ptyProcess 仍为 null。server connection handler 在

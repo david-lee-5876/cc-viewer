@@ -122,12 +122,12 @@ CC-Viewer auto-registers hooks in `~/.claude/settings.json` under `hooks.PreTool
 
 ### 1. AskUserQuestion Bridge
 - **Matcher**: `"AskUserQuestion"`
-- **Command**: `node <install_dir>/lib/ask-bridge.js`
+- **Command**: `node <install_dir>/server/lib/ask-bridge.js`
 - **Purpose**: Forward Claude's questions to Web UI, wait for user answers
 
 ### 2. Permission Approval Bridge
 - **Matcher**: `""` (empty = match all tools)
-- **Command**: `node <install_dir>/lib/perm-bridge.js`
+- **Command**: `node <install_dir>/server/lib/perm-bridge.js`
 - **Purpose**: Only `Bash`/`Edit`/`Write`/`NotebookEdit` require Web UI approval; others pass through
 
 ## 7. Shell Integration

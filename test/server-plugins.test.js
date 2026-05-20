@@ -36,7 +36,7 @@ describe('server plugin endpoints', { concurrency: false }, () => {
   let port;
 
   before(async () => {
-    const mod = await import('../server.js');
+    const mod = await import('../server/server.js');
     startViewer = mod.startViewer;
     stopViewer = mod.stopViewer;
     getPort = mod.getPort;

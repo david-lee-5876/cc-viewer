@@ -1,5 +1,5 @@
 /**
- * lib/claude-md-discovery.js 单元测试。
+ * server/lib/claude-md-discovery.js 单元测试。
  *
  * 覆盖：
  *   - 仅 global / 仅 project / 两者并存的发现结果
@@ -25,7 +25,7 @@ import { tmpdir } from 'node:os';
 import {
   discoverClaudeMdCandidates,
   readCandidateById,
-} from '../lib/claude-md-discovery.js';
+} from '../server/lib/claude-md-discovery.js';
 
 function setup() {
   const TMP = mkdtempSync(join(tmpdir(), 'ccv-claude-md-disc-'));

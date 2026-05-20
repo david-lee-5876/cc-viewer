@@ -616,7 +616,7 @@ export default function FileContentView({
             .json()
             .then((err) => {
               // 服务端 file-access-policy 现在统一返回 {error, reason, allowedRoots?}
-              // reason 取值见 lib/file-access-policy.js:isReadAllowed,前端解析后展示具体原因
+              // reason 取值见 server/lib/file-access-policy.js:isReadAllowed,前端解析后展示具体原因
               const reasonMsg = err.reason
                 ? (i18n(`ui.fileLoadError.reason.${err.reason}`) || err.error)
                 : (err.error || 'Failed to load');

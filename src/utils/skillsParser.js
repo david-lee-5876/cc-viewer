@@ -1,5 +1,5 @@
 // Claude Code 硬编码的 builtin skill 名单（本地无文件、不可禁用）。
-// 与 lib/skills-api.js 的 BUILTIN_NAMES 保持一致；前端用于 popover chip 过滤。
+// 与 server/lib/skills-api.js 的 BUILTIN_NAMES 保持一致；前端用于 popover chip 过滤。
 export const BUILTIN_SKILL_NAMES = new Set([
   'update-config', 'keybindings-help', 'simplify', 'fewer-permission-prompts',
   'loop', 'schedule', 'claude-api', 'init', 'review', 'security-review',

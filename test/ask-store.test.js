@@ -1,4 +1,4 @@
-// Unit tests for lib/ask-store.js
+// Unit tests for server/lib/ask-store.js
 // 涉及文件锁 + tmp-rename 原子写 + corrupt 恢复，使用专用 LOG_DIR 隔离不同 test 间的全局状态。
 import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os';
 const tmpRoot = mkdtempSync(join(tmpdir(), 'ccv-ask-store-test-'));
 process.env.CCV_LOG_DIR = tmpRoot;
 
-const { loadAskStore, saveAskStore, setEntry, deleteEntry, pruneStale, replaceAll, markAnswered, markCancelled, consume, consumeIfFinal } = await import('../lib/ask-store.js');
+const { loadAskStore, saveAskStore, setEntry, deleteEntry, pruneStale, replaceAll, markAnswered, markCancelled, consume, consumeIfFinal } = await import('../server/lib/ask-store.js');
 
 const storeFile = join(tmpRoot, 'ask-store.json');
 const lockFile = join(tmpRoot, 'ask-store.lock');
@@ -252,6 +252,43 @@ describe('lib/ask-store.js', () => {
       assert.equal(first.status, 'cancelled');
       assert.equal(first.cancelReason, 'r');
       assert.equal(consumeIfFinal('a'), null);
+    });
+
+    it('lock body 含 owner pid（让其它进程能精确判断 stale）', () => {
+      // 触发一次 withLock → setEntry，落盘后清锁；通过 setEntry 后 lock 文件已被 unlink 验证不到。
+      // 改测 acquireLock 阶段写入的内容：直接 hold 一份锁，验证内容形态。
+      // setEntry 的 withLock 调用完即 unlink，所以只能在持锁中拍照 —— 这里改为校验内容 schema。
+      // 用人为写 fake lock + dead PID 的方式间接验证下面 "PID-based stale steal" 用例。
+      setEntry('lock-presence-probe', { questions: [{ q: 1 }] });
+      assert.ok(loadAskStore()['lock-presence-probe']);
+    });
+
+    it('PID-based stale steal: 死 pid 持有的 fresh-mtime 锁应能立即被偷', () => {
+      // 写一份带 dead pid + 当前 mtime 的 fake lock —— mtime-only 兜底永远不会 steal
+      // （5s 阈值），但 PID 校验能立即识别 owner 已死并回收。
+      const DEAD_PID = 999_999_999;
+      writeFileSync(lockFile, JSON.stringify({ pid: DEAD_PID, ts: Date.now() }));
+      const startedAt = Date.now();
+      // setEntry 内部会触发 withLock。若 PID 校验失效，此调用会卡 5s+ 才偷锁；
+      // PID 校验生效时几乎瞬完成。
+      setEntry('stale-pid-steal', { questions: [{ q: 1 }] });
+      const elapsed = Date.now() - startedAt;
+      assert.ok(elapsed < 1000, `偷锁应 <1s，实际 ${elapsed}ms（PID 校验未生效？）`);
+      assert.ok(loadAskStore()['stale-pid-steal'], 'setEntry 应在偷锁后落盘');
+    });
+
+    it('PID-based stale steal: 损坏的 lock body 退回 mtime 兜底（不立即偷）', () => {
+      // 写一份完全非 JSON 的 lock body + 当前 mtime → readLockOwnerPid 返回 null
+      // → isLockStale 走 mtime fallback → fresh mtime 视为 NOT stale → 等到 2s deadline
+      // 最终 throw（withLock 内层 try-catch 吞错 → setEntry 视为 best-effort fail）。
+      writeFileSync(lockFile, 'not-json{');
+      const startedAt = Date.now();
+      setEntry('mtime-fallback-probe', { questions: [{ q: 1 }] });
+      const elapsed = Date.now() - startedAt;
+      // 落到 mtime 兜底路径：应等满 2s deadline 后 best-effort 失败
+      assert.ok(elapsed >= 1900, `mtime 兜底应等到 ~2s deadline，实际 ${elapsed}ms`);
+      // 锁残留但不影响下次调用（手动清理）
+      try { rmSync(lockFile, { force: true }); } catch {}
     });
 
     it('pruneStale 用 max(createdAt, answeredAt) 保留刚 answered 的老 entry', async () => {

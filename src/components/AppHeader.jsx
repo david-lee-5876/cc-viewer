@@ -1010,7 +1010,7 @@ class AppHeader extends React.Component {
     const slot = this.props.contextBarSlot;
     if (!slot) return null;
 
-    const { requests = [], isLocalLog, localLogFile, projectName, contextWindow, contextBarOptimistic, contextBarLocked, serverCachedContent } = this.props;
+    const { requests = [], isLocalLog, localLogFile, projectName, contextWindow, contextBarOptimistic, contextBarLocked, serverCachedContent, claudeProjectModel } = this.props;
 
     // 计算上下文使用率：距离 auto-compact 触发点的进度
     // auto-compact 在 ~83.5% 时触发（扣除 16.5% buffer）
@@ -1031,7 +1031,9 @@ class AppHeader extends React.Component {
       }
     }
     // resolveCalibrationTokens 不变量保证返回 1000000 或 200000，永不为 0/null
-    const calibrationTokens = resolveCalibrationTokens(this.state.calibrationModel, lastMainAgent);
+    // 第三参数 claudeProjectModel 是 ~/.claude.json projects[cwd].lastModelUsage 推断,
+    // 用作 'auto' 模式启动期回落(避 haiku init ping 让血条错显 200K)。
+    const calibrationTokens = resolveCalibrationTokens(this.state.calibrationModel, lastMainAgent, claudeProjectModel);
     if (!isLocalLog) {
       if (contextWindow?.used_percentage != null) {
         if (lastTotalTokens > 0) {

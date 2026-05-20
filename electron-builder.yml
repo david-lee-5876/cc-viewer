@@ -9,14 +9,9 @@ files:
   - dist/**/*
   - server.js
   - cli.js
-  - proxy.js
-  - interceptor.js
-  - i18n.js
   - findcc.js
-  - pty-manager.js
-  - scratch-pty-manager.js
-  - workspace-registry.js
-  - lib/**/*
+  - interceptor.js
+  - server/**/*
   - plugins/**/*
   - concepts/**/*
   - electron/**/*

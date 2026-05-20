@@ -5,15 +5,18 @@ import { resolve, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
 import { spawn } from 'node:child_process';
-import { t } from './i18n.js';
-import { INJECT_IMPORT, resolveCliPath, resolveNativePath, resolveNpmClaudePath, buildShellCandidates, setLogDir, LOG_DIR, hasClaude2xWrapper, getGlobalNodeModulesDir, PACKAGES, getClaudeConfigDir } from './findcc.js';
-import { ensureHooks } from './lib/ensure-hooks.js';
+import { t } from './server/i18n.js';
+import { INJECT_IMPORT, LEGACY_INJECT_IMPORTS, resolveCliPath, resolveNativePath, resolveNpmClaudePath, buildShellCandidates, setLogDir, LOG_DIR, hasClaude2xWrapper, getGlobalNodeModulesDir, PACKAGES, getClaudeConfigDir } from './findcc.js';
+import { ensureHooks, removeAllManagedHooks } from './server/lib/ensure-hooks.js';
+import { injectCliJsAt, removeCliJsInjectionAt, INJECT_START as _INJECT_START, INJECT_END as _INJECT_END, buildInjectBlock as _buildInjectBlock } from './server/lib/cli-inject.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 
-const INJECT_START = '// >>> Start CC Viewer Web Service >>>';
-const INJECT_END = '// <<< Start CC Viewer Web Service <<<';
-const INJECT_BLOCK = `${INJECT_START}\n${INJECT_IMPORT}\n${INJECT_END}`;
+// 注入 marker 常量定义在 server/lib/cli-inject.js（便于单元测试）；
+// 本文件仅 re-export 给 helper 与 hook 使用，保持现有行为。
+const INJECT_START = _INJECT_START;
+const INJECT_END = _INJECT_END;
+const INJECT_BLOCK = _buildInjectBlock(INJECT_IMPORT);
 
 
 const SHELL_HOOK_START = '# >>> CC-Viewer Auto-Inject >>>';
@@ -198,36 +201,17 @@ function removeShellHook() {
 }
 
 function injectCliJs() {
-  const content = readFileSync(cliPath, 'utf-8');
-  if (content.includes(INJECT_START)) {
-    return 'exists';
-  }
-  // 保留主导 EOL：若原文件 CRLF，注入完仍 CRLF（否则 split('\n')+join('\n') 会把 Win 文件
-  // 一次性转 LF，git/编辑器抱怨混合行尾且对哈希签名敏感的脚本可能失效）。
-  const eol = content.includes('\r\n') ? '\r\n' : '\n';
-  const lines = content.split(/\r?\n/);
-  lines.splice(2, 0, INJECT_BLOCK);
-  writeFileSync(cliPath, lines.join(eol));
-  return 'injected';
+  return injectCliJsAt(cliPath, INJECT_IMPORT, LEGACY_INJECT_IMPORTS);
 }
 
 function removeCliJsInjection() {
-  try {
-    if (!existsSync(cliPath)) return 'not_found';
-    const content = readFileSync(cliPath, 'utf-8');
-    if (!content.includes(INJECT_START)) return 'clean';
-    const regex = new RegExp(`${INJECT_START}\\n${INJECT_IMPORT}\\n${INJECT_END}\\n?`, 'g');
-    writeFileSync(cliPath, content.replace(regex, ''));
-    return 'removed';
-  } catch {
-    return 'error';
-  }
+  return removeCliJsInjectionAt(cliPath, INJECT_IMPORT, LEGACY_INJECT_IMPORTS);
 }
 
 async function runProxyCommand(args) {
   try {
     // Dynamic import to avoid side effects when just installing
-    const { startProxy } = await import('./proxy.js');
+    const { startProxy } = await import('./server/proxy.js');
     const proxyPort = await startProxy();
 
     // args = ['run', '--', 'command', 'claude', ...] or ['run', 'claude', ...]
@@ -285,7 +269,7 @@ async function runProxyCommand(args) {
     // 可通过环境变量 CCV_SKIP_THINKING_DISPLAY=1 强制跳过。
     const isClaudeCmd = cmd === 'claude' || /[\\/]claude(\.exe)?$/.test(cmd);
     if (isClaudeCmd && process.env.CCV_SKIP_THINKING_DISPLAY !== '1') {
-      const { withDefaultThinkingDisplay } = await import('./pty-manager.js');
+      const { withDefaultThinkingDisplay } = await import('./server/pty-manager.js');
       cmdArgs = withDefaultThinkingDisplay(cmdArgs);
     }
 
@@ -308,7 +292,7 @@ async function runProxyCommand(args) {
   }
 }
 
-// ensureHooks() extracted to lib/ensure-hooks.js (shared with electron/tab-worker.js)
+// ensureHooks() extracted to server/lib/ensure-hooks.js (shared with electron/tab-worker.js)
 
 async function runCliMode(extraClaudeArgs = [], cwd, noOpen = false) {
   // 首先尝试 npm 版本（包括 nvm 安装），找不到再尝试 native 版本
@@ -329,7 +313,7 @@ async function runCliMode(extraClaudeArgs = [], cwd, noOpen = false) {
   const workingDir = cwd || process.cwd();
 
   // 注册工作区
-  const { registerWorkspace } = await import('./workspace-registry.js');
+  const { registerWorkspace } = await import('./server/workspace-registry.js');
   registerWorkspace(workingDir);
 
   // 确保 AskUserQuestion hook 已注册到 ~/.claude/settings.json
@@ -347,12 +331,12 @@ async function runCliMode(extraClaudeArgs = [], cwd, noOpen = false) {
   }
 
   // 1. 启动代理
-  const { startProxy } = await import('./proxy.js');
+  const { startProxy } = await import('./server/proxy.js');
   const proxyPort = await startProxy();
   process.env.CCV_PROXY_PORT = String(proxyPort);
 
   // 3. 启动 HTTP 服务器
-  const serverMod = await import('./server.js');
+  const serverMod = await import('./server/server.js');
 
   // 等待服务器启动完成
   await new Promise(resolve => {
@@ -368,7 +352,7 @@ async function runCliMode(extraClaudeArgs = [], cwd, noOpen = false) {
   const serverProtocol = serverMod.getProtocol();
 
   // 3. 启动 PTY 中的 claude
-  const { spawnClaude, killPty } = await import('./pty-manager.js');
+  const { spawnClaude, killPty } = await import('./server/pty-manager.js');
   try {
     await spawnClaude(proxyPort, workingDir, extraClaudeArgs, claudePath, isNpmVersion, port, serverProtocol, serverMod.getInternalToken());
   } catch (err) {
@@ -416,7 +400,7 @@ async function runSdkMode(extraClaudeArgs = [], cwd, noOpen = false) {
   // 检查 SDK 是否可用
   let sdkManager;
   try {
-    sdkManager = await import('./lib/sdk-manager.js');
+    sdkManager = await import('./server/lib/sdk-manager.js');
     if (!sdkManager.isSdkAvailable()) throw new Error('query not available');
   } catch {
     console.warn('[CC Viewer] Agent SDK not available, falling back to PTY mode (-C)');
@@ -426,7 +410,7 @@ async function runSdkMode(extraClaudeArgs = [], cwd, noOpen = false) {
   const workingDir = cwd || process.cwd();
 
   // 注册工作区
-  const { registerWorkspace } = await import('./workspace-registry.js');
+  const { registerWorkspace } = await import('./server/workspace-registry.js');
   registerWorkspace(workingDir);
 
   // 不需要 ensureHooks — SDK canUseTool 处理 AskUserQuestion + 权限
@@ -439,7 +423,7 @@ async function runSdkMode(extraClaudeArgs = [], cwd, noOpen = false) {
   process.env.CCV_PROXY_MODE = '1'; // 使 interceptor.js 惰性
 
   // 启动 HTTP 服务器
-  const serverMod = await import('./server.js');
+  const serverMod = await import('./server/server.js');
 
   await new Promise(resolve => {
     const check = () => {
@@ -467,7 +451,7 @@ async function runSdkMode(extraClaudeArgs = [], cwd, noOpen = false) {
     onStreamingStatus: (data) => serverMod.setSdkStreamingState(data),
     broadcastWs: (msg) => serverMod.broadcastWsMessage(msg),
     permissionMode,
-    runWaterfallHook: (await import('./lib/plugin-loader.js')).runWaterfallHook,
+    runWaterfallHook: (await import('./server/lib/plugin-loader.js')).runWaterfallHook,
     // Round-3 P0: SDK mode has no Stop hook (ensureHooks() skipped above), so
     // the only place we learn a turn ended is the SDK 'result' message. Forward
     // it to the same SSE channel the Stop hook bridge uses in PTY mode.
@@ -545,12 +529,12 @@ async function runCliModeWorkspaceSelector(extraClaudeArgs = [], noOpen = false)
   process.env.CCV_WORKSPACE_MODE = '1';
 
   // 启动代理
-  const { startProxy } = await import('./proxy.js');
+  const { startProxy } = await import('./server/proxy.js');
   const proxyPort = await startProxy();
   process.env.CCV_PROXY_PORT = String(proxyPort);
 
   // 启动 HTTP 服务器（工作区模式，不初始化 interceptor 日志）
-  const serverMod = await import('./server.js');
+  const serverMod = await import('./server/server.js');
 
   // 工作区模式下 server.js 跳过了自动启动，需要手动调用
   await serverMod.startViewer();
@@ -588,7 +572,7 @@ async function runCliModeWorkspaceSelector(extraClaudeArgs = [], noOpen = false)
   }
 
   // 注册退出处理
-  const { killPty } = await import('./pty-manager.js');
+  const { killPty } = await import('./server/pty-manager.js');
   const cleanup = () => {
     killPty();
     serverMod.stopViewer().finally(() => process.exit());
@@ -702,15 +686,32 @@ if (isUninstall) {
     console.log(t('cli.uninstall.hookFail', { error: shellResult.error }));
   }
 
-  // 清理 statusLine 配置和脚本（兼容历史版本遗留）
+  // 清理 settings.json 里的 cc-viewer-managed hooks + 历史 statusLine 残留
+  // 一次性 read-modify-write，避免对 settings.json 做两轮 IO。
   try {
     const settingsPath = resolve(getClaudeConfigDir(), 'settings.json');
     if (existsSync(settingsPath)) {
       const settings = JSON.parse(readFileSync(settingsPath, 'utf-8'));
+      let mutated = false;
+
+      // 1) 移除所有带 cc-viewer-managed marker 的 hook entry（PreToolUse + Stop）
+      //    无此清理 → npm uninstall 后用户 settings.json 仍含 dead path → claude 启动
+      //    时每个工具调用都 ENOENT 报错。
+      const removed = removeAllManagedHooks(settings);
+      if (removed > 0) {
+        mutated = true;
+        console.log(`Removed ${removed} cc-viewer-managed hook entr${removed === 1 ? 'y' : 'ies'} from settings.json`);
+      }
+
+      // 2) 历史 statusLine 残留
       if (settings.statusLine?.command?.includes('ccv-statusline')) {
         delete settings.statusLine;
-        writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n');
+        mutated = true;
         console.log('Cleaned statusLine config from settings.json');
+      }
+
+      if (mutated) {
+        writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n');
       }
     }
     const ccvScript = resolve(getClaudeConfigDir(), 'ccv-statusline.sh');

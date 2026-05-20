@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve, dirname, sep } from 'node:path';
 import AdmZip from 'adm-zip';
 
-import { validateSkillName } from '../lib/skills-api.js';
+import { validateSkillName } from '../server/lib/skills-api.js';
 
 /**
  * Unit tests for the /api/skills/import zip-validation + write logic.

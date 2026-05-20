@@ -1,8 +1,9 @@
-import { resolveNativePath, LOG_DIR } from './findcc.js';
+import { resolveNativePath, LOG_DIR } from '../findcc.js';
 import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
 import { chmodSync, statSync } from 'node:fs';
 import { platform, arch } from 'node:os';
+import { createRequire } from 'node:module';
 import { prepareEmbeddedShellSpawn, stripClaudeNoFlickerUnlessOptedIn } from './lib/terminal-env.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -83,16 +84,29 @@ function flushBatch() {
   }
 }
 
+// 走 createRequire().resolve 而非 join(__dirname, '..', 'node_modules', ...) ——
+// pnpm / yarn workspace 把 node-pty hoist 到上级 node_modules 时相对路径会找不到，
+// 静默 chmod 失败 → 运行 PTY 时 EACCES，且全程无 log 难排查。
 function fixSpawnHelperPermissions() {
+  const os = platform();
+  const cpu = arch();
+  const subPath = `node-pty/prebuilds/${os}-${cpu}/spawn-helper`;
+  let helperPath;
   try {
-    const os = platform();
-    const cpu = arch();
-    const helperPath = join(__dirname, 'node_modules', 'node-pty', 'prebuilds', `${os}-${cpu}`, 'spawn-helper');
+    const req = createRequire(import.meta.url);
+    helperPath = req.resolve(subPath);
+  } catch (err) {
+    // node-pty 没安装/没该平台 prebuild：放过，spawn 时会另报错
+    return;
+  }
+  try {
     const stat = statSync(helperPath);
     if (!(stat.mode & 0o111)) {
       chmodSync(helperPath, stat.mode | 0o755);
     }
-  } catch { }
+  } catch (err) {
+    console.warn('[cc-viewer] fixSpawnHelperPermissions failed:', helperPath, err?.message || err);
+  }
 }
 
 // Opus 4.7 默认不再返回 thinking；为所有非显式覆写的调用加上 summarized。

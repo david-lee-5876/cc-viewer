@@ -15,7 +15,7 @@ const repoRoot = resolve(__dirname, '..');
 
 describe('AskUserQuestion 无超时/无降级 不变量', () => {
   it('lib/ask-bridge.js 不再调 req.setTimeout（客户端无硬超时）', () => {
-    const src = readFileSync(resolve(repoRoot, 'lib/ask-bridge.js'), 'utf-8');
+    const src = readFileSync(resolve(repoRoot, 'server/lib/ask-bridge.js'), 'utf-8');
     assert.ok(
       !/req\.setTimeout\s*\(/.test(src),
       'lib/ask-bridge.js 出现了 req.setTimeout — 违反"客户端无硬超时"承诺（用户视角任何 N 分钟挂起都不应被打断）',
@@ -27,7 +27,7 @@ describe('AskUserQuestion 无超时/无降级 不变量', () => {
   });
 
   it('server.js ASK_HOOK_TIMEOUT_MS 必须引用 ASK_TIMEOUT_MS（同源常量来自 lib/ask-constants.js）', () => {
-    const src = readFileSync(resolve(repoRoot, 'server.js'), 'utf-8');
+    const src = readFileSync(resolve(repoRoot, 'server/server.js'), 'utf-8');
     const m = src.match(/const\s+ASK_HOOK_TIMEOUT_MS\s*=\s*([^;]+);/);
     assert.ok(m, 'server.js 必须显式声明 const ASK_HOOK_TIMEOUT_MS 作为同源常量（避免 60min/24h 字面量散落）');
     const expr = m[1].trim();
@@ -44,12 +44,12 @@ describe('AskUserQuestion 无超时/无降级 不变量', () => {
   });
 
   it('lib/ask-constants.js ASK_TIMEOUT_MS = 24h（hook 与 SDK 路径共享的"无超时"实质上限）', async () => {
-    const { ASK_TIMEOUT_MS } = await import('../lib/ask-constants.js');
+    const { ASK_TIMEOUT_MS } = await import('../server/lib/ask-constants.js');
     assert.equal(ASK_TIMEOUT_MS, 24 * 60 * 60 * 1000, `ASK_TIMEOUT_MS 必须为 24h，实测 ${ASK_TIMEOUT_MS}`);
   });
 
   it('lib/sdk-manager.js askTimeoutMs 必须引用 ASK_TIMEOUT_MS（与 hook 路径同源）', () => {
-    const src = readFileSync(resolve(repoRoot, 'lib/sdk-manager.js'), 'utf-8');
+    const src = readFileSync(resolve(repoRoot, 'server/lib/sdk-manager.js'), 'utf-8');
     const m = src.match(/const\s+askTimeoutMs\s*=\s*([^;]+);/);
     assert.ok(m, 'sdk-manager.js 必须声明 const askTimeoutMs');
     assert.ok(
@@ -59,7 +59,7 @@ describe('AskUserQuestion 无超时/无降级 不变量', () => {
   });
 
   it('server.js HOOK_TIMEOUT / REPLAY_HOOK_TIMEOUT 必须引用 ASK_HOOK_TIMEOUT_MS 而非字面量', () => {
-    const src = readFileSync(resolve(repoRoot, 'server.js'), 'utf-8');
+    const src = readFileSync(resolve(repoRoot, 'server/server.js'), 'utf-8');
     // HOOK_TIMEOUT 在 /api/ask-hook handler 内
     const hookTimeoutAssign = src.match(/const\s+HOOK_TIMEOUT\s*=\s*([^;]+);/);
     assert.ok(hookTimeoutAssign, 'server.js 必须声明 const HOOK_TIMEOUT');
@@ -77,7 +77,7 @@ describe('AskUserQuestion 无超时/无降级 不变量', () => {
   });
 
   it('server.js ASK_HOOK_MAP_MAX = 1000（防恶意 OOM 兜底，正常使用永不触发）', () => {
-    const src = readFileSync(resolve(repoRoot, 'server.js'), 'utf-8');
+    const src = readFileSync(resolve(repoRoot, 'server/server.js'), 'utf-8');
     const m = src.match(/const\s+ASK_HOOK_MAP_MAX\s*=\s*(\d+)/);
     assert.ok(m, 'server.js 必须显式声明 ASK_HOOK_MAP_MAX');
     const v = Number(m[1]);
@@ -131,15 +131,15 @@ describe('AskUserQuestion 无超时/无降级 不变量', () => {
 
   // v2a 短轮询协议锚点 —— 锁住关键协议字符串/函数名，防未来漂移破协议
   it('lib/ask-store.js SCHEMA_VERSION = 1（不变量；改 schema 必须显式 bump + 写 migration）', () => {
-    const src = readFileSync(resolve(repoRoot, 'lib/ask-store.js'), 'utf-8');
+    const src = readFileSync(resolve(repoRoot, 'server/lib/ask-store.js'), 'utf-8');
     const m = src.match(/const\s+SCHEMA_VERSION\s*=\s*(\d+)/);
     assert.ok(m, 'lib/ask-store.js 必须显式声明 const SCHEMA_VERSION');
     assert.equal(Number(m[1]), 1, `SCHEMA_VERSION 当前锁定为 1，改值意味着需要写 migration —— 实测 ${m[1]}`);
   });
 
   it('server.js / ask-bridge.js 共享同一 "X-Ask-Poll-Mode: short" 协议字符串', () => {
-    const server = readFileSync(resolve(repoRoot, 'server.js'), 'utf-8');
-    const bridge = readFileSync(resolve(repoRoot, 'lib/ask-bridge.js'), 'utf-8');
+    const server = readFileSync(resolve(repoRoot, 'server/server.js'), 'utf-8');
+    const bridge = readFileSync(resolve(repoRoot, 'server/lib/ask-bridge.js'), 'utf-8');
     assert.ok(/['"]x-ask-poll-mode['"]/i.test(server), 'server.js 必须读 X-Ask-Poll-Mode header');
     assert.ok(/['"]X-Ask-Poll-Mode['"]/.test(bridge), 'lib/ask-bridge.js 必须发 X-Ask-Poll-Mode header');
     assert.ok(/['"]short['"]/.test(server) && /['"]short['"]/.test(bridge), '协议值必须是字符串 "short"');
@@ -147,18 +147,18 @@ describe('AskUserQuestion 无超时/无降级 不变量', () => {
   });
 
   it('lib/ask-bridge.js 必须有 pollUntilAnswered（防 v2a 短轮询被悄悄删回 long-poll）', () => {
-    const src = readFileSync(resolve(repoRoot, 'lib/ask-bridge.js'), 'utf-8');
+    const src = readFileSync(resolve(repoRoot, 'server/lib/ask-bridge.js'), 'utf-8');
     assert.ok(/function\s+pollUntilAnswered\b/.test(src), 'lib/ask-bridge.js 必须定义 pollUntilAnswered 函数');
     assert.ok(/getPollResult\s*\(/.test(src), 'lib/ask-bridge.js 必须使用 getPollResult 真正发 GET 请求');
   });
 
   it('lib/ask-store.js 必须导出 consumeIfFinal（防 GET handler 退回到 race-prone 的 consume+setEntry）', () => {
-    const src = readFileSync(resolve(repoRoot, 'lib/ask-store.js'), 'utf-8');
+    const src = readFileSync(resolve(repoRoot, 'server/lib/ask-store.js'), 'utf-8');
     assert.ok(/export\s+function\s+consumeIfFinal\b/.test(src), 'consumeIfFinal 必须 export（GET handler 依赖它消除写后读 race）');
   });
 
   it('server.js GET /api/ask-hook/:id/result 端点存在（短轮询协议核心）', () => {
-    const src = readFileSync(resolve(repoRoot, 'server.js'), 'utf-8');
+    const src = readFileSync(resolve(repoRoot, 'server/server.js'), 'utf-8');
     assert.ok(
       /url\.startsWith\(['"]\/api\/ask-hook\/['"]\)/.test(src) && /\/result/.test(src),
       'server.js 必须路由 GET /api/ask-hook/:id/result 端点',
@@ -168,7 +168,7 @@ describe('AskUserQuestion 无超时/无降级 不变量', () => {
   });
 
   it('lib/ensure-hooks.js 必须给注入 hook 加 timeout 字段（防 Claude Code 10min 中断 ask-bridge → TUI 接管）', () => {
-    const src = readFileSync(resolve(repoRoot, 'lib/ensure-hooks.js'), 'utf-8');
+    const src = readFileSync(resolve(repoRoot, 'server/lib/ensure-hooks.js'), 'utf-8');
     // 锁死默认 86400 的常量赋值场景，而非任意位置含 86400 字面量（防注释里写 "// was 86400" 也通过）
     assert.match(
       src,

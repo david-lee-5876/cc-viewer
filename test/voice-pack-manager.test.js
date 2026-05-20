@@ -23,7 +23,7 @@ import {
   BUNDLED_PACK_IDS,
   EVENT_KEYS,
   MAX_AUDIO_BYTES,
-} from '../lib/voice-pack-manager.js';
+} from '../server/lib/voice-pack-manager.js';
 
 function mkTmp() {
   const dir = join(tmpdir(), `ccv-voicepack-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -420,7 +420,7 @@ describe('reconcileVoicePackPrefs', () => {
 });
 
 // mergeApprovalModalPrefs / mergeVoicePackInto tests live in test/approval-modal-prefs.test.js
-// (round-2 architect P1 — merge logic moved to lib/approval-modal-prefs.js).
+// (round-2 architect P1 — merge logic moved to server/lib/approval-modal-prefs.js).
 
 // Symlink hardening — getUserAudioPath / getDefaultPackPath refuse to dereference
 // symbolic links (round-2 P1). Skip on platforms where symlinkSync isn't permitted

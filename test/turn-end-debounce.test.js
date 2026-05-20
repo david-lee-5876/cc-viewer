@@ -19,11 +19,11 @@ let broadcasts = [];
 let DEBOUNCE_MS;
 
 before(async () => {
-  const interceptor = await import('../interceptor.js');
+  const interceptor = await import('../server/interceptor.js');
   streamingState = interceptor.streamingState;
   resetStreamingState = interceptor.resetStreamingState;
   PROFILE_PATH = interceptor.PROFILE_PATH;
-  serverMod = await import('../server.js');
+  serverMod = await import('../server/server.js');
   DEBOUNCE_MS = serverMod.__testing.getDebounceMs();
 });
 

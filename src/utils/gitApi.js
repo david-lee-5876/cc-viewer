@@ -21,7 +21,7 @@ export async function fetchAllRepos() {
   // GET /api/git-status?repo=<path> → { changes, insertions, deletions, insertions_capped? }
   // GET /api/git-log-unpushed?repo=<path> → { commits, hasUpstream, branch?, upstream?, truncated?, totalCount? }
   //   commit shape: { hash, shortHash, author, date (ISO), subject, files: [{status, file}] }
-  //   详见 lib/git-diff.js: getUnpushedCommits / server.js: /api/git-log-unpushed handler.
+  //   详见 server/lib/git-diff.js: getUnpushedCommits / server.js: /api/git-log-unpushed handler.
   const results = await Promise.all(
     repoList.map(async (repo) => {
       const [statusData, commitsData] = await Promise.all([

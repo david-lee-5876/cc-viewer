@@ -4,7 +4,8 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { dirname } from 'node:path';
 import { t } from '../i18n.js';
-import { getClaudeConfigDir } from '../findcc.js';
+import { getClaudeConfigDir } from '../../findcc.js';
+import { PACKAGE_JSON } from '../_paths.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -47,7 +48,7 @@ const CACHE_FILE = join(CACHE_DIR, 'update-check.json');
 const CC_SETTINGS_FILE = join(getClaudeConfigDir(), 'settings.json');
 
 function getCurrentVersion() {
-  const pkg = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf-8'));
+  const pkg = JSON.parse(readFileSync(PACKAGE_JSON, 'utf-8'));
   return pkg.version;
 }
 

@@ -8,9 +8,9 @@ import {
   sendToClients,
   sendEventToClients,
   sendChunkToClients,
-} from '../lib/log-watcher.js';
-import { streamRawEntriesAsync } from '../lib/log-stream.js';
-import { awaitDrainOrClose } from '../lib/sse-backpressure.js';
+} from '../server/lib/log-watcher.js';
+import { streamRawEntriesAsync } from '../server/lib/log-stream.js';
+import { awaitDrainOrClose } from '../server/lib/sse-backpressure.js';
 
 /**
  * 构造一个能模拟 backpressure / dead 状态的 SSE client。
@@ -144,7 +144,7 @@ describe('SSE backpressure: sendChunkToClients', () => {
 });
 
 // ---------------------------------------------------------------------------
-// /events 默认 limit 行为：通过直接调用 lib/log-stream.js 验证（与 server.js 中
+// /events 默认 limit 行为：通过直接调用 server/lib/log-stream.js 验证（与 server.js 中
 // `effectiveLimit` 决策结合）。新增 server-side 默认 limit 的最关键不变量是：
 //   1) `streamRawEntriesAsync` 在 limit > 0 时切片到 ≤ limit + 给出 hasMore/oldestTs
 //   2) limit = undefined（即 ?limit=0 或老调用）时不切片

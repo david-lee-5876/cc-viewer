@@ -15,7 +15,7 @@ import {
   getScratchActiveCount,
   getScratchShellBasename,
   _setPtyImportForTests,
-} from '../scratch-pty-manager.js';
+} from '../server/scratch-pty-manager.js';
 
 const TID_A = 'tab-test-a';
 const TID_B = 'tab-test-b';

@@ -11,13 +11,35 @@
 .modal {
   width: 95vw;
   max-width: 560px;
+  /* 未拖拽过时给 modal 一个合理初始高度,让 textareaWrap flex grow 有目标。
+     拖拽过的 inline height 会覆盖这个值。 */
+  height: 480px;
+  /* max-height 由 inline style 兜底 90vh;CSS 保留 default 给未拖拽过的状态 */
   max-height: 85vh;
   background: var(--bg-elevated);
   border: 1px solid var(--border-hover);
   border-radius: 12px;
-  overflow-y: auto;
+  /* overflow:hidden 而非 auto —— scroll 容器会让 flex grow 在某些浏览器(Chrome/Safari)
+     无法正确把剩余空间分给 .textareaWrap,导致 textarea 不撑大、footer 卡中段。
+     scroll 留给 textarea 自己(textarea 长内容时它原生就有 overflow-y:auto)。 */
+  overflow: hidden;
   display: flex;
   flex-direction: column;
+  /* handle absolute 锚点 + 拖拽 inline width/height 写在这里 */
+  position: relative;
+}
+
+/* 内容容器:把 header + variantRow + fileList + textareaWrap + footer 包起来,
+   跟 .resizeHandle(absolute)解耦。
+   - 占据 modal 全部尺寸(flex: 1),
+   - 内部独立 flex column,flex grow 算法只在这一层算,不受 modal 父级影响,
+   - min-height: 0 解锁 flex shrink 默认 min-content 约束。 */
+.modalContent {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  width: 100%;
 }
 
 .header {
@@ -280,8 +302,30 @@
   }
 }
 
-.textarea {
+/* textarea wrap:column flex 容器,在 modal column 内 flex grow 撑满 footer 上方剩余高度。
+   flex-direction: column + min-height: 0 让 textarea 真能拿到余量,避免 flexbox 默认 min-
+   content 撑爆;flex: 1 1 0 而非 1 1 auto 让 wrap 严格按可用余量算高,不受 textarea
+   intrinsic height (rows=5) 干扰。 */
+.textareaWrap {
   margin: 0 16px;
+  display: flex;
+  flex-direction: column;
+  /* flex grow 拿 modal 余量;min-height: 0 解锁 flex shrink 默认 min-content 约束;
+     不再写 min-height: 120(textarea 自身有,且会阻止 wrap shrink 时正确 grow) */
+  flex: 1 1 0;
+  min-height: 0;
+}
+
+.textarea {
+  /* textarea 是 column flex 子,flex: 1 1 0 + min-height: 0 严格按余量拉伸,
+     不再使用 rows=5 的 intrinsic 高度。width:100% + height:100% 强制双向贴合
+     wrap(flex 算法对 textarea 这种 form 控件有时不严格 stretch,显式 100% 兜底)。
+     box-sizing: border-box 避免 100% + padding 24px + border 2px 溢出 wrap 26px。 */
+  flex: 1 1 0;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  box-sizing: border-box;
   padding: 12px 14px;
   border: 1px solid var(--border-primary);
   border-radius: 8px;
@@ -290,10 +334,51 @@
   font-size: 16px;
   line-height: 1.5;
   font-family: inherit;
-  resize: vertical;
+  /* 原生 resize 关掉(modal 整体 drag 接管)。手机模式 JS 会在 inline style 覆盖回 'vertical'。 */
+  resize: none;
   outline: none;
-  min-height: 120px;
-  max-height: 40vh;
+}
+
+/* Modal 左上角 SVG resize handle:直角三角形,直角顶点在左上(rounded corner 圆弧
+   凸向左上),斜边从右上到左下。位置 top:6 left:6 跟 modal 左上保持距离,既不顶圆角
+   也不挡 header 标题(标题 from left:16)。颜色浅灰半透明,与 modal 主视觉低对比。 */
+.resizeHandle {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  width: 18px;
+  height: 18px;
+  cursor: nwse-resize;
+  z-index: 5;
+  touch-action: none;
+  /* color 用 --text-disabled-faint:浅色主题 rgba(0,0,0,0.35),暗色 rgba(255,255,255,0.45),
+     已自带"很淡"质感且对两个主题对称(深底浅 handle / 浅底深 handle)。基础 opacity 0.7
+     再降一档(合成 alpha ~0.25)更接近"几乎不打扰"的视觉重量;hover 回 1.0 提示可点。 */
+  color: var(--text-disabled-faint);
+  opacity: 0.7;
+  transition: opacity 0.15s ease;
+  /* SVG 父级:line-height 归零防 baseline 多 1px;display:block 防 inline gap */
+  display: block;
+  line-height: 0;
+}
+
+.resizeHandle svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.resizeHandle:hover,
+.resizeHandle:active {
+  opacity: 1;
+}
+
+/* iPad 模式 handle 放大,符合触摸目标 24×24 最低建议 */
+:global(.pad-mode) .resizeHandle {
+  width: 22px;
+  height: 22px;
+  top: 8px;
+  left: 8px;
 }
 
 .textarea:focus {

@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveProxyConfig } from '../lib/proxy-env.js';
+import { resolveProxyConfig } from '../server/lib/proxy-env.js';
 
 describe('resolveProxyConfig', () => {
   it('无代理变量时返回全 undefined', () => {

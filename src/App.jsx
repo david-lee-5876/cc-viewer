@@ -399,6 +399,7 @@ class App extends AppBase {
               defaultConfig={this.state.defaultConfig}
               onProxyProfileChange={this.handleProxyProfileChange}
               contextBarSlot={this.state.contextBarSlot}
+              claudeProjectModel={this.state.claudeProjectModel}
             />
           </Layout.Header>
           {this.state.claudeMissing && (

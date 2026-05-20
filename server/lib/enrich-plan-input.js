@@ -47,7 +47,7 @@ function findEmptyExitPlanModeBlocks(content, out) {
  * - Header 名规范：interceptor 走 fetch Headers.entries() 全小写（WHATWG 规范），
  *   只查小写键即可。
  * - In-place mutation by design：用 Object.assign(blk.input, patch) 而非
- *   `blk.input = {...}`。增量重建器 (lib/delta-reconstructor.js) 会让同一 tool_use
+ *   `blk.input = {...}`。增量重建器 (server/lib/delta-reconstructor.js) 会让同一 tool_use
  *   block 在多个 entry 间共享对象引用；in-place mutate 让后续 entry 的「Object.keys
  *   (inp).length === 0」预检自动跳过——正是我们想要的 (相同 plan，不重新查盘)。
  *   注意：此优化仅在 SSE / live 路径（共享对象）生效；REST 路径 raw → JSON.parse
@@ -93,7 +93,7 @@ export function enrichEntry(entry) {
 /**
  * 服务端三处接入点共用：raw 字符串预过滤 → 命中才 parse + enrich + stringify。
  *
- * 设计原则：保持 lib/log-stream.js 的「原始字符串透传」哲学，只对真正需要补全的
+ * 设计原则：保持 server/lib/log-stream.js 的「原始字符串透传」哲学，只对真正需要补全的
  * 条目做 parse / stringify，其它一律按 raw 透传。
  *
  * @param {string} raw - 一条日志条目的原始 JSON 字符串

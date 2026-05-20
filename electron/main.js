@@ -20,7 +20,7 @@ const __dirname = dirname(__filename);
 const rootDir = join(__dirname, '..');
 // Windows 下 import(绝对路径) 会被 Node 把 'c:' 当 URL scheme 拒绝 (ERR_UNSUPPORTED_ESM_URL_SCHEME)。
 // pathToFileURL(p).href 在 POSIX 产出 file:///abs/.. 在 Windows 产出 file:///C:/.. —— 两平台 ESM 等价。
-const { t } = await import(pathToFileURL(join(rootDir, 'i18n.js')).href);
+const { t } = await import(pathToFileURL(join(rootDir, 'server', 'i18n.js')).href);
 const { getClaudeConfigDir, LOG_DIR } = await import(pathToFileURL(join(rootDir, 'findcc.js')).href);
 
 // 白屏诊断日志（实现在 electron/diag.js）。
@@ -143,10 +143,10 @@ function killChildEscalating(child, escalateMs = 3000) {
 
 async function startMgmtServer() {
   try {
-    const { startProxy } = await import(pathToFileURL(join(rootDir, 'proxy.js')).href);
+    const { startProxy } = await import(pathToFileURL(join(rootDir, 'server', 'proxy.js')).href);
     const proxyPort = await startProxy();
     process.env.CCV_PROXY_PORT = String(proxyPort);
-    mgmtServerMod = await import(pathToFileURL(join(rootDir, 'server.js')).href);
+    mgmtServerMod = await import(pathToFileURL(join(rootDir, 'server', 'server.js')).href);
     await mgmtServerMod.startViewer();
     mgmtPort = mgmtServerMod.getPort();
     if (!mgmtPort) {

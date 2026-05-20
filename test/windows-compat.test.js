@@ -2,10 +2,10 @@
  * Windows 适配回归测试套件（批 1）
  *
  * 覆盖：
- *   - lib/file-api.js: isAbsolute() 替代 startsWith('/') 后 Windows 绝对路径（C:\）能被识别
+ *   - server/lib/file-api.js: isAbsolute() 替代 startsWith('/') 后 Windows 绝对路径（C:\）能被识别
  *   - server.js protectedDirs 守卫：backslash + 大小写绕过
- *   - lib/log-watcher.js: \r\n---\r\n 分隔符
- *   - lib/git-diff.js: getUnpushedCommits 输出在 CRLF 下不带尾随 \r
+ *   - server/lib/log-watcher.js: \r\n---\r\n 分隔符
+ *   - server/lib/git-diff.js: getUnpushedCommits 输出在 CRLF 下不带尾随 \r
  *
  * 注：SSE CRLF（interceptor.js）+ git-restore Windows 回归已在 test/git-restore.test.js 覆盖。
  *    interceptor 内部 SSE split 非导出 helper，本套件不做单独 unit test，靠生产路径自然回归。
@@ -16,9 +16,9 @@ import { mkdirSync, rmSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { join, win32, posix, isAbsolute } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execSync } from 'node:child_process';
-import { readLogFile } from '../lib/log-watcher.js';
-import { getUnpushedCommits } from '../lib/git-diff.js';
-import { renameSyncWithRetry } from '../lib/file-api.js';
+import { readLogFile } from '../server/lib/log-watcher.js';
+import { getUnpushedCommits } from '../server/lib/git-diff.js';
+import { renameSyncWithRetry } from '../server/lib/file-api.js';
 import { existsSync, readFileSync as fsReadFileSync } from 'node:fs';
 
 describe('renameSyncWithRetry (lib/file-api.js)', () => {
@@ -52,7 +52,7 @@ describe('renameSyncWithRetry (lib/file-api.js)', () => {
   it('retries on EACCES and succeeds before exhausting attempts (regression守卫)', () => {
     // helper 内部直接调 fs.renameSync——不能 monkey-patch import 后的 binding。
     // 改方案：mirror 同款 retry 语义在测试里跑一遍，验证退避逻辑跑满 3 次（实际 helper
-    // 在 lib/file-api.js 行为是同一份，规格回归如有漂移由这条 mirror 测试守住）。
+    // 在 server/lib/file-api.js 行为是同一份，规格回归如有漂移由这条 mirror 测试守住）。
     const retryable = new Set(['EACCES', 'EPERM', 'EBUSY']);
     let attempts = 0;
     const mockRename = () => {
@@ -165,7 +165,7 @@ describe('git-restore per-file mutex semantics', () => {
 describe('Windows absolute-path detection (lib/file-api.js intent)', () => {
   it('path.win32.isAbsolute catches C:\\ paths', () => {
     // 不依赖运行平台：直接用 win32 namespace 验证 isAbsolute 的契约。
-    // 这是 lib/file-api.js startsWith('/') → isAbsolute() 替换的"应当生效"语义。
+    // 这是 server/lib/file-api.js startsWith('/') → isAbsolute() 替换的"应当生效"语义。
     assert.equal(win32.isAbsolute('C:\\Windows\\System32'), true);
     assert.equal(win32.isAbsolute('C:/Windows/System32'), true);
     assert.equal(win32.isAbsolute('\\\\server\\share\\f'), true);

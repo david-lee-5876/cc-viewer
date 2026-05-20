@@ -4,7 +4,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync } from '
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { execFileSync } from 'node:child_process';
-import { checkAndUpdate, isAnyCcvBusy, detectHomebrewInstall } from '../lib/updater.js';
+import { checkAndUpdate, isAnyCcvBusy, detectHomebrewInstall } from '../server/lib/updater.js';
 import { getClaudeConfigDir } from '../findcc.js';
 
 const CACHE_DIR = join(getClaudeConfigDir(), 'cc-viewer');

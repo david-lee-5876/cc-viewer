@@ -1,3 +1,4 @@
+// CLIENT-SAFE: no node deps. Imported by src/ — do not add fs/process/node: imports.
 /**
  * Serialize an Anthropic tool definition (name / description / input_schema)
  * into the XML-shaped text format the model sees on the server side.
@@ -7,7 +8,7 @@
  * approximation useful for inspection, not a canonical wire format.
  *
  * Single source of truth: src/utils/toolsXmlFormatter.js re-exports from here,
- * lib/kv-cache-analyzer.js imports from here.
+ * server/lib/kv-cache-analyzer.js imports from here.
  *
  * Note: free-text fields (name / description / enum) are NOT XML-escaped.
  * parseCachedTools relies on first-match semantics — the tool-level <name>

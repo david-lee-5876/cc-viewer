@@ -55,28 +55,46 @@ const CALIBRATION_TOKEN_MAP = {
   '200k': 200000,
 };
 
-/**
- * 把用户在 popover 里选的"上下文窗口尺寸"换算成 token 数。
- *  - calibrationModel === '1m' / '200k'：直接查表
- *  - 其它（含 'auto' 与所有兜底情况）：按 lastMainAgent 的 model 名判定
- *      · model 包含 opus-4-7 / opus-4.7 / opus 4.7（大小写不敏感）→ 1M
- *      · model 含 1m 子串（如 deepseek-v3-1m）→ 1M
- *      · 冷启动（lastMainAgent 缺失或 getEffectiveModel 返回非字符串）→ 1M（用户规约）
- *      · 否则 → 200K
- *  注：model="opus-4-7-1m" 同时命中前两条规则；opus 规则先触发，结果 1M（语义一致，无冲突）。
- *
- * 不变量：永远返回 1000000 或 200000；调用方可放心当真值用。
- */
-export function resolveCalibrationTokens(calibrationModel, lastMainAgent) {
-  const direct = CALIBRATION_TOKEN_MAP[calibrationModel];
-  if (direct) return direct;
-  const raw = lastMainAgent ? getEffectiveModel(lastMainAgent) : null;
-  // proxy 异常返回 number/object 时 .toLowerCase 会抛错；非字符串一律按冷启动 1M 处理
-  if (typeof raw !== 'string' || !raw) return 1000000;
-  const m = raw.toLowerCase();
+// 名字 → 1M/200K 分类。集中此处避免 auto 路径多分支重复写规则。
+function _classifyContextSize(modelName) {
+  const m = modelName.toLowerCase();
   if (m.includes('opus-4-7') || m.includes('opus-4.7') || m.includes('opus 4.7')) return 1000000;
   if (m.includes('1m')) return 1000000;
   return 200000;
+}
+
+/**
+ * 把用户在 popover 里选的"上下文窗口尺寸"换算成 token 数。
+ *  - calibrationModel === '1m' / '200k'：直接查表
+ *  - 其它（含 'auto' 与所有兜底情况）：按以下优先级判定
+ *      1) lastMainAgent.model 真实信号（但跳过 haiku — 启动期 init ping 噪声）
+ *      2) projectModelHint（来自 ~/.claude.json projects[cwd].lastModelUsage，
+ *         由 /api/claude-settings 与 workspace_started SSE 携带；反映用户在
+ *         claude 里实际偏好的 model）
+ *      3) 冷启动兜底 → 1M（用户规约）
+ *  分类规则（_classifyContextSize）：
+ *      · model 包含 opus-4-7 / opus-4.7 / opus 4.7（大小写不敏感）→ 1M
+ *      · model 含 1m 子串（如 deepseek-v3-1m）→ 1M
+ *      · 否则 → 200K
+ *  haiku 跳过的代价：纯 haiku 子任务期会落到 projectModelHint；该路径下 hint
+ *  缺失时仍按冷启动 1M 处理，不会突然变 200K。
+ *
+ * 不变量：永远返回 1000000 或 200000；调用方可放心当真值用。
+ */
+export function resolveCalibrationTokens(calibrationModel, lastMainAgent, projectModelHint = null) {
+  const direct = CALIBRATION_TOKEN_MAP[calibrationModel];
+  if (direct) return direct;
+  const lastModel = lastMainAgent ? getEffectiveModel(lastMainAgent) : null;
+  // 优先用真实 mainAgent 信号；haiku 一律视为 init ping 噪声，跳过
+  if (typeof lastModel === 'string' && lastModel && !/haiku/i.test(lastModel)) {
+    return _classifyContextSize(lastModel);
+  }
+  // 回落 1：claude 自己存的项目偏好 model
+  if (typeof projectModelHint === 'string' && projectModelHint) {
+    return _classifyContextSize(projectModelHint);
+  }
+  // 回落 2：冷启动 1M
+  return 1000000;
 }
 
 /**
@@ -768,7 +786,7 @@ export function extractCachedContent(requests) {
   // 提取 tools：API 缓存顺序为 tools → system → messages，
   // tools 作为 cache 前缀的一部分隐式被缓存（不需要自身有 cache_control 标记）。
   // 只要 system 有缓存内容（说明 cache 前缀存在），tools 就应被展示。
-  // Keep in sync with lib/kv-cache-analyzer.js extractCachedContent
+  // Keep in sync with server/lib/kv-cache-analyzer.js extractCachedContent
   if (Array.isArray(body.tools) && body.tools.length > 0 && result.system.length > 0) {
     for (const tool of body.tools) {
       result.tools.push(formatToolAsXml(tool));

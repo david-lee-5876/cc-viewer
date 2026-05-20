@@ -2,7 +2,8 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
-import { readModelContextSize, buildContextWindowEvent, CONTEXT_WINDOW_FILE } from '../lib/context-watcher.js';
+import { tmpdir } from 'node:os';
+import { readModelContextSize, buildContextWindowEvent, readClaudeProjectModel, CONTEXT_WINDOW_FILE } from '../server/lib/context-watcher.js';
 import { getClaudeConfigDir } from '../findcc.js';
 
 const CLAUDE_DIR = getClaudeConfigDir();
@@ -113,6 +114,90 @@ describe('context-watcher: readModelContextSize', () => {
     } finally {
       restoreContextFile();
     }
+  });
+});
+
+describe('context-watcher: readClaudeProjectModel', () => {
+  // 用 tmpdir 写 stub ~/.claude.json,readClaudeProjectModel 接受可选 filePath 参数,
+  // 单测注入 tmp 文件不动用户真实 config(后者动辄数 MB)。
+  function withTmpClaudeJson(content, fn) {
+    const tmpFile = join(tmpdir(), `cc-viewer-claude-json-${Date.now()}-${Math.random().toString(36).slice(2)}.json`);
+    writeFileSync(tmpFile, typeof content === 'string' ? content : JSON.stringify(content));
+    try { return fn(tmpFile); }
+    finally { try { unlinkSync(tmpFile); } catch {} }
+  }
+
+  it('returns null when file does not exist', () => {
+    const result = readClaudeProjectModel('/some/cwd', join(tmpdir(), 'definitely-not-exist-' + Date.now() + '.json'));
+    assert.equal(result, null);
+  });
+
+  it('returns null when cwd is missing or not a string', () => {
+    withTmpClaudeJson({ projects: {} }, (tmpFile) => {
+      assert.equal(readClaudeProjectModel(null, tmpFile), null);
+      assert.equal(readClaudeProjectModel('', tmpFile), null);
+      assert.equal(readClaudeProjectModel(123, tmpFile), null);
+    });
+  });
+
+  it('returns null when projects[cwd] does not exist', () => {
+    withTmpClaudeJson({ projects: { '/other/path': { lastModelUsage: { foo: {} } } } }, (tmpFile) => {
+      assert.equal(readClaudeProjectModel('/my/cwd', tmpFile), null);
+    });
+  });
+
+  it('returns null when lastModelUsage is empty', () => {
+    withTmpClaudeJson({ projects: { '/my/cwd': { lastModelUsage: {} } } }, (tmpFile) => {
+      assert.equal(readClaudeProjectModel('/my/cwd', tmpFile), null);
+    });
+  });
+
+  it('returns null when only haiku is present (filtered out)', () => {
+    withTmpClaudeJson({
+      projects: { '/my/cwd': { lastModelUsage: { 'claude-haiku-4-5': { costUSD: 0.5 } } } },
+    }, (tmpFile) => {
+      assert.equal(readClaudeProjectModel('/my/cwd', tmpFile), null);
+    });
+  });
+
+  it('prefers [1m] suffix over other models', () => {
+    // [1m] 是用户显式选 1M context 的强信号,即使 costUSD 不是最大也优先返回
+    withTmpClaudeJson({
+      projects: { '/my/cwd': { lastModelUsage: {
+        'claude-opus-4-7': { costUSD: 100 },
+        'claude-opus-4-7[1m]': { costUSD: 10 },
+      } } },
+    }, (tmpFile) => {
+      assert.equal(readClaudeProjectModel('/my/cwd', tmpFile), 'claude-opus-4-7[1m]');
+    });
+  });
+
+  it('falls back to highest costUSD when no [1m] entry', () => {
+    withTmpClaudeJson({
+      projects: { '/my/cwd': { lastModelUsage: {
+        'claude-sonnet-4-6': { costUSD: 5 },
+        'claude-opus-4-7': { costUSD: 50 },
+      } } },
+    }, (tmpFile) => {
+      assert.equal(readClaudeProjectModel('/my/cwd', tmpFile), 'claude-opus-4-7');
+    });
+  });
+
+  it('skips haiku and picks among non-haiku entries', () => {
+    withTmpClaudeJson({
+      projects: { '/my/cwd': { lastModelUsage: {
+        'claude-haiku-4-5': { costUSD: 200 },
+        'claude-opus-4-7': { costUSD: 20 },
+      } } },
+    }, (tmpFile) => {
+      assert.equal(readClaudeProjectModel('/my/cwd', tmpFile), 'claude-opus-4-7');
+    });
+  });
+
+  it('returns null on invalid JSON (graceful catch)', () => {
+    withTmpClaudeJson('{not-valid-json', (tmpFile) => {
+      assert.equal(readClaudeProjectModel('/my/cwd', tmpFile), null);
+    });
   });
 });
 

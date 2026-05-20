@@ -115,6 +115,29 @@ function randomInterval() {
   return 100 + Math.random() * 50;
 }
 
+// UltraPlan modal 拖拽尺寸持久化 helper —— 单值 key,与 PanelResizer 风格一致。
+// 手机模式(isMobile && !isPad)不读 localStorage,初值 null,保留 modal CSS 默认尺寸。
+const _ULTRAPLAN_W_KEY = 'cc-viewer-ultraplan-modal-width';
+const _ULTRAPLAN_H_KEY = 'cc-viewer-ultraplan-modal-height';
+function _readUltraplanModalSize() {
+  if (isMobile && !isPad) return null;
+  try {
+    const w = parseFloat(localStorage.getItem(_ULTRAPLAN_W_KEY));
+    const h = parseFloat(localStorage.getItem(_ULTRAPLAN_H_KEY));
+    if (Number.isFinite(w) || Number.isFinite(h)) {
+      return { w: Number.isFinite(w) ? w : null, h: Number.isFinite(h) ? h : null };
+    }
+  } catch {}
+  return null;
+}
+function _writeUltraplanModalSize(size) {
+  if (isMobile && !isPad) return;
+  try {
+    if (size?.w) localStorage.setItem(_ULTRAPLAN_W_KEY, String(size.w));
+    if (size?.h) localStorage.setItem(_ULTRAPLAN_H_KEY, String(size.h));
+  } catch {}
+}
+
 class ChatView extends React.Component {
   // 通过 Context 共享 App 层的单条 /ws/terminal,this.context = { send, isOpen, addMessageHandler, addStateListener }
   static contextType = TerminalWsContext;
@@ -241,6 +264,9 @@ class ChatView extends React.Component {
       ultraplanVariant: 'codeExpert',
       ultraplanPrompt: '',
       ultraplanFiles: [],
+      // UltraPlan modal 拖拽 resize 后的尺寸,持久化到 localStorage 两个 key
+      // (与 PanelResizer 单值风格一致);手机模式不读不写,初值固定 null。
+      ultraplanModalSize: _readUltraplanModalSize(),
       customUltraplanExperts: [],
       customUltraplanEditOpen: false,
       customUltraplanEditing: null,
@@ -2199,6 +2225,14 @@ class ChatView extends React.Component {
     this.setState(prev => ({
       ultraplanFiles: prev.ultraplanFiles.filter((_, i) => i !== idx),
     }));
+  };
+
+  // UltraPlanModal pointerup 时回调 —— 一次性 setState + 写双 localStorage key。
+  // 拖拽期 UltraPlanModal 已直接改 DOM style,这里只负责落盘 + 下次打开恢复。
+  _handleUltraplanModalSizeChange = (size) => {
+    if (!size) return;
+    this.setState({ ultraplanModalSize: size });
+    _writeUltraplanModalSize(size);
   };
 
   _openCustomUltraplanEditor = (item) => {
@@ -4678,6 +4712,8 @@ class ChatView extends React.Component {
               onPaste={this._handleUltraplanPaste}
               onRemoveFile={this._handleUltraplanRemoveFile}
               onOpenCustomEditor={this._openCustomUltraplanEditor}
+              modalSize={this.state.ultraplanModalSize}
+              onModalSizeChange={this._handleUltraplanModalSizeChange}
             />
             <CustomUltraplanEditModal
               open={this.state.customUltraplanEditOpen}

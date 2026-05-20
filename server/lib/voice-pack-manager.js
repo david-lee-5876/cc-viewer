@@ -11,12 +11,8 @@
 import { existsSync, mkdirSync, writeFileSync, unlinkSync, readdirSync, statSync, readFileSync, lstatSync } from 'node:fs';
 import { join, extname } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { fileURLToPath } from 'node:url';
-import { dirname } from 'node:path';
 import { EVENT_KEYS, DEFAULT_BINDINGS, BUNDLED_PACK_IDS } from './voice-pack-events.js';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+import { DIST_DIR, PUBLIC_DIR } from '../_paths.js';
 
 // Bundled pack lookup order, per packId:
 //   1. <repo>/dist/voice-packs/<packId>/   — production (Vite copies public/* into dist/, npm ships dist/ only)
@@ -25,8 +21,8 @@ const __dirname = dirname(__filename);
 // drop public/voice-packs/<id>/ with pack.json. No code path here needs editing.
 function bundledPackDirs(packId) {
   return [
-    join(__dirname, '..', 'dist', 'voice-packs', packId),
-    join(__dirname, '..', 'public', 'voice-packs', packId),
+    join(DIST_DIR, 'voice-packs', packId),
+    join(PUBLIC_DIR, 'voice-packs', packId),
   ];
 }
 
@@ -338,6 +334,6 @@ export function reconcileVoicePackPrefs(logDir, vp) {
 // Re-export shared defaults so consumers can pull everything from one module.
 export { DEFAULT_BINDINGS, BUNDLED_PACK_IDS };
 
-// mergeApprovalModalPrefs / mergeVoicePackInto moved to lib/approval-modal-prefs.js
+// mergeApprovalModalPrefs / mergeVoicePackInto moved to server/lib/approval-modal-prefs.js
 //( — merge logic isn't voice-pack-specific). Import from
 // './approval-modal-prefs.js' directly.

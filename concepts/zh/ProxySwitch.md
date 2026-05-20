@@ -18,7 +18,7 @@
 
 ## 工作原理
 
-切换代理后，`interceptor.js` 会在每次 API 请求发出前执行以下操作：
+切换代理后，`server/interceptor.js` 会在每次 API 请求发出前执行以下操作：
 
 1. **URL 重写** — 将请求的 origin 替换为代理的 Base URL
 2. **认证替换** — 将请求头中的 `x-api-key` 或 `Authorization` 替换为代理的 API Key

@@ -38,7 +38,7 @@ The formula installs to `<prefix>/Cellar/cc-viewer/<version>/` and creates a wra
 brew upgrade cc-viewer
 ```
 
-cc-viewer's built-in self-updater (`lib/updater.js`) detects Homebrew installs (via `detectHomebrewInstall()`) and skips the npm-based upgrade path, printing this hint instead. See `test/updater.test.js` describe block `checkAndUpdate — brew_managed`.
+cc-viewer's built-in self-updater (`server/lib/updater.js`) detects Homebrew installs (via `detectHomebrewInstall()`) and skips the npm-based upgrade path, printing this hint instead. See `test/updater.test.js` describe block `checkAndUpdate — brew_managed`.
 
 ## Why a wrapper instead of `bin.install_symlink`?
 

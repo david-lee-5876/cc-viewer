@@ -20,7 +20,7 @@
 
 import { existsSync, statSync, openSync, readSync, closeSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { getClaudeConfigDir } from '../findcc.js';
+import { getClaudeConfigDir } from '../../findcc.js';
 
 function projectsDir() {
   return process.env.CCV_PROJECTS_DIR || join(getClaudeConfigDir(), 'projects');

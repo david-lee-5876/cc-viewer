@@ -59,7 +59,7 @@ describe('server local logs endpoints', { concurrency: false }, () => {
     writeFileSync(join(projectDir, fileName), entries.join('\n---\n') + '\n---\n');
     writeFileSync(join(projectDir, `${projectName}.json`), JSON.stringify({ files: { [fileName]: { summary: { sessionCount: 3 } } } }));
 
-    const mod = await import('../server.js');
+    const mod = await import('../server/server.js');
     startViewer = mod.startViewer;
     stopViewer = mod.stopViewer;
     getPort = mod.getPort;

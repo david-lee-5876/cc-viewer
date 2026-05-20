@@ -23,15 +23,19 @@ import { fileURLToPath } from 'node:url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(__dirname, '..');
 
-// Root-level JS files (hand-curated — these are the entry points).
+// Entry-point JS files (hand-curated — cli.js + root shim + the server/ files
+// the shim and electron loaders pull in). cli.js stays at repo root; the
+// real server-side modules live under server/ since the 1.6.273 reorg.
 const ROOT_FILES = [
   'cli.js',
-  'server.js',
-  'proxy.js',
-  'interceptor.js',
-  'pty-manager.js',
   'findcc.js',
-  'workspace-registry.js',
+  'interceptor.js',
+  'server.js',
+  'server/server.js',
+  'server/proxy.js',
+  'server/interceptor.js',
+  'server/pty-manager.js',
+  'server/workspace-registry.js',
 ];
 
 // Recursively list ESM source files under a directory, excluding node_modules / dist.
@@ -99,13 +103,13 @@ describe('windows-import-paths: dynamic import() must use pathToFileURL on absol
       violations.map(v => `  ${v.file}:${v.line}  ${v.text}`).join('\n'));
   });
 
-  it('no file under lib/ has a naked dynamic import()', () => {
+  it('no file under server/lib/ has a naked dynamic import()', () => {
     const violations = [];
-    for (const file of listJsFiles(join(repoRoot, 'lib'))) {
+    for (const file of listJsFiles(join(repoRoot, 'server', 'lib'))) {
       violations.push(...scanFile(file));
     }
     assert.deepEqual(violations, [],
-      'Found dynamic import() without pathToFileURL wrapper in lib/:\n' +
+      'Found dynamic import() without pathToFileURL wrapper in server/lib/:\n' +
       violations.map(v => `  ${v.file}:${v.line}  ${v.text}`).join('\n'));
   });
 

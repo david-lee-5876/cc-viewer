@@ -8,12 +8,12 @@
  *
  * 关键合同:返回 `real`(realpath 解析后),调用方 MUST 用 real 读文件,杜绝 TOCTOU。
  *
- * 不替代写路径的业务校验(见 lib/file-api.js writeFileContent),但同样会被 endpoint 用作首道关卡。
+ * 不替代写路径的业务校验(见 server/lib/file-api.js writeFileContent),但同样会被 endpoint 用作首道关卡。
  */
 import { realpathSync } from 'node:fs';
 import { resolve, basename, sep, join } from 'node:path';
 import { homedir, platform, tmpdir } from 'node:os';
-import { getClaudeConfigDir } from '../findcc.js';
+import { getClaudeConfigDir } from '../../findcc.js';
 import { loadWorkspaces } from '../workspace-registry.js';
 
 const osPlatform = platform();

@@ -1,14 +1,13 @@
 {
   "name": "cc-viewer",
-  "version": "1.6.272",
+  "version": "1.6.273",
   "description": "Claude Code Logger visualization management tool",
   "license": "MIT",
   "main": "server.js",
   "type": "module",
   "exports": {
     ".": "./server.js",
-    "./server.js": "./server.js",
-    "./interceptor.js": "./interceptor.js"
+    "./interceptor.js": "./server/interceptor.js"
   },
   "author": "weiesky",
   "bin": {
@@ -20,7 +19,7 @@
     "build:sourcemap": "CCV_SOURCEMAP=1 node build.js",
     "start": "node server.js",
     "test": "CCV_LOG_DIR=tmp node --test",
-    "test:coverage": "CCV_LOG_DIR=tmp node --test --experimental-test-coverage --test-coverage-include='lib/*.js' --test-coverage-include='src/utils/*.js' --test-coverage-include='*.js'",
+    "test:coverage": "CCV_LOG_DIR=tmp node --test --experimental-test-coverage --test-coverage-include='server/**/*.js' --test-coverage-include='src/utils/**/*.js' --test-coverage-include='*.js'",
     "test:coverage:html": "CCV_LOG_DIR=tmp c8 --reporter=text-summary --reporter=html node --test",
     "prepublishOnly": "npm run build",
     "electron:dev": "electron electron/main.js",
@@ -53,15 +52,10 @@
     "!dist/**/*.map",
     "server.js",
     "cli.js",
-    "proxy.js",
-    "interceptor.js",
-    "i18n.js",
     "findcc.js",
-    "lib/",
+    "interceptor.js",
+    "server/",
     "plugins/",
-    "pty-manager.js",
-    "scratch-pty-manager.js",
-    "workspace-registry.js",
     "concepts/"
   ],
   "devDependencies": {
@@ -118,7 +112,7 @@
   },
   "c8": {
     "include": [
-      "lib/**/*.js",
+      "server/**/*.js",
       "src/utils/**/*.js",
       "*.js"
     ],

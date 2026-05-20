@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { homedir } from 'node:os';
-import { getClaudeConfigDir } from '../findcc.js';
+import { getClaudeConfigDir } from '../../findcc.js';
 
 export const KEEP_CLAUDE_NO_FLICKER_ENV = 'CCV_KEEP_CLAUDE_CODE_NO_FLICKER';
 

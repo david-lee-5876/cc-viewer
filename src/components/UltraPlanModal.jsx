@@ -1,15 +1,142 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { t } from '../i18n';
 import { apiUrl } from '../utils/apiUrl';
+import { isMobile, isPad } from '../env';
+import { calcResizedSize } from '../utils/resizeCalc';
 import ImageLightbox from './ImageLightbox';
 import ConfirmRemoveButton from './ConfirmRemoveButton';
 import styles from './UltraPlanModal.module.css';
 
+// 真手机不启用自定义 handle(保留原生 resize: vertical);PC + iPad 启用。
+// iPad 走 Mobile.jsx 入口但 isPad=true,通过 `!isMobile || isPad` 命中。
+const ENABLE_RESIZE_HANDLE = !isMobile || isPad;
+
+// Modal 尺寸 clamp:宽 [400, 90vw](modal 太窄 chip 行会挤),高 [240, 90vh]。
+// 拖拽改的是 modal 自己,maxW/maxH 在 pointerdown 时按 window 现尺寸算。
+const SIZE_CLAMP = {
+  minW: 400,
+  minH: 240,
+};
+
+// 中止当前正在进行的拖拽:abort listener + 释放 pointer capture + 清 ref。
+// useEffect cleanup 调用(open 变 false / 卸载),也兼容 onEnd 内同步调用。
+// 返回 () => void 形式方便 useEffect cleanup 直接 return。
+function _abortActiveDrag(dragRef) {
+  return () => {
+    const d = dragRef.current;
+    if (!d) return;
+    try { d.handle?.releasePointerCapture?.(d.pointerId); } catch {}
+    try { d.controller?.abort(); } catch {}
+    dragRef.current = null;
+  };
+}
+
 export default function UltraPlanModal({
   open, variant, prompt, files, agentTeamEnabled, customExperts,
   onClose, onVariantChange, onPromptChange, onSend, onUpload, onPaste, onRemoveFile, onOpenCustomEditor,
+  modalSize, onModalSizeChange,
 }) {
   const [lightbox, setLightbox] = useState(null);
+  const modalRef = useRef(null);
+  const textareaRef = useRef(null);
+  const dragRef = useRef(null);
+
+  // 首挂载根据 props.modalSize 把 inline width/height 写到 modal;之后拖拽期
+  // 直接改 DOM style 不走 setState(避免 ChatView 整棵 re-render)。
+  // textarea 通过 flex: 1 1 auto 自动跟随 modal 高度,不需要单独写 height。
+  useEffect(() => {
+    if (!open || !ENABLE_RESIZE_HANDLE) return;
+    const modal = modalRef.current;
+    if (!modal) return;
+    if (modalSize?.w) {
+      modal.style.width = `${modalSize.w}px`;
+      // 拖拽 width 超 CSS max-width:560px 时,也要松开 max-width
+      modal.style.maxWidth = `${modalSize.w}px`;
+    }
+    if (modalSize?.h) {
+      modal.style.height = `${modalSize.h}px`;
+      modal.style.maxHeight = `${modalSize.h}px`;
+    }
+  }, [open, modalSize]);
+
+  // 拖拽中关闭 modal / 组件卸载时:abort 当前 drag,清掉 document 上的 pointer listener,
+  // 释放 pointer capture,避免 listener 残留 + onEnd 在 close 后才触发的 setState 漏。
+  useEffect(() => {
+    if (open) return undefined;
+    return _abortActiveDrag(dragRef);
+  }, [open]);
+  useEffect(() => () => _abortActiveDrag(dragRef)(), []);
+
+  const handlePointerDown = useCallback((e) => {
+    if (!ENABLE_RESIZE_HANDLE) return;
+    const modal = modalRef.current;
+    if (!modal) return;
+    // 同时按住多个 pointer 时只认第一个,后续 pointerdown 忽略
+    if (dragRef.current) return;
+    e.preventDefault();
+    e.stopPropagation();
+    try { e.currentTarget.setPointerCapture?.(e.pointerId); } catch {}
+    const maxW = Math.round(window.innerWidth * 0.9);
+    const maxH = Math.round(window.innerHeight * 0.9);
+    const controller = new AbortController();
+    dragRef.current = {
+      startX: e.clientX, startY: e.clientY,
+      startW: modal.offsetWidth, startH: modal.offsetHeight,
+      clamp: { ...SIZE_CLAMP, maxW, maxH },
+      pointerId: e.pointerId,
+      handle: e.currentTarget,
+      controller,
+    };
+
+    // rAF 节流:120/240Hz 鼠标 pointermove 高于显示帧率,直接每事件写 style 是无用功。
+    // 同帧多事件只保留最后一次坐标,下一帧 flush;rafScheduled 防重复 schedule。
+    let pendingXY = null;
+    let rafScheduled = false;
+    const onMove = (ev) => {
+      const d = dragRef.current;
+      if (!d) return;
+      pendingXY = { x: ev.clientX, y: ev.clientY };
+      if (rafScheduled) return;
+      rafScheduled = true;
+      requestAnimationFrame(() => {
+        rafScheduled = false;
+        const p = pendingXY;
+        pendingXY = null;
+        const dd = dragRef.current;
+        if (!dd || !p) return;
+        const { w, h } = calcResizedSize({
+          startX: dd.startX, startY: dd.startY,
+          curX: p.x, curY: p.y,
+          startW: dd.startW, startH: dd.startH,
+          dirX: -1, dirY: -1,
+          clamp: dd.clamp,
+        });
+        modal.style.width = `${w}px`;
+        modal.style.maxWidth = `${w}px`;
+        modal.style.height = `${h}px`;
+        modal.style.maxHeight = `${h}px`;
+      });
+    };
+
+    const onEnd = () => {
+      const d = dragRef.current;
+      if (!d) return;
+      const finalW = modal.offsetWidth;
+      const finalH = modal.offsetHeight;
+      try { d.handle?.releasePointerCapture?.(d.pointerId); } catch {}
+      d.controller.abort();
+      dragRef.current = null;
+      if (typeof onModalSizeChange === 'function') {
+        onModalSizeChange({ w: finalW, h: finalH });
+      }
+    };
+
+    const signal = controller.signal;
+    document.addEventListener('pointermove', onMove, { signal });
+    document.addEventListener('pointerup', onEnd, { signal });
+    document.addEventListener('pointercancel', onEnd, { signal });
+  }, [onModalSizeChange]);
+
   if (!open) return null;
 
   const hasContent = (prompt || '').trim() || files.length > 0;
@@ -17,7 +144,27 @@ export default function UltraPlanModal({
 
   return (
     <div className={styles.backdrop} onClick={onClose}>
-      <div className={styles.modal} onClick={e => e.stopPropagation()}>
+      <div className={styles.modal} onClick={e => e.stopPropagation()} ref={modalRef}>
+        {ENABLE_RESIZE_HANDLE && (
+          // Modal 左上角 drag handle:拖拽改 modal 整体尺寸,textarea 通过 flex grow 跟随。
+          // role=separator + tabIndex=-1:不进 Tab 焦点链,modal 打开时 autoFocus 落 textarea。
+          // SVG 直角三角形,左上顶点 rounded(r=4),斜边右上→左下,语义吻合"左上角 resize"。
+          <div
+            className={styles.resizeHandle}
+            onPointerDown={handlePointerDown}
+            aria-label={t('ui.ultraplan.resizeHandle')}
+            role="separator"
+            tabIndex={-1}
+          >
+            <svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+              <path
+                d="M 4 0 L 16 0 L 0 16 L 0 4 A 4 4 0 0 1 4 0 Z"
+                fill="currentColor"
+              />
+            </svg>
+          </div>
+        )}
+        <div className={styles.modalContent}>
         <div className={styles.header}>
           <span className={styles.title}>{t('ui.ultraplan.title')}</span>
           <div className={styles.headerActions}>
@@ -126,16 +273,24 @@ export default function UltraPlanModal({
               </div>
             )}
 
-            <textarea
-              className={styles.textarea}
-              value={prompt}
-              onChange={e => onPromptChange(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && hasContent) { e.preventDefault(); onSend(); } }}
-              onPaste={onPaste}
-              placeholder={t('ui.ultraplan.placeholder')}
-              rows={5}
-              autoFocus
-            />
+            <div className={styles.textareaWrap}>
+              <textarea
+                ref={textareaRef}
+                className={styles.textarea}
+                value={prompt}
+                onChange={e => onPromptChange(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && hasContent) { e.preventDefault(); onSend(); } }}
+                onPaste={onPaste}
+                placeholder={t('ui.ultraplan.placeholder')}
+                /* 启用自定义 drag handle 时 rows={1} 让 CSS flex 完全控制高度
+                   (rows 是 textarea intrinsic 最小高度,在 flex 算法里会被当 baseline
+                   干扰 grow);手机模式回原生 resize:vertical,需要 rows=5 起步合理 */
+                rows={ENABLE_RESIZE_HANDLE ? 1 : 5}
+                autoFocus
+                /* 真手机回到原生 resize: vertical(CSS 默认是 none) */
+                style={ENABLE_RESIZE_HANDLE ? undefined : { resize: 'vertical' }}
+              />
+            </div>
 
             <div className={styles.footer}>
               <button className={styles.sendBtn} disabled={!hasContent} onClick={onSend}>{t('ui.ultraplan.send')}</button>
@@ -146,6 +301,7 @@ export default function UltraPlanModal({
             </div>
           </>
         )}
+        </div>
       </div>
       {lightbox && (
         <ImageLightbox

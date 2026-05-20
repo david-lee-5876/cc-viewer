@@ -3,7 +3,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync, statSync, readdirSy
 import { renameSyncWithRetry } from './lib/file-api.js';
 import { join, basename, resolve } from 'node:path';
 import { randomBytes } from 'node:crypto';
-import { LOG_DIR } from './findcc.js';
+import { LOG_DIR } from '../findcc.js';
 
 // 动态获取（LOG_DIR 可能在运行时被 setLogDir 修改）
 function getWorkspacesFile() { return join(LOG_DIR, 'workspaces.json'); }
@@ -70,7 +70,7 @@ export function saveWorkspaces(list) {
     mkdirSync(LOG_DIR, { recursive: true });
     writeFileSync(tmpFile, JSON.stringify({ workspaces: list }, null, 2));
     
-    // Windows 上 renameSync 可能会因为目标文件存在或被占用而失败。统一走 lib/file-api.js
+    // Windows 上 renameSync 可能会因为目标文件存在或被占用而失败。统一走 server/lib/file-api.js
     // renameSyncWithRetry helper（同款重试策略，跟 interceptor / log-management 一致）。
     renameSyncWithRetry(tmpFile, getWorkspacesFile());
   } catch (err) {

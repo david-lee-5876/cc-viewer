@@ -4,7 +4,7 @@ import { PlayCircleOutlined, UploadOutlined, DeleteOutlined, ReloadOutlined, Inf
 import { t, getLang } from '../i18n';
 import { apiUrl } from '../utils/apiUrl';
 import { previewEvent, stopPreview, unlockAudio } from '../utils/voicePackPlayer';
-import { EVENT_KEYS, DEFAULT_BINDINGS, getDefaultBindingsForLocale } from '../../lib/voice-pack-events';
+import { EVENT_KEYS, DEFAULT_BINDINGS, getDefaultBindingsForLocale } from '../../server/lib/voice-pack-events';
 import styles from './VoicePackSettings.module.css';
 
 // User-visible list — order matters (rendered top to bottom). EVENT_KEYS is the

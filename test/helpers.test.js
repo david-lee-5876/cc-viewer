@@ -84,15 +84,24 @@ const CALIBRATION_TOKEN_MAP = {
   '200k': 200000,
 };
 
-function resolveCalibrationTokens(calibrationModel, lastMainAgent) {
-  const direct = CALIBRATION_TOKEN_MAP[calibrationModel];
-  if (direct) return direct;
-  const raw = lastMainAgent ? getEffectiveModel(lastMainAgent) : null;
-  if (typeof raw !== 'string' || !raw) return 1000000;
-  const m = raw.toLowerCase();
+function _classifyContextSize(modelName) {
+  const m = modelName.toLowerCase();
   if (m.includes('opus-4-7') || m.includes('opus-4.7') || m.includes('opus 4.7')) return 1000000;
   if (m.includes('1m')) return 1000000;
   return 200000;
+}
+
+function resolveCalibrationTokens(calibrationModel, lastMainAgent, projectModelHint = null) {
+  const direct = CALIBRATION_TOKEN_MAP[calibrationModel];
+  if (direct) return direct;
+  const lastModel = lastMainAgent ? getEffectiveModel(lastMainAgent) : null;
+  if (typeof lastModel === 'string' && lastModel && !/haiku/i.test(lastModel)) {
+    return _classifyContextSize(lastModel);
+  }
+  if (typeof projectModelHint === 'string' && projectModelHint) {
+    return _classifyContextSize(projectModelHint);
+  }
+  return 1000000;
 }
 
 function getModelInfo(modelName) {
@@ -401,6 +410,36 @@ describe('helpers', () => {
       // 老用户 localStorage 残留值；AppHeader.jsx 验证逻辑会先把它兜底为 'auto'，
       // 但即使直接传进来这里，也会走 auto 路径 + 冷启动默认 1M，行为可接受。
       assert.equal(resolveCalibrationTokens('opus-4.7-1m', null), 1000000);
+    });
+    // projectModelHint 第 3 参数:~/.claude.json projects[cwd].lastModelUsage 推断,
+    // 用作 auto 启动期回落(避 haiku init ping 让血条错显 200K)。
+    it('auto + null lastMainAgent + projectModelHint=opus-4-7[1m] → 1M (hint 命中)', () => {
+      assert.equal(resolveCalibrationTokens('auto', null, 'claude-opus-4-7[1m]'), 1000000);
+    });
+    it('auto + null lastMainAgent + projectModelHint=sonnet-4-6 → 200K (hint 命中非 opus)', () => {
+      assert.equal(resolveCalibrationTokens('auto', null, 'claude-sonnet-4-6'), 200000);
+    });
+    it('auto + lastMainAgent=haiku (init ping) + projectModelHint=opus-4-7[1m] → 1M (跳 haiku 用 hint)', () => {
+      // 关键修复路径:启动期 claude 先发 haiku topic detection,cc-viewer 误当
+      // mainAgent → 不该让血条直接判 200K;有 hint 时用 hint 兜底。
+      assert.equal(
+        resolveCalibrationTokens('auto', reqWith('claude-haiku-4-5-20251001'), 'claude-opus-4-7[1m]'),
+        1000000
+      );
+    });
+    it('auto + lastMainAgent=opus-4-7 (真信号) 覆盖 projectModelHint=sonnet', () => {
+      // lastMainAgent 是真实 mainAgent 信号,优先于 hint;hint 仅在 lastModel 缺失或 haiku 时生效。
+      assert.equal(
+        resolveCalibrationTokens('auto', reqWith('claude-opus-4-7'), 'claude-sonnet-4-6'),
+        1000000
+      );
+    });
+    it('auto + lastMainAgent=haiku + projectModelHint=null → 1M (冷启动兜底)', () => {
+      assert.equal(resolveCalibrationTokens('auto', reqWith('claude-haiku-4-5'), null), 1000000);
+    });
+    it('显式 1m/200k 时 projectModelHint 不参与', () => {
+      assert.equal(resolveCalibrationTokens('1m', null, 'claude-sonnet-4-6'), 1000000);
+      assert.equal(resolveCalibrationTokens('200k', reqWith('claude-opus-4-7'), 'claude-opus-4-7[1m]'), 200000);
     });
   });
 

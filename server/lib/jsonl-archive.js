@@ -15,7 +15,7 @@ const CACHE_ROOT_NAME = 'ccv-extract';
 const RENAME_RETRY = 3;
 const RENAME_DELAY_MS = 50;
 const CACHE_TTL_MS = 7 * 24 * 3600 * 1000;
-// 与 lib/log-management.js 的 MAX_MERGE_SIZE 对齐：merge 上限 400MB，归档 / 读回 zip
+// 与 server/lib/log-management.js 的 MAX_MERGE_SIZE 对齐：merge 上限 400MB，归档 / 读回 zip
 // 必须容纳这一规模，否则自家产物会被 zip-safety 默认 50MB 阈值拦住造成永久不可读。
 const ARCHIVE_MAX_BYTES = 400 * 1024 * 1024;
 

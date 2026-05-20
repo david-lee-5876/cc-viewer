@@ -61,7 +61,7 @@ describe('GET /api/claude-md', { concurrency: false }, () => {
   let port;
 
   before(async () => {
-    const mod = await import('../server.js');
+    const mod = await import('../server/server.js');
     const srv = await mod.startViewer();
     assert.ok(srv);
     port = mod.getPort();

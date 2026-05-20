@@ -1,7 +1,8 @@
 import { readdirSync, existsSync, readFileSync } from 'node:fs';
-import { join, dirname } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { LOG_DIR } from '../findcc.js';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { LOG_DIR } from '../../findcc.js';
+import { PLUGINS_DIR } from '../_paths.js';
 
 // 动态获取（LOG_DIR 可能在运行时被 setLogDir 修改）
 export function getPluginsDir() { return join(LOG_DIR, 'plugins'); }
@@ -77,7 +78,7 @@ export async function loadPlugins() {
   }
 
   // Load bundled plugins from package's plugins/ directory (user plugins take priority)
-  const bundledDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'plugins');
+  const bundledDir = PLUGINS_DIR;
   if (existsSync(bundledDir)) {
     let bundledFiles;
     try {

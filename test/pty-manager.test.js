@@ -17,7 +17,7 @@ import {
   _clearThinkingDisplayRejectedPaths,
   _isThinkingDisplayRejected,
   _markThinkingDisplayRejected,
-} from '../pty-manager.js';
+} from '../server/pty-manager.js';
 
 // ─── getPtyPid / getPtyState / getCurrentWorkspace (no PTY running) ───
 

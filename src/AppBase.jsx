@@ -12,12 +12,12 @@ import { getProjectAlias, subscribeToAlias } from './utils/projectAlias';
 import { isMainAgent, isPostClearCheckpoint } from './utils/contentFilter';
 import { apiUrl } from './utils/apiUrl';
 import { playEvent as playVoiceEvent, unlockAudio, setTurnEndCooldownMs } from './utils/voicePackPlayer';
-import { getDefaultBindingsForLocale as vpDefaultBindingsForLocale } from '../lib/voice-pack-events';
-import { mergeVoicePackInto } from '../lib/approval-modal-prefs';
+import { getDefaultBindingsForLocale as vpDefaultBindingsForLocale } from '../server/lib/voice-pack-events';
+import { mergeVoicePackInto } from '../server/lib/approval-modal-prefs';
 import { saveEntries, loadEntries, clearEntries, getCacheMeta, saveSessionEntries, loadSessionEntries, saveSessionIndex } from './utils/entryCache';
 import { buildSessionIndex, splitHotCold, mergeSessionIndices, HOT_SESSION_COUNT, assignMessageTimestamps, applyInPlaceLastMsgReplace } from './utils/sessionManager';
 import { mergeMainAgentSessions as _mergeMainAgentSessions } from './utils/sessionMerge';
-import { reconstructEntries, createIncrementalReconstructor } from '../lib/delta-reconstructor.js';
+import { reconstructEntries, createIncrementalReconstructor } from '../server/lib/delta-reconstructor.js';
 import { createEntrySlimmer, createIncrementalSlimmer, restoreSlimmedEntry, internEntryBigFields } from './utils/entry-slim.js';
 import { reinitializeMermaid } from './hooks/useMermaidRender';
 import styles from './App.module.css';
@@ -92,6 +92,10 @@ class AppBase extends React.Component {
       lang: getLang(),
       userProfile: null,    // { name, avatar }
       projectName: '',      // 当前监控的项目名称
+      // claude 自己存的项目偏好 model（~/.claude.json projects[cwd].lastModelUsage 推断），
+      // 用作 AppHeader 血条 calibration 'auto' 启动期的回落 hint（避 haiku init ping 误判 200K）。
+      // 初值 null = 还没拿到；/api/claude-settings 与 workspace_started SSE 都会塞值。
+      claudeProjectModel: null,
       resumeModalVisible: false,
       resumeFileName: '',
       resumeRememberChoice: false,
@@ -369,6 +373,9 @@ class AppBase extends React.Component {
       if (!data) return;
       if (data.showThinkingSummaries) this.setState({ showThinkingSummaries: true });
       if (data.claudeAvailable === false) this.setState({ claudeMissing: true });
+      if (typeof data.claudeProjectModel === 'string' && data.claudeProjectModel) {
+        this.setState({ claudeProjectModel: data.claudeProjectModel });
+      }
     });
 
     // ─── Approval modal: subscribe to electron main → tabBridge ──────────────────
@@ -610,7 +617,7 @@ class AppBase extends React.Component {
     // Voice-pack turnEnd is now driven by the `turn_end` SSE event (broadcast when
     // Claude Code's Stop hook fires), not by isStreaming falling-edge. The streaming
     // signal resets per-API-call so it mis-fired between slow tool calls. See the
-    // SSE listener registered in componentDidMount and lib/turn-end-bridge.js.
+    // SSE listener registered in componentDidMount and server/lib/turn-end-bridge.js.
   }
 
   componentWillUnmount() {
@@ -1084,6 +1091,9 @@ class AppBase extends React.Component {
             selectedIndex: null,
             streamingLatest: null,
             isStreaming: false,
+            // workspace 切换 = cwd 切换 → claude 的 lastModelUsage 也要重查；
+            // 后端在 workspace_started 一并塞了新 cwd 对应的 hint，没有就清空。
+            claudeProjectModel: (typeof data.claudeProjectModel === 'string' && data.claudeProjectModel) ? data.claudeProjectModel : null,
           });
           if (isMobile) clearEntries();
         } catch {}

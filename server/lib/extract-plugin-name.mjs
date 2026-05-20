@@ -1,6 +1,6 @@
 /**
  * 在隔离子进程中提取插件 name，避免不安全的插件代码影响主进程。
- * 用法: node lib/extract-plugin-name.mjs <file-path>
+ * 用法: node server/lib/extract-plugin-name.mjs <file-path>
  * 输出: JSON { name: string } 到 stdout
  */
 import { pathToFileURL } from 'node:url';

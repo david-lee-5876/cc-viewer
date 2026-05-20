@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { readLogFile, sendToClients } from '../lib/log-watcher.js';
+import { readLogFile, sendToClients } from '../server/lib/log-watcher.js';
 
 function makeTmpDir() {
   const dir = join(tmpdir(), `ccv-logwatch-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);

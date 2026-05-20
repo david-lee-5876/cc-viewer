@@ -4,7 +4,7 @@ import {
   isMainAgentEntry,
   extractCachedContent,
   extractToolResultText,
-} from '../lib/kv-cache-analyzer.js';
+} from '../server/lib/kv-cache-analyzer.js';
 
 // ============================================================================
 // Helpers

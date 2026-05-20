@@ -16,7 +16,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { fingerprintMsg } from '../lib/interceptor-core.js';
+import { fingerprintMsg } from '../server/lib/interceptor-core.js';
 
 const CHECKPOINT_INTERVAL = 10;
 

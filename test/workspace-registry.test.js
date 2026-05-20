@@ -5,12 +5,12 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawn } from 'node:child_process';
 import { LOG_DIR } from '../findcc.js';
-import { getWorkspaces, loadWorkspaces, registerWorkspace, removeWorkspace } from '../workspace-registry.js';
+import { getWorkspaces, loadWorkspaces, registerWorkspace, removeWorkspace } from '../server/workspace-registry.js';
 
 const WORKSPACES_FILE = join(LOG_DIR, 'workspaces.json');
 
 function spawnRegister(path) {
-  const moduleUrl = new URL('../workspace-registry.js', import.meta.url).href;
+  const moduleUrl = new URL('../server/workspace-registry.js', import.meta.url).href;
   const script = `
     import { registerWorkspace } from ${JSON.stringify(moduleUrl)};
     registerWorkspace(process.argv[1]);

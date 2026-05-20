@@ -1,3 +1,4 @@
+// CLIENT-SAFE: no node deps. Imported by src/ — do not add fs/process/node: imports.
 /**
  * Delta Reconstructor — 增量日志重建模块
  *

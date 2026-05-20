@@ -4,8 +4,8 @@ import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync, mkdirSync
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createRequire } from 'node:module';
-import { archiveJsonl, resolveJsonlPath, getExtractCacheRoot } from '../lib/jsonl-archive.js';
-import { archiveLogFiles } from '../lib/log-management.js';
+import { archiveJsonl, resolveJsonlPath, getExtractCacheRoot } from '../server/lib/jsonl-archive.js';
+import { archiveLogFiles } from '../server/lib/log-management.js';
 
 const require = createRequire(import.meta.url);
 const AdmZip = require('adm-zip');

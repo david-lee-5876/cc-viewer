@@ -37,7 +37,7 @@ export function uploadPlugins(pluginsDir, fileList) {
  * Install a plugin by downloading from a URL.
  * @param {string} pluginsDir - path to plugins directory
  * @param {string} fileUrl - URL to download from
- * @param {string} extractNameScript - path to lib/extract-plugin-name.mjs
+ * @param {string} extractNameScript - path to server/lib/extract-plugin-name.mjs
  * @returns {Promise<{filename: string}>} the saved filename
  * @throws {Error} on validation or download failure
  */

@@ -8,7 +8,7 @@ import {
   KEEP_CLAUDE_NO_FLICKER_ENV,
   prepareEmbeddedShellSpawn,
   stripClaudeNoFlickerUnlessOptedIn,
-} from '../lib/terminal-env.js';
+} from '../server/lib/terminal-env.js';
 
 const tmpDirs = [];
 

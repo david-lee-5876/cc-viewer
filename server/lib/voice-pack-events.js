@@ -1,8 +1,9 @@
+// CLIENT-SAFE: no node deps. Imported by src/ — do not add fs/process/node: imports.
 // Single source of truth for voice-pack event keys + their default bindings.
 //
 // Why a shared module: this list was previously duplicated across
-//   - lib/voice-pack-manager.js (EVENT_KEYS for whitelist + reconcile)
-//   - server.js (preferences merge / reconcile)
+//   - server/lib/voice-pack-manager.js (EVENT_KEYS for whitelist + reconcile)
+//   - server/server.js (preferences merge / reconcile)
 //   - src/AppBase.jsx (initial state default)
 //   - src/components/VoicePackSettings.jsx (UI rows + reset handler)
 //   - scripts/gen-placeholder-voicepack.js (pattern table keys)
@@ -12,7 +13,7 @@
 
 // 注：timeoutWarning5min / timeoutWarning60s 已删除。AskUserQuestion 实质 24h 无超时后
 // 倒计时不再渲染（AskTimeoutCountdown.jsx isInfiniteTimeout → null），剩余时间预警事件失去意义。
-// 老用户 preferences.json 含这两个 key 由 lib/approval-modal-prefs.js _filterEvents 白名单
+// 老用户 preferences.json 含这两个 key 由 server/lib/approval-modal-prefs.js _filterEvents 白名单
 // 自动 strip，零迁移工作量。孤儿 audio 文件留待 cleanup CLI（backlog）。
 export const EVENT_KEYS = [
   'planApproval',

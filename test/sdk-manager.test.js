@@ -7,7 +7,7 @@ import {
   cancelApproval,
   stopSession,
   getSessionId,
-} from '../lib/sdk-manager.js';
+} from '../server/lib/sdk-manager.js';
 
 describe('sdk-manager', () => {
   describe('isSdkAvailable', () => {

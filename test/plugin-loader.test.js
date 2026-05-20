@@ -8,7 +8,7 @@ import {
   runWaterfallHook,
   runParallelHook,
   getPluginsInfo,
-} from '../lib/plugin-loader.js';
+} from '../server/lib/plugin-loader.js';
 import { LOG_DIR } from '../findcc.js';
 
 const PLUGINS_DIR = getPluginsDir();

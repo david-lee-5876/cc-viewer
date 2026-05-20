@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "target": "ES2022",
+    "jsx": "preserve",
+    "allowJs": true,
+    "checkJs": false,
+    "resolveJsonModule": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"]
+    }
+  },
+  "include": ["src/**/*", "server/**/*", "test/**/*", "electron/**/*", "scripts/**/*", "cli.js", "findcc.js", "server.js", "interceptor.js", "vite.config.js"],
+  "exclude": ["node_modules", "build", "dist"]
+}

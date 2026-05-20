@@ -6,7 +6,7 @@ import { homedir } from 'node:os';
 import * as interceptor from './interceptor.js';
 import { setupInterceptor } from './interceptor.js';
 import { extractApiErrorMessage, formatProxyRequestError } from './lib/proxy-errors.js';
-import { getClaudeConfigDir } from './findcc.js';
+import { getClaudeConfigDir } from '../findcc.js';
 
 // Setup interceptor to patch fetch
 setupInterceptor();
