@@ -5,9 +5,9 @@
 //   - server/lib/voice-pack-manager.js (EVENT_KEYS for whitelist + reconcile)
 //   - server/server.js (preferences merge / reconcile)
 //   - src/AppBase.jsx (initial state default)
-//   - src/components/VoicePackSettings.jsx (UI rows + reset handler)
+//   - src/components/settings/VoicePackSettings.jsx (UI rows + reset handler)
 //   - scripts/gen-placeholder-voicepack.js (pattern table keys)
-//   - src/components/AskTimeoutCountdown.jsx (threshold list keys)
+//   - src/components/chat/AskTimeoutCountdown.jsx (threshold list keys)
 // Adding a 6th event meant editing 5+ files and any miss silently dropped audio
 //(). All consumers now import from here.
 

@@ -1,0 +1,149 @@
+/* Re-homed from dashboard/AppHeader.module.css — owned by sharedChrome. */
+
+.modelCard {
+  border: 1px solid var(--border-secondary);
+  border-radius: 6px;
+  padding: 8px 10px;
+  background: var(--bg-container);
+}
+.modelName {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border-secondary);
+}
+.statsTable {
+  width: 100%;
+  border-collapse: collapse;
+}
+.th {
+  padding: 2px 12px;
+  font-size: 12px;
+  font-family: monospace;
+  white-space: nowrap;
+  color: var(--text-tertiary);
+  font-weight: normal;
+  text-align: right;
+}
+.td {
+  padding: 2px 12px;
+  font-size: 12px;
+  font-family: monospace;
+  white-space: nowrap;
+  color: var(--text-primary);
+  text-align: right;
+}
+.label {
+  padding: 2px 12px;
+  font-size: 12px;
+  font-family: monospace;
+  white-space: nowrap;
+  color: var(--text-light);
+  font-weight: normal;
+  text-align: left;
+}
+.rowBorder {
+  border-bottom: 1px solid var(--border-primary);
+}
+.rebuildTotalRow {
+  border-top: 1px solid var(--border-light);
+}
+.rebuildTotalRow td {
+  font-weight: 600;
+}
+.cachePopoverEmpty {
+  padding: 8px 4px;
+  color: var(--text-tertiary);
+  font-size: 13px;
+}
+.toolChipGrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 2px 0 6px 2px;
+}
+.cacheToolChip {
+  font-size: 11px;
+  padding: 0 6px;
+  border-radius: 3px;
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  line-height: 18px;
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border: 1px solid var(--border-primary);
+  cursor: help;
+}
+.titleIcon {
+  margin-right: 8px;
+}
+.memoryMarkdown {
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-primary);
+  word-break: break-word;
+}
+.memoryMarkdown p {
+  margin: 0 0 6px 0;
+}
+.memoryMarkdown ul,
+.memoryMarkdown ol {
+  margin: 4px 0 6px 0;
+  padding-left: 20px;
+}
+.memoryMarkdown li {
+  margin: 2px 0;
+}
+.memoryMarkdown h1,
+.memoryMarkdown h2,
+.memoryMarkdown h3,
+.memoryMarkdown h4 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 8px 0 4px 0;
+  color: var(--text-primary);
+}
+.memoryMarkdown h1 { font-size: 14px; }
+.memoryMarkdown a {
+  color: var(--primary-color, #1677ff);
+  text-decoration: none;
+  cursor: pointer;
+}
+.memoryMarkdown a:hover {
+  text-decoration: underline;
+}
+.memoryMarkdown code {
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 12px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: var(--bg-surface);
+  color: var(--text-primary);
+}
+.memoryMarkdown pre {
+  margin: 6px 0;
+  padding: 8px 10px;
+  border-radius: 4px;
+  background: var(--bg-surface);
+  overflow-x: auto;
+}
+.memoryMarkdown pre code {
+  padding: 0;
+  background: transparent;
+  font-size: 12px;
+}
+.memoryMarkdown blockquote {
+  margin: 4px 0;
+  padding: 2px 8px;
+  border-left: 3px solid var(--border-hover);
+  color: var(--text-secondary);
+}
+.memoryMarkdown hr {
+  margin: 8px 0;
+  border: none;
+  border-top: 1px solid var(--border-secondary);
+}

@@ -6,11 +6,7 @@
     "jsx": "preserve",
     "allowJs": true,
     "checkJs": false,
-    "resolveJsonModule": true,
-    "baseUrl": ".",
-    "paths": {
-      "@/*": ["src/*"]
-    }
+    "resolveJsonModule": true
   },
   "include": ["src/**/*", "server/**/*", "test/**/*", "electron/**/*", "scripts/**/*", "cli.js", "findcc.js", "server.js", "interceptor.js", "vite.config.js"],
   "exclude": ["node_modules", "build", "dist"]

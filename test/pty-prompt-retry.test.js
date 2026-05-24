@@ -1,5 +1,5 @@
 // Unit tests for the PTY ask-prompt retry decision tree implemented inline in
-// src/components/chatview/askFlowController.js _submitViaSequentialQueueInternal()
+// src/components/chat/controllers/askFlowController.js _submitViaSequentialQueueInternal()
 // （原在 ChatView.jsx，Step 抽离后移入控制器）。
 //
 // 测试范围 = 该函数前半段的"判定 + 兜底"决策（决定 abort / 重试 / 走 state / 走 history），

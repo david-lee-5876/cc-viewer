@@ -1,11 +1,11 @@
 import React from 'react';
 import { ConfigProvider, theme, Modal, Spin, Button, message } from 'antd';
-import { uploadFileAndGetPath } from './components/TerminalPanel';
+import { uploadFileAndGetPath } from './components/terminal/TerminalPanel';
 import { DeleteOutlined, ReloadOutlined } from '@ant-design/icons';
 import { isMobile, isPad } from './env';
-import WorkspaceList from './components/WorkspaceList';
-import OpenFolderIcon from './components/OpenFolderIcon';
-import LogTable from './components/LogTable';
+import WorkspaceList from './components/dashboard/WorkspaceList';
+import OpenFolderIcon from './components/common/OpenFolderIcon';
+import LogTable from './components/viewers/LogTable';
 import { t, getLang, setLang } from './i18n';
 import { SettingsContext } from './contexts/SettingsContext';
 import { formatTokenCount, filterRelevantRequests, isRelevantRequest, appendCacheLossMap, extractCachedContent } from './utils/helpers';

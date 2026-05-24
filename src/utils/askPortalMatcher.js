@@ -17,7 +17,7 @@
  * 协议锚点：
  *   - server 端 fallback id 生成：server.js（搜索 `ask_${Date.now()}` 定位）
  *   - server 端 LEGACY 占位推送：server.js 推送 ask-hook-pending 事件时 id 为 '__ask__'
- *   - 前端 setState pendingAsk：src/components/ChatView.jsx
+ *   - 前端 setState pendingAsk：src/components/chat/ChatView.jsx
  *
  * 改 server 端 fallback id 格式时，必须同步更新此文件的 isFallbackId 检测。
  */

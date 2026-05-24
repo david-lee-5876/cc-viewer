@@ -2,8 +2,11 @@
 
 ## 1.6.274 (2026-05-24)
 
+- refactor(components): `src/components/` 扁平目录按功能域重组为子目录 —— `chat`(含 `controllers/`,原 `chatview/`)、`terminal`、`git`、`files`、`viewers`、`approval`、`settings`、`mobile`、`dashboard`、`common`;所有组件及 co-located CSS 经 `git mv` 迁移并同步相对 import 路径,纯搬移零行为变更
+- refactor(css): `dashboard/AppHeader.module.css`(1507 行)按归属拆分 —— 13 个跨域共享类(stats 表格 / `modelCard` / `toolChip` / `titleIcon` / `cachePopoverEmpty` / `memoryMarkdown`)抽到 `common/sharedChrome.module.css`,`proxy*`/`plugin*`/`process*`/`cache*`/`liveTag*` 各归 `ProxyModal`/`PluginModal`/`ProcessModal`/`CachePopoverContent`/`LiveTagPopover` 独立 module;消除 settings/mobile 跨域硬引用 AppHeader 私有样式,163 类零丢失(`composes` 跨文件改 `composes ... from`)
+- chore(config/test): 删 `jsconfig.json` 失效的 `@/*` alias(vite 无对应 `resolve.alias`、零引用,避免"编辑器绿/构建炸"陷阱);`ask-no-timeout-invariants.test.js` 字面量路径读取统一走 `readSource()` helper(文件移动即抛清晰错而非裸 ENOENT)
 - refactor(state): `collapseToolResults` / `expandThinking` / `expandDiff` / `showFullToolContent` / `showThinkingSummaries` 五个偏好单一真相源收口到 `SettingsContext` —— `AppBase` 新增 `_prefValues()` 从 `context.preferences`/`claudeSettings` 派生下传 prop，删除本地 state 镜像、启动灌入、`componentDidUpdate` 回灌、toggle 双写
-- refactor(chatview): 抽离 ChatView 的 Ask 问答流到 `src/components/chatview/askFlowController.js`（依赖注入控制器 + host 适配器，state 仍留 ChatView），ChatView 约 4777 → 3990 行；新增 `test/ask-flow-controller.test.js`
+- refactor(chatview): 抽离 ChatView 的 Ask 问答流到 `src/components/chat/controllers/askFlowController.js`（依赖注入控制器 + host 适配器，state 仍留 ChatView），ChatView 约 4777 → 3990 行；新增 `test/ask-flow-controller.test.js`
 - chore(ui): Agent Team 编辑 Modal「Team 描述」textarea 默认行数 6 → 15（覆盖 PresetModal 独立组件 + TerminalPanel.jsx 内嵌副本两处）；`.presetTextarea` 加 `max-height: 70vh` + `@media (max-height: 600px) → 60vh` 兜底防小屏 Modal 溢出双滚条
 - chore(docs): `concepts/<18 locale>/UltraPlan.md` 同步 `ultraplanTemplates.js` 最新 codeExpert / researchExpert 模板首段补充的 "You should be adept at utilizing tools such as `AskUserQuestion` / `EnterPlanMode` / `WebSearch` / `TeamCreate`" 工具偏好句
 
