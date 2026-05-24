@@ -1,6 +1,11 @@
 # Changelog
 
-## Unreleased
+## 1.6.274 (2026-05-24)
+
+- refactor(state): `collapseToolResults` / `expandThinking` / `expandDiff` / `showFullToolContent` / `showThinkingSummaries` 五个偏好单一真相源收口到 `SettingsContext` —— `AppBase` 新增 `_prefValues()` 从 `context.preferences`/`claudeSettings` 派生下传 prop，删除本地 state 镜像、启动灌入、`componentDidUpdate` 回灌、toggle 双写
+- refactor(chatview): 抽离 ChatView 的 Ask 问答流到 `src/components/chatview/askFlowController.js`（依赖注入控制器 + host 适配器，state 仍留 ChatView），ChatView 约 4777 → 3990 行；新增 `test/ask-flow-controller.test.js`
+- chore(ui): Agent Team 编辑 Modal「Team 描述」textarea 默认行数 6 → 15（覆盖 PresetModal 独立组件 + TerminalPanel.jsx 内嵌副本两处）；`.presetTextarea` 加 `max-height: 70vh` + `@media (max-height: 600px) → 60vh` 兜底防小屏 Modal 溢出双滚条
+- chore(docs): `concepts/<18 locale>/UltraPlan.md` 同步 `ultraplanTemplates.js` 最新 codeExpert / researchExpert 模板首段补充的 "You should be adept at utilizing tools such as `AskUserQuestion` / `EnterPlanMode` / `WebSearch` / `TeamCreate`" 工具偏好句
 
 ## 1.6.273 (2026-05-20)
 

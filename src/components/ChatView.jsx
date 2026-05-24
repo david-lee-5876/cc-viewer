@@ -34,6 +34,7 @@ import CustomUltraplanEditModal from './CustomUltraplanEditModal';
 import { buildLocalUltraplan } from '../utils/ultraplanTemplates';
 import { Virtuoso } from 'react-virtuoso';
 import { StickyBottomController } from '../utils/stickyBottomController';
+import { AskFlowController, ASK_KIND, LEGACY_ASK_PLACEHOLDER_ID } from './chatview/askFlowController';
 import { isMobile, isIOS, isPad } from '../env';
 import { t } from '../i18n';
 import { apiUrl } from '../utils/apiUrl';
@@ -99,12 +100,7 @@ function collectToolUseBlocks(blocks, toolUseMap) {
   }
 }
 
-// pendingAsk.id 占位符 — 仅在连旧 server（pre-Map ask-hook 协议）时启用：
-// 那时 ask-hook-pending 不带 id，所以前端用这个固定串作 head id，提交时也省略 id 让 server fallback FIFO。
-// FIXME: 待旧 server 版本完全淘汰（>2~3 版本周期）后统一去掉此 fallback 路径。
-const LEGACY_ASK_PLACEHOLDER_ID = '__ask__';
-// askQueue entry.kind — 决定 _promoteNextAskFromQueue 弹起后路由哪条 submit 路径
-const ASK_KIND = { HOOK: 'hook', SDK: 'sdk' };
+// ASK_KIND / LEGACY_ASK_PLACEHOLDER_ID 现由 ./chatview/askFlowController 定义并 import（见顶部）。
 
 // Virtuoso custom Scroller — 定义在类外部，避免每次 render 创建新组件引用
 const VirtuosoScroller = React.forwardRef((props, ref) => (
@@ -298,16 +294,8 @@ class ChatView extends React.Component {
     this._ptyDataSeq = 0; // increments on every PTY output event
     this._ptyDebounceTimer = null;
     this._currentPtyPrompt = null; // 同步跟踪 ptyPrompt，避免闭包捕获旧 state
-    this._askHookActive = false;      // PreToolUse hook bridge is pending
-    // hook bridge 在本 session 内是否曾经握手过——区分"新版 CC 有 ask-bridge"和"老版无 hook"两种场景。
-    // 新版：_waitForHookBridge 进入无限等模式（hook bridge 偶发晚到 / 长时间挂起均不打断）。
-    // 老版：30s 兜底 fallback 到 PTY 模拟，否则 answer 永远投递不出。
-    this._askHookEverActive = false;
-    this._askHookQuestions = null;    // questions from hook bridge
-    this._pendingHookAnswers = null;  // answers waiting for hook bridge
-    this._askHookWaitRetries = 0;     // hook bridge wait retry counter
-    this._hookWaitTimer = null;       // hook bridge wait timer
-    this._askAbortRequested = false;  // Cancel 路径请求 polling 立即退出（每次新 submit 入口重置）
+    // 全部 ask 状态机字段 + 方法由 this._askFlow（AskFlowController）持有，见构造末尾。
+    // ChatView 不再直接读写这些字段（唯一例外：_detectPrompt 读 this._askFlow._askSubmitting）。
     this._mobileExtraItems = 0;
     this._mobileSliceOffset = 0;
     this._totalItemCount = 0;
@@ -333,6 +321,56 @@ class ChatView extends React.Component {
         this.setState({ stickyBottom: v });
       },
       getMode: () => useVirtuoso ? 'virtuoso' : 'desktop',
+    });
+
+    // ── Ask 问答流状态机控制器（逻辑从 ChatView 抽出，见 ./chatview/askFlowController.js）──
+    // host 适配器把 ChatView 的 state / props / ws / PTY 字段桥接给控制器；ChatView 的 ask 方法
+    // 退化为一行委托。state 仍留在 ChatView.state，行为不变。
+    this._askFlow = new AskFlowController({
+      getState: () => this.state,
+      setState: (updater, cb) => this.setState(updater, cb),
+      getProps: () => this.props,
+      ws: () => this._inputWs,
+      ctxSend: (obj) => this.context?.send?.(obj),
+      ctxIsOpen: () => this.context?.isOpen?.(),
+      addMessageHandler: (fn) => this.context.addMessageHandler(fn),
+      getCurrentPtyPrompt: () => this._currentPtyPrompt,
+      setCurrentPtyPrompt: (v) => { this._currentPtyPrompt = v; },
+      clearPtyDebounce: () => { if (this._ptyDebounceTimer) clearTimeout(this._ptyDebounceTimer); },
+      sendUserMessageImmediate: (text, ta, skip) => this._sendUserMessageImmediate(text, ta, skip),
+      takePendingFlush: (askId) => {
+        if (!this._pendingFlushQueue || this._pendingFlushQueue.length === 0) return null;
+        const idx = this._pendingFlushQueue.findIndex(e => e.askId === askId);
+        if (idx < 0) return null;
+        const entry = this._pendingFlushQueue.splice(idx, 1)[0];
+        if (entry?.tid) clearTimeout(entry.tid);
+        return entry;
+      },
+      isUnmounted: () => this._unmounted,
+      fetchPendingAsks: () => fetch(apiUrl('/api/pending-asks')).then(r => r.ok ? r.json() : null),
+      notifyAskResolved: (payload) => {
+        try {
+          if (typeof window !== 'undefined' && window.tabBridge?.notifyAskResolved) {
+            window.tabBridge.notifyAskResolved({ tabId: this.props.ownTabId ?? null, ...payload });
+          }
+        } catch {}
+      },
+      // PTY 提交失败的用户提示（antd Modal + i18n + JSX 留在 ChatView，控制器保持 node:test 可 import）
+      warnSubmitRetry: (reason) => {
+        try {
+          Modal.warning({
+            title: t('ui.askSubmitRetryHint'),
+            content: (
+              <div>
+                <div style={{ whiteSpace: 'pre-line' }}>{t('ui.askSubmitFailedDetail')}</div>
+                <div style={{ marginTop: 8, fontSize: 11, color: 'var(--text-muted)' }}>[reason] {String(reason || 'unknown')}</div>
+              </div>
+            ),
+          });
+        } catch {
+          try { message.warning(t('ui.askSubmitRetryHint')); } catch {}
+        }
+      },
     });
   }
 
@@ -901,19 +939,16 @@ class ChatView extends React.Component {
     if (this._gitRefreshTimer) clearTimeout(this._gitRefreshTimer);
     if (this._contentRefreshTimer) clearTimeout(this._contentRefreshTimer);
     if (this._wsReconnectTimer) clearTimeout(this._wsReconnectTimer);
-    if (this._waitForWsTimer) clearTimeout(this._waitForWsTimer);
-    if (this._waitForPtyTimer) clearTimeout(this._waitForPtyTimer);
     if (this._planFeedbackTimer) clearTimeout(this._planFeedbackTimer);
     if (this._streamingFadeTimer) clearTimeout(this._streamingFadeTimer);
-    if (this._hookWaitTimer) clearTimeout(this._hookWaitTimer);
-    this._pendingHookAnswers = null;
-    // ask-cancel ack 协议清理：clearTimeout 所有 in-flight 500ms 兜底 timer，
-    // 否则 unmount 后还会 fire → _sendUserMessageImmediate(stale text)，被新 session 收到
+    // ask 流计时器 / _pendingHookAnswers / _pendingCancelIds 的清理收口到控制器 dispose()
+    this._askFlow.dispose();
+    // ask-cancel ack 协议清理：_pendingFlushQueue 留在 ChatView（生产者 handleInputSend），
+    // clearTimeout 所有 in-flight 500ms 兜底 timer，否则 unmount 后还会 fire → 被新 session 收到
     if (this._pendingFlushQueue) {
       for (const entry of this._pendingFlushQueue) clearTimeout(entry.tid);
       this._pendingFlushQueue.length = 0;
     }
-    if (this._pendingCancelIds) this._pendingCancelIds.clear();
     this._unbindScrollFade();
     // 流式吸底统一清理：dispose 内会卸 RO + scroll listener + document touch + cancel 全部 rAF
     if (this._stickyController) this._stickyController.dispose();
@@ -2287,152 +2322,17 @@ class ChatView extends React.Component {
   // (renderDangerApproval / SubAgent 兜底权限面板路由 / handlePlanFeedbackSubmit isDanger 检查 /
   //  _submitViaSequentialQueue 非 danger 类型自检 等)。合并 ws 后 ChatView 仍需要这条解析路径,
   // CPU 开销保留,但网络层 1 条 ws 是仍有收益(改前 2 条同时收同一份 PTY 流)。
-  // Promote the next ask from askQueue to pendingAsk (or clear when empty).
-  // Side-effects on routing flags (_askHookActive / _sdkAskId / _askHookQuestions)
-  // are intentional — submit paths read these fields, so they must follow the head.
-  // Mirrors the permissionQueue dequeue pattern but additionally re-derives routing kind.
-  _promoteNextAskFromQueue = () => {
-    // 清当前 head 的 askMetaMap 条目（内存回收）— ask 结束后 startedAt/timeoutMs 不再需要
-    const prevHeadId = this.state.pendingAsk?.id;
-    if (prevHeadId) this._clearAskMeta(prevHeadId);
-
-    const queue = this.state.askQueue;
-    const next = queue && queue.length > 0 ? queue[0] : null;
-    if (next) {
-      if (next.kind === ASK_KIND.SDK) {
-        this._sdkAskId = next.id;
-        this._askHookActive = false;
-      } else {
-        this._sdkAskId = null;
-        this._askHookActive = true; this._askHookEverActive = true;
-      }
-      this._askHookQuestions = next.questions;
-      this.setState({
-        pendingAsk: { id: next.id, questions: next.questions },
-        askQueue: queue.slice(1),
-      });
-    } else {
-      this._askHookActive = false;
-      this._sdkAskId = null;
-      this._askHookQuestions = null;
-      this.setState({ pendingAsk: null, askQueue: [] });
-    }
-  };
-
-  /**
-   * 清 askMetaMap 中指定 askId 的 entry — 内存回收钩子。
-   * 所有 ask 结束路径（promote / queue.filter / unmount）都需调用以防 startedAt/timeoutMs
-   * 随会话长度无界累积。entry 不存在时返 null（setState 不触发 re-render）。
-   */
-  _clearAskMeta = (askId) => {
-    if (!askId) return;
-    this.setState(prev => {
-      if (!prev.askMetaMap || !prev.askMetaMap[askId]) return null;
-      const next = { ...prev.askMetaMap };
-      delete next[askId];
-      return { askMetaMap: next };
-    });
-  };
-
   _onTerminalWsMessage = (msg) => {
     try {
+      // ask / sdk-ask 类消息交给 AskFlowController；返回 true 表示已处理 → 短路。
+      if (this._askFlow.handleWsMessage(msg)) return;
       if (msg.type === 'data') {
         this._appendPtyData(msg.data);
       } else if (msg.type === 'exit') {
           this._clearPtyPrompt();
-        } else if (msg.type === 'ask-hook-pending') {
-          // Hook bridge: server now sends an id so multiple concurrent asks (sub-agents)
-          // multiplex through pendingAskHooks Map and never block each other.
-          // Legacy server (no id) → fall back to LEGACY_ASK_PLACEHOLDER_ID placeholder for single-slot semantics.
-          if (Array.isArray(msg.questions) && msg.questions.length > 0) {
-            const askId = msg.id != null ? String(msg.id) : LEGACY_ASK_PLACEHOLDER_ID;
-            // 记录倒计时 meta（server 60min 起算）— ask 结束时由 timeout/resolved/cancelled 分支 delete
-            if (typeof msg.startedAt === 'number' && typeof msg.timeoutMs === 'number') {
-              this.setState(prev => ({
-                askMetaMap: { ...prev.askMetaMap, [askId]: { startedAt: msg.startedAt, timeoutMs: msg.timeoutMs } },
-              }));
-            }
-            // Telemetry：legacy server + 多并发 ask 的 mid-deploy 混合场景下，
-            // 第二条 ask 会因 placeholder id 撞库被静默 dedupe 丢弃。warn 让用户至少在
-            // Console 里能看到 "为什么有的 ask 没弹出来"，否则零 telemetry 黑盒。
-            // 仅 head 是 placeholder 时才会 dedupe（promote 走的是 setState updater 里的
-            // dedupe return null → askQueue 永远不会塞 placeholder），故只需检查 pendingAsk。
-            if (msg.id == null && this.state.pendingAsk?.id === LEGACY_ASK_PLACEHOLDER_ID) {
-              console.warn('[ChatView] legacy ask-hook-pending without id arrived while a placeholder ask is already active — second ask will be silently dropped (legacy server does not support concurrent asks). Upgrade server to enable multi-ask multiplexing.');
-            }
-            this.setState(state => {
-              // Already showing one — queue this new ask. dedupe by id (WS reconnects can re-deliver).
-              if (state.pendingAsk) {
-                if (state.pendingAsk.id === askId) return null;
-                if (state.askQueue.some(a => a.id === askId)) return null;
-                return { askQueue: [...state.askQueue, { id: askId, questions: msg.questions, kind: ASK_KIND.HOOK }] };
-              }
-              // Become the head and own routing flags.
-              this._askHookActive = true; this._askHookEverActive = true;
-              this._askHookQuestions = msg.questions;
-              this._sdkAskId = null;
-              return { pendingAsk: { id: askId, questions: msg.questions } };
-            });
-          }
-        } else if (msg.type === 'ask-hook-timeout') {
-          // id-aware: only clear/promote when the timed-out ask matches the head.
-          // Legacy timeout without id (or LEGACY_ASK_PLACEHOLDER_ID) → match the legacy placeholder head only,
-          // never clobber an active SDK ask.
-          const askId = msg.id != null ? String(msg.id) : null;
-          if (askId == null) {
-            if (this.state.pendingAsk?.id === LEGACY_ASK_PLACEHOLDER_ID) this._promoteNextAskFromQueue();
-            return;
-          }
-          if (this.state.pendingAsk?.id === askId) {
-            this._promoteNextAskFromQueue();
-          } else if (this.state.askQueue.some(a => a.id === askId)) {
-            this._clearAskMeta(askId);
-            this.setState(state => ({ askQueue: state.askQueue.filter(a => a.id !== askId) }));
-          }
         } else if (msg.type === 'sdk-plan-pending') {
           // SDK mode: ExitPlanMode — show plan approval UI
           this.setState({ pendingPlanApproval: { id: msg.id, input: msg.input } });
-        } else if (msg.type === 'sdk-ask-pending') {
-          // SDK mode: AskUserQuestion via canUseTool — id is the SDK toolUseId.
-          // Same queue as hook so SDK + hook (mutually exclusive in practice) share UX.
-          // sdk-manager.js always sets msg.id from toolUseID; warn loudly if invariant breaks
-          // rather than silently dropping the prompt (would leave the SDK side waiting forever).
-          if (msg.id == null) {
-            console.warn('[ChatView] sdk-ask-pending missing id — server invariant violated, ignoring');
-            return;
-          }
-          if (Array.isArray(msg.questions) && msg.questions.length > 0) {
-            const askId = String(msg.id);
-            // 记录倒计时 meta — 同 ask-hook-pending 路径
-            if (typeof msg.startedAt === 'number' && typeof msg.timeoutMs === 'number') {
-              this.setState(prev => ({
-                askMetaMap: { ...prev.askMetaMap, [askId]: { startedAt: msg.startedAt, timeoutMs: msg.timeoutMs } },
-              }));
-            }
-            this.setState(state => {
-              if (state.pendingAsk) {
-                if (state.pendingAsk.id === askId) return null;
-                if (state.askQueue.some(a => a.id === askId)) return null;
-                return { askQueue: [...state.askQueue, { id: askId, questions: msg.questions, kind: ASK_KIND.SDK }] };
-              }
-              this._askHookActive = true; this._askHookEverActive = true;
-              this._askHookQuestions = msg.questions;
-              this._sdkAskId = msg.id;
-              return { pendingAsk: { id: askId, questions: msg.questions } };
-            });
-          }
-        } else if (msg.type === 'sdk-ask-timeout') {
-          const askId = msg.id != null ? String(msg.id) : null;
-          if (askId == null) {
-            // Defensive: no id — clear current head only if it's the placeholder. SDK ids never use placeholder.
-            return;
-          }
-          if (this.state.pendingAsk?.id === askId) {
-            this._promoteNextAskFromQueue();
-          } else if (this.state.askQueue.some(a => a.id === askId)) {
-            this._clearAskMeta(askId);
-            this.setState(state => ({ askQueue: state.askQueue.filter(a => a.id !== askId) }));
-          }
         } else if (msg.type === 'perm-hook-pending') {
           // Queue support: if a permission panel is already showing, queue the new one
           this.setState(state => {
@@ -2463,62 +2363,6 @@ class ChatView extends React.Component {
             }
             return { permissionQueue: state.permissionQueue.filter(p => p.id !== msg.id) };
           });
-        } else if (msg.type === 'ask-hook-resolved' || msg.type === 'ask-hook-already-answered') {
-          // ask-hook-resolved：另一端回答了 AskUserQuestion (hook bridge 模式)。
-          // ask-hook-already-answered：本端发起的 ws ask-hook-answer 触发了 first-write-wins
-          //   抢答失败 — 抢答赢家是另一端，server 只 ack 本端让 modal 关掉，不广播给其他 client。
-          // 两种语义一样（清 modal/queue），统一处理；first-write-wins ack 路径不需要额外 toast。
-          const askId = msg.id != null ? String(msg.id) : null;
-          if (askId == null) {
-            if (this.state.pendingAsk?.id === LEGACY_ASK_PLACEHOLDER_ID) this._promoteNextAskFromQueue();
-          } else if (this.state.pendingAsk?.id === askId) {
-            this._promoteNextAskFromQueue();
-          } else if (this.state.askQueue.some(a => a.id === askId)) {
-            this._clearAskMeta(askId);
-            this.setState(state => ({ askQueue: state.askQueue.filter(a => a.id !== askId) }));
-          }
-        } else if (msg.type === 'sdk-ask-resolved') {
-          // 另一端已回答 AskUserQuestion (SDK 模式)
-          const askId = msg.id != null ? String(msg.id) : null;
-          if (askId != null && this.state.pendingAsk?.id === askId) {
-            this._promoteNextAskFromQueue();
-          } else if (askId != null && this.state.askQueue.some(a => a.id === askId)) {
-            this._clearAskMeta(askId);
-            this.setState(state => ({ askQueue: state.askQueue.filter(a => a.id !== askId) }));
-          }
-        } else if (msg.type === 'ask-hook-cancelled') {
-          // server ack 到 — handleAskCancel 发的 ask-cancel 已经被处理（不论是 SDK / Hook / 兜底广播）。
-          // 1) 如果是本端发起 + 在等 ack flush user message → 立即 flush
-          // 2) 兜底清 modal/queue（其他 client 取消的场景：本端 pending 还在但已经被远端 cancel）
-          // 3) 写 localAskAnswers 让 ChatMessage isCancelled 灰态显示（如果还没乐观写过）
-          const askId = msg.id != null ? String(msg.id) : null;
-          if (!askId) return;
-          // 优先 flush 等待中的 user message —— ack 协议核心。
-          // findIndex 默认返回数组**第一个**匹配 = FIFO 取最早入队 entry：连续两次 typed-interrupt
-          // < 500ms 同 askId 时入队 entry1, entry2；server 端 first-wins 后第一次 cancel handled=true
-          // 全广播，第二次 handled=false 仅 ack 发起方 — 同一 ws 仍收两次 ack，FIFO 配对正确。
-          // 找到 entry 表明 ack 来自本端发起的 cancel — handleAskCancel 已 promote head；
-          // 找不到表明远端 cancel（其他 client 触发）— 本端 head 还在 askId，需要 promote。
-          let isLocalAck = false;
-          if (this._pendingFlushQueue && this._pendingFlushQueue.length > 0) {
-            const idx = this._pendingFlushQueue.findIndex(e => e.askId === askId);
-            if (idx >= 0) {
-              const entry = this._pendingFlushQueue.splice(idx, 1)[0];
-              clearTimeout(entry.tid);
-              this._sendUserMessageImmediate(entry.text, null, true);
-              isLocalAck = true;
-            }
-          }
-          // 应用 cancel local state — promoteHead 仅远端场景需要（本端 handleAskCancel 已 promote）
-          this._applyCancelLocal(askId, msg.reason, { promoteHead: !isLocalAck });
-          // 远端取消（其他 tab / API 触发）时本 tab 可能正在 _waitForHookBridge polling 该 ask —
-          // 必须同步打破 polling 循环并清 submit 状态，否则下一轮新 ask 会复用残留 _askSubmitting=true。
-          if (!isLocalAck) {
-            this._askAbortRequested = true;
-            if (this._hookWaitTimer) { clearTimeout(this._hookWaitTimer); this._hookWaitTimer = null; }
-            this._pendingHookAnswers = null;
-            this._askSubmitting = false;
-          }
         } else if (msg.type === 'sdk-plan-resolved') {
           if (this.state.pendingPlanApproval?.id === msg.id) {
             this.setState({ pendingPlanApproval: null });
@@ -2540,41 +2384,10 @@ class ChatView extends React.Component {
   };
 
   // ws 状态变更监听:close 时清残留审批面板(原 _inputWs.onclose 行为);Provider 内部已自动 2s 重连。
-  // 'open' 时重发 _pendingCancelIds — handleAskCancel 在 WS 不可用时把 cancel 缓存进来，
-  // 重连后必须重发，否则 server 端 5min 后才超时释放，期间用户的新 prompt 会被模型当 follow-up answer。
+  // 'open' 的 ask 相关恢复逻辑（重发 _pendingCancelIds + 拉 /api/pending-asks）已搬到 AskFlowController.onWsOpen。
   _onTerminalWsState = (state) => {
     if (state === 'open') {
-      // _unmounted guard：极小窗口下 reopen 在 unmount 后到达，此时 _pendingCancelIds 已被
-      // componentWillUnmount clear（line 871），但若 React 调度让 unmount 后还跑一次 callback，
-      // 这里防御一次。
-      if (this._unmounted) return;
-      if (this._pendingCancelIds && this._pendingCancelIds.size > 0 && this._inputWs && this._inputWs.readyState === WebSocket.OPEN) {
-        for (const [askId, reason] of this._pendingCancelIds) {
-          try { this._inputWs.send(JSON.stringify({ type: 'ask-cancel', id: askId, reason })); } catch {}
-        }
-        this._pendingCancelIds.clear();
-      }
-      // 拉 /api/pending-asks：恢复 ws 断开期间产生 + server 重启前已存在的 ask UI。
-      // WS reconnect server 端 replay (server.js:4478) 已 broadcast 内存中存活的 ask-hook-pending，
-      // 但 disk-only entry（server 重启后未 hydrate 到内存的）只能靠此 HTTP 端点拉回。
-      // dedupe 走与 ws ask-hook-pending 同一条路径（setState 内 askQueue.some id 检查）。
-      try {
-        fetch(apiUrl('/api/pending-asks'))
-          .then(r => r.ok ? r.json() : null)
-          .then(data => {
-            if (this._unmounted || !data || !Array.isArray(data.pendingAsks)) return;
-            for (const ask of data.pendingAsks) {
-              if (!ask || !ask.id || !Array.isArray(ask.questions)) continue;
-              // 注入与 ws ask-hook-pending 同形态的 fake msg 走现有 dedupe + 入队路径，
-              // 避免在两处维护"插队 askQueue"逻辑。createdAt 透传给倒计时（已自动转 startedAt）。
-              this._onTerminalWsMessage({ data: JSON.stringify({
-                type: 'ask-hook-pending', id: ask.id, questions: ask.questions,
-                startedAt: ask.createdAt, timeoutMs: 24 * 60 * 60 * 1000,
-              }) });
-            }
-          })
-          .catch(() => { /* 静默：旧 server 没此端点 → 404 → ws replay 仍能覆盖大多数场景 */ });
-      } catch {}
+      this._askFlow.onWsOpen();
       return;
     }
     if (state !== 'close') return;
@@ -2599,9 +2412,8 @@ class ChatView extends React.Component {
         || this.state.pendingPtyPlan || this.state.askQueue?.length) {
       this.setState({ pendingPermission: null, permissionQueue: [], pendingPlanApproval: null, pendingAsk: null, askQueue: [], askMetaMap: {}, pendingPtyPlan: null });
     }
-    this._sdkAskId = null;
-    this._askHookActive = false;
-    this._askHookQuestions = null;
+    // ask 实例 flag 由控制器 reset（state 键已在上面那条合并 setState 里清）
+    this._askFlow.resetAskFlagsOnClose();
   };
 
   _stripAnsi(str) {
@@ -2743,8 +2555,8 @@ class ChatView extends React.Component {
       if (isDangerousOperationPrompt(this.state.ptyPrompt)) {
         return;
       }
-      if (this._askSubmitting) {
-        // Don't dismiss prompts during AskUserQuestion submission
+      if (this._askFlow._askSubmitting) {
+        // Don't dismiss prompts during AskUserQuestion submission（_detectPrompt 是 PTY 基建，留 ChatView，读控制器 flag）
         return;
       }
       this._currentPtyPrompt = null;
@@ -2976,105 +2788,8 @@ class ChatView extends React.Component {
     if (this._ptyDebounceTimer) clearTimeout(this._ptyDebounceTimer);
   };
 
-  /**
-   * Plan submission strategy for each answer based on question structure.
-   * Annotates each answer with `isLast` flag.
-   */
-  _planSubmissionSteps(answers) {
-    return answers.map((answer, i) => ({
-      ...answer,
-      isLast: i === answers.length - 1,
-    }));
-  }
-
-  /**
-   * 共享 cancel local-state 应用逻辑 — 用于 handleAskCancel（本端触发）和
-   * _onTerminalWsMessage 'ask-hook-cancelled'（远端触发或 ack 兜底）两处调用。
-   *
-   * 两步 setState 原子化（React 18 batched 合并到一个 commit）：
-   *   step 1: 写 __cancelled__ sentinel 到 localAskAnswers — 纯函数 updater
-   *           - hasRealAnswer guard：已有真实 answer 时不覆盖（防 A 端 cancel 把 B 端真实 answer 涂灰态）
-   *           - 幂等：已经 __cancelled__ 也跳过（远端 ack 兜底场景）
-   *   step 2: head 推进（仅当 promoteHead=true）或非 head 过滤 queue
-   *
-   * promoteHead 区分场景：
-   *   - 本端 handleAskCancel：promoteHead=true（cancel 触发时主动推进）
-   *   - 远端 ack：promoteHead=true 仅当本端没在等 ack（!isLocalAck）— 本端已 promote 过避免跳一个
-   */
-  _applyCancelLocal = (askId, reason, { promoteHead = true } = {}) => {
-    if (!askId) return;
-    const cancelReason = typeof reason === 'string' && reason ? reason : 'User aborted';
-
-    this.setState(prev => {
-      const existingLocal = prev.localAskAnswers && prev.localAskAnswers[askId];
-      const hasRealAnswer = existingLocal
-        && !existingLocal.__cancelled__
-        && !existingLocal.__rejected__
-        && Object.keys(existingLocal).length > 0;
-      if (hasRealAnswer) return null;
-      if (existingLocal && existingLocal.__cancelled__ === true) return null;
-      return {
-        localAskAnswers: { ...(prev.localAskAnswers || {}), [askId]: { __cancelled__: true, __cancelReason__: cancelReason } },
-      };
-    });
-
-    if (this.state.pendingAsk?.id === askId) {
-      // 内存回收：head 分支无条件清 askMetaMap entry — promoteHead=false（远端 ack 走
-      // isLocalAck=true 分支）时 _promoteNextAskFromQueue 不会被调，head meta 会残留。
-      // 幂等：_clearAskMeta entry 不存在时返 null 不触发 re-render；
-      // promoteHead=true 时 _promoteNextAskFromQueue 内也调 _clearAskMeta(prevHeadId) 是 no-op。
-      this._clearAskMeta(askId);
-      if (promoteHead) this._promoteNextAskFromQueue();
-    } else if (this.state.askQueue.some(a => a.id === askId)) {
-      this._clearAskMeta(askId);
-      this.setState(state => ({ askQueue: state.askQueue.filter(a => a.id !== askId) }));
-    }
-  };
-
-  /**
-   * Cancel a pending AskUserQuestion — triggered by Cancel button or by handleInputSend
-   * detecting a typed-interrupt while an ask is pending.
-   *
-   * 行为近似 terminal Claude Code 的 onAbort + cancelAndAbort（**不完全等价**：
-   *  SDK 模式下 cancel 只走 cancelApproval → canUseTool 返 deny，不 abort 当前 SDK turn；
-   *  terminal onAbort 会 abort 整个 turn 后 enqueue 新输入。差异点：cc-viewer typed-interrupt
-   *  后续 sdk-user-message 会被 SDK 当下一轮 turn 起点，不进当前 turn）：
-   *   - 乐观写 localAskAnswers + 推 head 走 _applyCancelLocal（本端 promoteHead=true）
-   *   - 通知 Electron main 清 dock badge / pendingByTab[tabId].ask
-   *   - 发 WS ask-cancel 让 server 路由到 SDK cancelApproval / Hook bridge cancel
-   *   - WS 不可用时缓存到 _pendingCancelIds，_onTerminalWsState 'open' 时重发
-   */
-  handleAskCancel = (askId, reason) => {
-    if (!askId) return;
-    const cancelReason = typeof reason === 'string' && reason ? reason : 'User aborted';
-
-    // 通知 _waitForHookBridge 的 polling 立即停下：
-    // 用户取消是唯一的逃生口，必须打破"无超时等待"循环（否则下一帧又会 setTimeout 200ms 自调）。
-    this._askAbortRequested = true;
-    if (this._hookWaitTimer) { clearTimeout(this._hookWaitTimer); this._hookWaitTimer = null; }
-    this._pendingHookAnswers = null;
-    this._askSubmitting = false;
-
-    this._applyCancelLocal(askId, cancelReason);
-
-    // 通知 Electron main 清 dock badge / pendingByTab[tabId].ask
-    try {
-      if (typeof window !== 'undefined' && window.tabBridge?.notifyAskResolved) {
-        const tabId = this.props.ownTabId ?? null;
-        try { window.tabBridge.notifyAskResolved({ id: askId, tabId, reason: 'cancel' }); } catch {}
-      }
-    } catch {}
-
-    // 发 WS ask-cancel；WS 不可用 → 缓存到 _pendingCancelIds 让 reopen 时重发
-    const ws = this._inputWs;
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      try { ws.send(JSON.stringify({ type: 'ask-cancel', id: askId, reason: cancelReason })); } catch {}
-    } else {
-      if (!this._pendingCancelIds) this._pendingCancelIds = new Map();
-      this._pendingCancelIds.set(askId, cancelReason);
-    }
-    return askId;
-  };
+  // 委托 → AskFlowController（handleAskCancel 是 public 入口：bubble handlers + ChatMessage props 引用）
+  handleAskCancel = (askId, reason) => this._askFlow.handleAskCancel(askId, reason);
 
   /**
    * Send queued user message after ack received (or 500ms timeout best effort).
@@ -3111,513 +2826,8 @@ class ChatView extends React.Component {
     }
   };
 
-  handleAskQuestionSubmit = (answers, askId, questions) => {
-    // 每次新提交入口重置 abort：上轮 Cancel 可能把标志置 true 但 polling 已停在 abort 早退分支，
-    // 这一轮 _waitForHookBridge 第一帧会立即误判 abort 而吞掉答案。
-    this._askAbortRequested = false;
-    // 关键：在 _promoteNextAskFromQueue 之前把当前 head 的所有提交上下文整体快照下来。
-    // promote 会立刻把 _askHookQuestions / _askHookActive / _sdkAskId 切到下一个 ask，
-    // 用 instance 字段就会用"下一个 ask 的 questions"给"当前 ask 的 answers"编 key —— 错位。
-    const submitCtx = {
-      headAskId: this.state.pendingAsk?.id || null,
-      hookQuestions: this._askHookQuestions,  // 当前 head 的 questions（hook bridge 提交按 questionText 编 key 用这份）
-      wasHookActive: this._askHookActive,     // 路由 flag 的当前值（promote 后会被改）
-      wasSdkAskId: this._sdkAskId,
-    };
-    // 立即更新本地答案映射，解除 Last Response 中"提交中..."卡住状态
-    if (askId && questions) {
-      const localAnswers = {};
-      for (const answer of answers) {
-        const q = questions[answer.questionIndex];
-        if (!q) continue;
-        if (answer.type === 'other') {
-          localAnswers[q.question] = answer.text;
-        } else if (answer.type === 'multi') {
-          const labels = answer.selectedIndices.map(i => (q.options || [])[i]?.label).filter(Boolean);
-          localAnswers[q.question] = labels.join(', ');
-        } else {
-          localAnswers[q.question] = (q.options || [])[answer.optionIndex]?.label || '';
-        }
-      }
-      // 暂存原 pendingAsk + askId 到 instance 字段：PTY 路径 prompt 失效时
-      // _abortAskSubmitWithRollback 据此恢复 modal + 清回 localAskAnswers，让用户重试。
-      // 三条成功路径（SDK ws.send / hook bridge ws.send / PTY input-sequential-done）
-      // 必须在成功后清这两个字段，避免下次 abort 误回滚。
-      this._lastClearedPendingAsk = this.state.pendingAsk;
-      this._lastAskSubmitId = askId;
-      this.setState(prev => ({
-        localAskAnswers: { ...(prev.localAskAnswers || {}), [askId]: localAnswers },
-      }));
-      // 乐观推进 head：让全局 modal 与 inline form 在同一帧切到下一个 ask（或清空），不依赖 server ack。
-      // server 后续到达的 sdk-ask-resolved / ask-hook-resolved 因 head id 已变 → no-op 无副作用。
-      this._promoteNextAskFromQueue();
-    }
-
-    // SDK 模式：直接通过 WS 发送结构化答案，无需 hook bridge 或 PTY
-    if (this.props.sdkMode) {
-      const resolvedId = askId || submitCtx.wasSdkAskId;
-      if (!resolvedId) {
-        // SDK 已被其他设备回答 / 没有可解析的 id：早退也要清暂存字段，
-        // 否则下一轮 PTY abort 时会用过期 pendingAsk 错误回滚出已结束的 modal。
-        this._lastClearedPendingAsk = null;
-        this._lastAskSubmitId = null;
-        return;
-      }
-      const ws = this._inputWs;
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        // 构造 answers 对象: { questionText: selectedLabel }
-        // qs 优先取快照（promote 已经把 instance 字段切到了下一个 ask 的 questions，会错位）
-        const sdkAnswers = {};
-        const qs = submitCtx.hookQuestions || questions;
-        for (const answer of answers) {
-          const q = qs?.[answer.questionIndex];
-          if (!q) continue;
-          if (answer.type === 'other') {
-            sdkAnswers[q.question] = answer.text;
-          } else if (answer.type === 'multi') {
-            const labels = answer.selectedIndices.map(i => (q.options || [])[i]?.label).filter(Boolean);
-            sdkAnswers[q.question] = labels.join(', ');
-          } else {
-            sdkAnswers[q.question] = (q.options || [])[answer.optionIndex]?.label || '';
-          }
-        }
-        ws.send(JSON.stringify({ type: 'sdk-ask-answer', id: resolvedId, answers: sdkAnswers }));
-        // 成功路径：清掉 abort 回滚用的暂存字段
-        this._lastClearedPendingAsk = null;
-        this._lastAskSubmitId = null;
-      } else {
-        // SDK 模式但 ws 不可用：sdk-ask-answer 没法发，理论上前端无可补救路径；
-        // 至少清暂存字段避免下次 abort 误回滚。pendingAsk 保持已乐观清空状态——
-        // 等 server 端超时后重发 sdk-ask-pending 自然唤回 modal。
-        this._lastClearedPendingAsk = null;
-        this._lastAskSubmitId = null;
-      }
-      return;
-    }
-
-    // Hook bridge path: submit structured JSON instead of PTY simulation
-    // 路由判定也用快照（promote 后 _askHookActive 反映的是新 head，而当前提交的是旧 head）
-    if (submitCtx.wasHookActive && !this._askSubmitting) {
-      this._submitViaHookBridge(answers, submitCtx.headAskId, submitCtx.hookQuestions);
-      return;
-    }
-
-    // _askHookActive=false 但 pendingAsk 仍存在 + ws OPEN → 直接尝试 hook bridge。
-    // 复现：用户在 ApprovalModal 按 ESC 后某副作用清了 _askHookActive 但 pendingAsk 仍在；
-    // inline 卡片提交无谓走 _waitForHookBridge 3s 后 fallback PTY 报 pty-prompt-invalid。
-    // 让 server handled=true/false 兜底语义决定路径：entry 在 → 正常 resolve；
-    // entry 不在 → server 给发起方 ack ask-hook-cancelled（server.js ask-hook-answer 内
-    // !askAnswered 分支已实现），前端走 _pendingFlushQueue 兜底关 modal。
-    if (!submitCtx.wasHookActive && !this._askSubmitting
-        && submitCtx.headAskId
-        && this._inputWs && this._inputWs.readyState === WebSocket.OPEN) {
-      this._submitViaHookBridge(answers, submitCtx.headAskId, submitCtx.hookQuestions);
-      return;
-    }
-
-    // Hook bridge 可能尚未就绪（streaming response 先于 hook 触发的时序竞争）：
-    // WebSocket 已连接但 ask-hook-pending 消息还没到 + headAskId 也没有 → 短暂等待
-    if (!submitCtx.wasHookActive && !this._askSubmitting
-        && this._inputWs && this._inputWs.readyState === WebSocket.OPEN) {
-      this._pendingHookAnswers = answers;
-      this._askHookWaitRetries = 0;
-      this._askSubmitting = true;
-      this._waitForHookBridge();
-      return;
-    }
-
-    this._submitViaPty(answers);
-  };
-
-  /**
-   * 等待 hook bridge（ask-hook-pending）到达。
-   *
-   * 两种模式：
-   * - `_askHookEverActive=true`（新版 CC，hook bridge 在本 session 至少握手过一次）：
-   *   无任何隐式超时。ask-hook-pending 因网络/抖动晚到 N 秒甚至 N 分钟都不打断，
-   *   用户主动 Cancel 是唯一逃生口。
-   * - `_askHookEverActive=false`（老版 CC 无 ask-bridge / 启动早期）：
-   *   等 ~30s（150 × 200ms）后兜底 fallback 到 PTY 模拟，否则 answer 永远投递不出。
-   *
-   * 退出条件：unmounted / 显式 abort / ws closed / hook bridge 就绪 / 老版兜底超时。
-   */
-  _waitForHookBridge() {
-    if (this._unmounted) return;
-    if (this._askAbortRequested) {
-      this._askAbortRequested = false;
-      this._pendingHookAnswers = null;
-      this._askSubmitting = false;
-      return;
-    }
-    if (this._askHookActive) {
-      const answers = this._pendingHookAnswers;
-      this._pendingHookAnswers = null;
-      this._submitViaHookBridge(answers);
-      return;
-    }
-    // ws 突然 closed：hook 路径无法走 → 转 PTY 由 _waitForWsAndSubmit 接管重连
-    if (!this._inputWs || this._inputWs.readyState !== WebSocket.OPEN) {
-      const answers = this._pendingHookAnswers;
-      this._pendingHookAnswers = null;
-      this._submitViaPty(answers);
-      return;
-    }
-    this._askHookWaitRetries = (this._askHookWaitRetries || 0) + 1;
-    // 老版 CC 兜底：本 session 从未见过 ask-hook-pending → 30s 后视作 hook 不可用，走 PTY
-    if (!this._askHookEverActive && this._askHookWaitRetries > 150) {
-      const answers = this._pendingHookAnswers;
-      this._pendingHookAnswers = null;
-      this._submitViaPty(answers);
-      return;
-    }
-    this._hookWaitTimer = setTimeout(() => this._waitForHookBridge(), 200);
-  }
-
-  /**
-   * PTY 模拟路径（原有逻辑，从 handleAskQuestionSubmit 提取）
-   */
-  _submitViaPty(answers) {
-    const ws = this._inputWs;
-
-    // ws 暂时不可用 → 准备 queue 后等 Provider 自动重连。
-    // (历史:此处曾调 this.connectInputWs() 主动连;方案 D 重构后该方法已删,保留调用会抛 TypeError。
-    // Provider 在 props.open=true 时自管 2s 退避重连,_waitForWsAndSubmit 轮询到 OPEN 自然继续。)
-    if (!ws || ws.readyState !== WebSocket.OPEN) {
-      this._askAnswerQueue = this._planSubmissionSteps(answers);
-      this._askSubmitting = true;
-      this._isMultiQuestionForm = answers.length > 1;
-      this._askWsRetries = 0;
-      this._waitForWsAndSubmit();
-      return;
-    }
-
-    this._askAnswerQueue = this._planSubmissionSteps(answers);
-    this._askSubmitting = true;
-    this._isMultiQuestionForm = answers.length > 1;
-
-    // ptyPrompt may not be available yet (streaming response renders before CLI prompt appears)
-    // Retry with delay until ptyPrompt is detected
-    if (!this._currentPtyPrompt) {
-      this._askPromptRetries = 0;
-      this._waitForPtyPromptAndSubmit();
-      return;
-    }
-
-    this._processNextAskAnswer();
-  }
-
-  _waitForWsAndSubmit() {
-    this._askWsRetries = (this._askWsRetries || 0) + 1;
-    if (this._askWsRetries > 30) {
-      // Give up after ~3 seconds
-      this._askSubmitting = false;
-      this._askAnswerQueue = [];
-      return;
-    }
-    if (this._inputWs && this._inputWs.readyState === WebSocket.OPEN) {
-      // WS connected, now wait for ptyPrompt
-      if (!this._currentPtyPrompt) {
-        this._askPromptRetries = 0;
-        this._waitForPtyPromptAndSubmit();
-      } else {
-        this._processNextAskAnswer();
-      }
-      return;
-    }
-    this._waitForWsTimer = setTimeout(() => this._waitForWsAndSubmit(), 100);
-  }
-
-  _waitForPtyPromptAndSubmit() {
-    this._askPromptRetries = (this._askPromptRetries || 0) + 1;
-    if (this._askPromptRetries > 50) {
-      // Timeout: proceed without ptyPrompt (assume first option selected, CLI default)
-      this._processNextAskAnswer();
-      return;
-    }
-    if (this._currentPtyPrompt) {
-      this._processNextAskAnswer();
-      return;
-    }
-    this._waitForPtyTimer = setTimeout(() => this._waitForPtyPromptAndSubmit(), 100);
-  }
-
-  _processNextAskAnswer() {
-    if (!this._askAnswerQueue || this._askAnswerQueue.length === 0) {
-      this._askSubmitting = false;
-      return;
-    }
-    const answer = this._askAnswerQueue.shift();
-
-    // Multi-select Other: handle as single PTY submission.
-    // "Type something" is a text input option — type text,
-    // ↓ exits text input, → to Submit tab, Enter submits.
-    // Uses higher settleMs to ensure text characters are fully processed.
-    if (answer.type === 'other' && answer.isMultiSelect) {
-      this._submitViaSequentialQueue(answer, { settleMs: 500 });
-      return;
-    }
-
-    if (answer.type === 'other') {
-      this._submitOtherAnswer(answer);
-    } else if (answer.type === 'multi') {
-      this._submitMultiSelectAnswer(answer);
-    } else {
-      this._submitSingleSelectAnswer(answer);
-    }
-  }
-
-  _submitSingleSelectAnswer(answer) {
-    this._submitViaSequentialQueue(answer);
-  }
-
-  _submitMultiSelectAnswer(answer) {
-    this._submitViaSequentialQueue(answer);
-  }
-
-  _submitOtherAnswer(answer) {
-    this._submitViaSequentialQueue(answer);
-  }
-
-  /**
-   * PTY 路径 abort：清掉提交中状态、回滚 handleAskQuestionSubmit 入口乐观写入的
-   * pendingAsk + localAskAnswers，让用户能在 modal 重新唤起后重试。
-   * reason 用于诊断（'ws-not-open' / 'pty-prompt-invalid' 等）。
-   */
-  _abortAskSubmitWithRollback(reason) {
-    this._askSubmitting = false;
-    this._askAnswerQueue = [];
-    if (this._lastClearedPendingAsk) {
-      const restored = this._lastClearedPendingAsk;
-      this._lastClearedPendingAsk = null;
-      this.setState({ pendingAsk: restored });
-    }
-    const askId = this._lastAskSubmitId;
-    if (askId) {
-      this._lastAskSubmitId = null;
-      this.setState((prev) => {
-        const nextLocal = { ...(prev.localAskAnswers || {}) };
-        delete nextLocal[askId];
-        return { localAskAnswers: nextLocal };
-      });
-    }
-    try {
-      Modal.warning({
-        title: t('ui.askSubmitRetryHint'),
-        content: (
-          <div>
-            <div style={{ whiteSpace: 'pre-line' }}>{t('ui.askSubmitFailedDetail')}</div>
-            <div style={{ marginTop: 8, fontSize: 11, color: 'var(--text-muted)' }}>[reason] {String(reason || 'unknown')}</div>
-          </div>
-        ),
-      });
-    } catch {
-      // Modal.warning 在 SSR / antd ConfigProvider 缺失等极端路径下可能 throw，
-      // 退回到原 message.warning toast 保证用户至少能感知到失败（modal 失败比原 toast 失败更不可见）。
-      try { message.warning(t('ui.askSubmitRetryHint')); } catch {}
-    }
-  }
-
-  /**
-   * Unified PTY submission: build chunks via ptyChunkBuilder, send via server-side sequential queue.
-   * PTY-prompt 自检：用户 ESC dismiss modal 后 PTY buffer 可能已离开 inquirer ask 状态
-   * （例如 Claude 已切换到下一行 user input prompt）。此时直接发 chunks 会被当成普通
-   * user message → Claude 把 Other 自由文本视为"补充文本"卡死整个流程。
-   *
-   * 但客户端 React state 的 ptyPrompt 推送是异步的，用户点 Submit 那一刻 state 可能
-   * 滞后于 PTY 实际状态（终端能正确接收，cc-viewer state 还没刷上）。所以分三层：
-   *   ① 第一次同步自检失败 → setTimeout 150ms 重试一次（让在路上的 ptyPrompt 推送追上）
-   *   ② 重试仍失败 → 从 `state.ptyPromptHistory` 找最新 status='active' 的合法 ask prompt 作兜底
-   *      （仅打 console.warn 不弹 modal，state.ptyPrompt 可能短暂为 null 但 history 仍有真值）
-   *   ③ 都找不到 → 硬阻断弹 modal（chunks 构造不出来，必须用户手动重试）
-   */
-  _submitViaSequentialQueue(answer, opts = {}) {
-    this._submitViaSequentialQueueInternal(answer, opts, 0);
-  }
-
-  _submitViaSequentialQueueInternal(answer, opts, retryCount) {
-    const ctx = this.context;
-    if (!ctx || !ctx.isOpen || !ctx.isOpen()) {
-      this._abortAskSubmitWithRollback('ws-not-open');
-      return;
-    }
-
-    // PTY prompt 类型自检：必须是合法的 AskUserQuestion inquirer prompt
-    // （options 非空 + 不是 plan 类型 + 不是 dangerous 类型；后两者 options 也非空但语义不同）
-    const p = this.state.ptyPrompt;
-    const isValidAskPrompt = !!(p && Array.isArray(p.options) && p.options.length > 0
-      && !isPlanApprovalPrompt(p)
-      && !isDangerousOperationPrompt(p));
-
-    // 第一次自检失败 → 150ms 后重试一次。异步 ptyPrompt 推送典型延迟 < 100ms，
-    // 给一个略宽裕的窗口让 state 追上 PTY 真实状态。retryCount 是单次单调累加，不会无限循环。
-    if (!isValidAskPrompt && retryCount === 0) {
-      setTimeout(() => this._submitViaSequentialQueueInternal(answer, opts, 1), 150);
-      return;
-    }
-
-    // 重试仍失败 → 从 history 找最新 active 合法 ask prompt 兜底（state.ptyPrompt 异步滞后但
-    // history 已记录的 active 标记是可信的）。找到则乐观提交，找不到才硬阻断。
-    let effectivePrompt = p;
-    if (!isValidAskPrompt) {
-      const fromHistory = (this.state.ptyPromptHistory || []).slice().reverse()
-        .find(pp => pp && pp.status === 'active'
-          && Array.isArray(pp.options) && pp.options.length > 0
-          && !isPlanApprovalPrompt(pp)
-          && !isDangerousOperationPrompt(pp));
-      if (fromHistory) {
-        effectivePrompt = fromHistory;
-        // 仅 trace 模式打日志，避免普通用户控制台噪声。诊断时
-        // `globalThis.__CCV_PTY_TRACE__ = true` 可看到自检降级路径。
-        if (typeof globalThis !== 'undefined' && globalThis.__CCV_PTY_TRACE__ === true) {
-          // eslint-disable-next-line no-console
-          try { console.warn('[pty.trace] _submitViaSequentialQueue: state.ptyPrompt 自检未命中（null/options 空/被 plan|dangerous 误判），从 ptyPromptHistory 取最新 active ask prompt 兜底乐观提交'); } catch {}
-        }
-      } else {
-        // 真没有合法 prompt（state + history 都无）→ 硬阻断，chunks 构造不出来
-        this._abortAskSubmitWithRollback('pty-prompt-invalid');
-        return;
-      }
-    }
-
-    const isMultiQuestion = !!this._isMultiQuestionForm;
-    const chunks = buildChunksForAnswer(answer, effectivePrompt, isMultiQuestion);
-    const settleMs = opts.settleMs || 300;
-
-    // 单 ws 合并后 server 的 input-sequential-done 仍是 unicast,但 ws 上有多个发送方
-    // (ChatView 的 ask 提交 + TerminalPanel 的 preset/clear-context/UltraPlan)。
-    // 用 seq 区分:发送时带,handler 严格按 seq 匹配,避免被 TerminalPanel 触发的 done 误判。
-    const seq = `cv-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-
-    // 先 send,只有发送成功才挂 handler——避免孤儿 handler 等满 15s。
-    // ctx.send() 在 readyState 检查后到实际 send 之间可能因 ws.onclose 触发返回 false,
-    // 同步回滚等价于"还没真正提交",和 ws-not-open 同回滚路径,UX 一致。
-    const sent = ctx.send({ type: 'input-sequential', chunks, settleMs, seq });
-    if (!sent) {
-      this._abortAskSubmitWithRollback('ws-send-failed');
-      return;
-    }
-
-    let unsub = null;
-    const onceMsg = (msg) => {
-      if (msg && msg.type === 'input-sequential-done' && msg.seq === seq) {
-        if (unsub) { try { unsub(); } catch {} unsub = null; }
-        this._finishCurrentAskAnswer();
-      }
-    };
-    unsub = ctx.addMessageHandler(onceMsg);
-
-    setTimeout(() => {
-      if (unsub) { try { unsub(); } catch {} unsub = null; }
-      if (this._askSubmitting) {
-        this._finishCurrentAskAnswer();
-      }
-    }, 15000);
-  }
-
-  _finishCurrentAskAnswer() {
-    // Mark current prompt as answered and clear buffer
-    this._currentPtyPrompt = null;
-    this.setState(state => {
-      const history = state.ptyPromptHistory.slice();
-      const last = history[history.length - 1];
-      if (last && last.status === 'active') {
-        history[history.length - 1] = { ...last, status: 'answered' };
-      }
-      return { ptyPrompt: null, ptyPromptHistory: history };
-    });
-    // Only clear debounce timer when no more answers pending;
-    // if queue has more items, we need _detectPrompt() to fire for the next question
-    if (!this._askAnswerQueue || this._askAnswerQueue.length === 0) {
-      if (this._ptyDebounceTimer) clearTimeout(this._ptyDebounceTimer);
-      // 队列已空 = PTY 路径成功结束。清掉 abort 回滚用的暂存字段
-      this._lastClearedPendingAsk = null;
-      this._lastAskSubmitId = null;
-    }
-
-    // Wait for next prompt to appear (multi-question scenario)
-    if (this._askAnswerQueue && this._askAnswerQueue.length > 0) {
-      // In tabbed forms, → switches tabs without generating a new prompt.
-      // Use fixed delay then proceed — cursor defaults to index 0 on new tab.
-      setTimeout(() => {
-        this._processNextAskAnswer();
-      }, 500);
-    } else {
-      this._askSubmitting = false;
-    }
-  }
-
-  /**
-   * Submit AskUserQuestion answers via hook bridge (structured JSON, no PTY simulation).
-   * Converts client answer format to hook answer format and sends via WebSocket.
-   */
-  _submitViaHookBridge(answers, explicitHeadId, explicitQuestions) {
-    const ws = this._inputWs;
-    if (!ws || ws.readyState !== WebSocket.OPEN) {
-      // Fallback to PTY path（直接走 PTY，跳过路由判断避免 WS reconnect 竞态白等 3s）
-      this._askHookActive = false;
-      this._askHookQuestions = null;
-      this._submitViaPty(answers);
-      return;
-    }
-
-    this._askSubmitting = true;
-
-    // 优先用快照 questions：handleAskQuestionSubmit 在 _promoteNextAskFromQueue 之前已经把
-    // 当前 head 的 questions 抓出来传进来；instance 字段 _askHookQuestions 此时已被 promote
-    // 切到下一个 ask 的 questions（错位会让 hookAnswers 的 key 全部用错 question text）。
-    // 兜底：retry 路径（_waitForHookBridge）调本函数时不传 questions —— 那种场景 promote 是 no-op，
-    // 直接读 instance 字段才是正确的当前 head。
-    const questions = explicitQuestions || this._askHookQuestions || [];
-    const hookAnswers = {};
-
-    for (const answer of answers) {
-      const q = questions[answer.questionIndex];
-      if (!q) continue;
-      const questionText = q.question;
-
-      if (answer.type === 'other') {
-        hookAnswers[questionText] = answer.text || '';
-      } else if (answer.type === 'multi') {
-        const labels = (answer.selectedIndices || [])
-          .map((i) => q.options?.[i]?.label)
-          .filter(Boolean);
-        hookAnswers[questionText] = labels.join(', ');
-      } else {
-        // single
-        hookAnswers[questionText] = q.options?.[answer.optionIndex]?.label || '';
-      }
-    }
-
-    // Resolve which pending ask in pendingAskHooks Map this answer addresses.
-    // Direct submit path passes explicitHeadId (captured before optimistic queue advance).
-    // Retry-from-_waitForHookBridge path omits it → read current head from state, since the
-    // hook arrived after the optimistic clear and is the freshly-set head.
-    // LEGACY_ASK_PLACEHOLDER_ID placeholder = legacy server (no Map); send no id and let server fall back to FIFO.
-    const resolvedAskId = (explicitHeadId !== undefined ? explicitHeadId : this.state.pendingAsk?.id) || null;
-    const payload = { type: 'ask-hook-answer', answers: hookAnswers };
-    if (resolvedAskId && resolvedAskId !== LEGACY_ASK_PLACEHOLDER_ID) payload.id = resolvedAskId;
-    ws.send(JSON.stringify(payload));
-
-    // 成功路径：清掉 abort 回滚用的暂存字段
-    this._lastClearedPendingAsk = null;
-    this._lastAskSubmitId = null;
-
-    // 不立即清除 _askHookActive：保留 hook bridge 状态以支持重试
-    // hook 状态由 ask-hook-timeout WS 消息或下一轮 streaming response 自然清除
-    this._askSubmitting = false;
-
-    // Update UI state — mark prompt as answered
-    this._currentPtyPrompt = null;
-    this.setState((state) => {
-      const history = state.ptyPromptHistory.slice();
-      const last = history[history.length - 1];
-      if (last && last.status === 'active') {
-        history[history.length - 1] = { ...last, status: 'answered' };
-      }
-      return { ptyPrompt: null, ptyPromptHistory: history };
-    });
-    if (this._ptyDebounceTimer) clearTimeout(this._ptyDebounceTimer);
-  }
+  // 委托 → AskFlowController
+  handleAskQuestionSubmit = (answers, askId, questions) => this._askFlow.handleAskQuestionSubmit(answers, askId, questions);
 
   handleInputStop = () => {
     if (!this._inputWs || this._inputWs.readyState !== WebSocket.OPEN) return;

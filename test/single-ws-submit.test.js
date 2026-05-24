@@ -21,8 +21,8 @@ import assert from 'node:assert/strict';
 
 // ─── 内联:_submitViaSequentialQueue 的核心逻辑(纯函数版) ─────────────────────
 //
-// 真实代码位于 src/components/ChatView.jsx:2702-2745。
-// 此处把 ChatView 实例方法的核心提交逻辑抽取为接收依赖注入的纯函数,便于单测。
+// 真实代码位于 src/components/chatview/askFlowController.js（_submitViaSequentialQueueInternal，原在 ChatView.jsx）。
+// 此处把核心提交逻辑抽取为接收依赖注入的纯函数,便于单测。
 function submitViaSequentialQueue({ ctx, ptyPrompt, isPlanApprovalPrompt, isDangerousOperationPrompt,
                                     chunks, settleMs, seq,
                                     onAbort, onFinish }) {

@@ -2009,7 +2009,7 @@ class TerminalPanel extends React.Component {
             <label className={styles.presetFormLabel}>Team {t('ui.terminal.teamDesc')}</label>
             <textarea
               className={styles.presetTextarea}
-              rows={6}
+              rows={15}
               placeholder={t('ui.terminal.presetInputPlaceholder')}
               value={this.state.presetAddText}
               onChange={(e) => this.setState({ presetAddText: e.target.value })}

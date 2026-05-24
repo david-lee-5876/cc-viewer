@@ -110,7 +110,7 @@ export default function PresetModal({ open, onClose, items, onItemsChange, dismi
         </div>
         <div>
           <label className={styles.presetFormLabel}>Team {t('ui.terminal.teamDesc')}</label>
-          <textarea className={styles.presetTextarea} rows={6} placeholder={t('ui.terminal.presetInputPlaceholder')} value={addText} onChange={e => setAddText(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') e.stopPropagation(); }} />
+          <textarea className={styles.presetTextarea} rows={15} placeholder={t('ui.terminal.presetInputPlaceholder')} value={addText} onChange={e => setAddText(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') e.stopPropagation(); }} />
         </div>
       </Modal>
     </>

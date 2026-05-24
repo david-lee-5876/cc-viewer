@@ -113,13 +113,14 @@ describe('AskUserQuestion 无超时/无降级 不变量', () => {
     );
   });
 
-  it('src/components/ChatView.jsx _waitForHookBridge 不再有 3s 固定 fallback 上限', () => {
-    const src = readFileSync(resolve(repoRoot, 'src/components/ChatView.jsx'), 'utf-8');
+  it('askFlowController.js _waitForHookBridge 不再有 3s 固定 fallback 上限', () => {
+    // Ask 流逻辑已从 ChatView.jsx 抽到 src/components/chatview/askFlowController.js（保留行为）。
+    const src = readFileSync(resolve(repoRoot, 'src/components/chatview/askFlowController.js'), 'utf-8');
     // 旧版: `if (this._askHookWaitRetries > 30) {`（3s = 30 × 100ms）+ fallback PTY
     // 新版必须存在 _askHookEverActive 区分新老 CC 的逻辑
     assert.ok(
       /_askHookEverActive/.test(src),
-      'ChatView.jsx 必须有 _askHookEverActive 标志区分"新版 hook bridge 已握手"vs"老版无 hook"两种场景',
+      'askFlowController.js 必须有 _askHookEverActive 标志区分"新版 hook bridge 已握手"vs"老版无 hook"两种场景',
     );
     // 不允许 retries > 30 这种 3s 硬上限（仍允许更大值作为老版兜底，> 150 ~30s）
     const m = src.match(/_askHookWaitRetries\s*>\s*(\d+)/);

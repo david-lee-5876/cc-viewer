@@ -101,12 +101,7 @@ class AppBase extends React.Component {
       resumeRememberChoice: false,
       resumeAutoChoice: null, // null | "continue" | "new"
       autoApproveSeconds: 0, // 自动审批倒计时秒数，0=关闭
-      collapseToolResults: true,
-      expandThinking: false,
-      expandDiff: false,
       logDir: '',
-      showFullToolContent: false,
-      showThinkingSummaries: false,
       themeColor: 'light',
       claudeMissing: false,
       updateModalVisible: false,
@@ -269,6 +264,21 @@ class AppBase extends React.Component {
     };
   }
 
+  // 这 5 个偏好的唯一真相源是 SettingsContext(preferences/claudeSettings);
+  // App/Mobile render 时直接派生往下传 prop,不再镜像进本地 state。
+  // context 未就绪(fetch 前)时用与原初始 state 一致的默认值兜底。
+  _prefValues() {
+    const prefs = (this.context && this.context.preferences) || {};
+    const cs = (this.context && this.context.claudeSettings) || {};
+    return {
+      collapseToolResults: prefs.collapseToolResults ?? true,
+      expandThinking: !!prefs.expandThinking,
+      expandDiff: !!prefs.expandDiff,
+      showFullToolContent: !!prefs.showFullToolContent,
+      showThinkingSummaries: !!cs.showThinkingSummaries,
+    };
+  }
+
   /**
    * 单次遍历完成 timestamp 赋值 + session 构建 + 过滤 + index 重建。
    * 合并 assignMessageTimestamps + buildSessionsFromEntries + filterRelevantRequests + _rebuildRequestIndex，
@@ -371,7 +381,8 @@ class AppBase extends React.Component {
     // 这里仅订阅其 Promise,把字段同步到本地 state(沿用现有 13+ 个 setState 消费链路)。
     this.context._claudeSettingsReady.then(data => {
       if (!data) return;
-      if (data.showThinkingSummaries) this.setState({ showThinkingSummaries: true });
+      // showThinkingSummaries 不再镜像进 state —— render 经 _prefValues() 直接读
+      // context.claudeSettings,fetch 回包触发 Provider 重渲染即生效。勿在此重加 setState。
       if (data.claudeAvailable === false) this.setState({ claudeMissing: true });
       if (typeof data.claudeProjectModel === 'string' && data.claudeProjectModel) {
         this.setState({ claudeProjectModel: data.claudeProjectModel });
@@ -413,18 +424,8 @@ class AppBase extends React.Component {
     this.context._prefsReady.then(data => {
       if (!data) return;
       if (data.lang) this.setState({ lang: data.lang });
-      if (data.collapseToolResults !== undefined) {
-        this.setState({ collapseToolResults: !!data.collapseToolResults });
-      }
-      if (data.expandThinking !== undefined) {
-        this.setState({ expandThinking: !!data.expandThinking });
-      }
-      if (data.expandDiff !== undefined) {
-        this.setState({ expandDiff: !!data.expandDiff });
-      }
-      if (data.showFullToolContent !== undefined) {
-        this.setState({ showFullToolContent: !!data.showFullToolContent });
-      }
+      // collapseToolResults / expandThinking / expandDiff / showFullToolContent
+      // 不再镜像进 state —— render 经 _prefValues() 直接读 context.preferences。
       if (data.resumeAutoChoice) {
         this.setState({ resumeAutoChoice: data.resumeAutoChoice });
       }
@@ -604,20 +605,6 @@ class AppBase extends React.Component {
     } else {
       this.initSSE();
     }
-  }
-
-  componentDidUpdate(prevProps, prevState) {
-    // context.claudeSettings 后续变化(如 ChatMessage 触发的 showThinkingSummaries 启用)
-    // 同步到本地 state,让 props.showThinkingSummaries 下游消费方立即响应。
-    // contextType 不提供 prevContext,只能比对 context value 与本地 state。
-    const cs = this.context && this.context.claudeSettings;
-    if (cs && !!cs.showThinkingSummaries !== !!this.state.showThinkingSummaries) {
-      this.setState({ showThinkingSummaries: !!cs.showThinkingSummaries });
-    }
-    // Voice-pack turnEnd is now driven by the `turn_end` SSE event (broadcast when
-    // Claude Code's Stop hook fires), not by isStreaming falling-edge. The streaming
-    // signal resets per-API-call so it mis-fired between slow tool calls. See the
-    // SSE listener registered in componentDidMount and server/lib/turn-end-bridge.js.
   }
 
   componentWillUnmount() {
@@ -1656,17 +1643,15 @@ class AppBase extends React.Component {
   };
 
   handleCollapseToolResultsChange = (checked) => {
-    this.setState({ collapseToolResults: checked });
+    // 单一真相源 = context;updatePreferences 内乐观 setState 即驱动重渲染。
     this.context.updatePreferences({ collapseToolResults: checked });
   };
 
   handleExpandThinkingChange = (checked) => {
-    this.setState({ expandThinking: checked });
     this.context.updatePreferences({ expandThinking: checked });
   };
 
   handleExpandDiffChange = (checked) => {
-    this.setState({ expandDiff: checked });
     this.context.updatePreferences({ expandDiff: checked });
   };
 
@@ -1818,7 +1803,6 @@ class AppBase extends React.Component {
   };
 
   handleShowFullToolContentChange = (checked) => {
-    this.setState({ showFullToolContent: checked });
     this.context.updatePreferences({ showFullToolContent: checked });
   };
 

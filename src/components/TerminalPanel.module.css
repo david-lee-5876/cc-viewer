@@ -428,10 +428,18 @@
   resize: none;
   outline: none;
   box-sizing: border-box;
+  max-height: 70vh;
 }
 
 .presetTextarea:focus {
   border-color: var(--color-primary);
+}
+
+/* 矮视口（横屏手机 / 软键盘弹起后剩余空间）防 Modal 溢出 */
+@media (max-height: 600px) {
+  .presetTextarea {
+    max-height: 60vh;
+  }
 }
 
 .hiddenFileInput {

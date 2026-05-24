@@ -1,11 +1,11 @@
 // Unit tests for the PTY ask-prompt retry decision tree implemented inline in
-// src/components/ChatView.jsx _submitViaSequentialQueueInternal()
-// (around lines 2922-2965).
+// src/components/chatview/askFlowController.js _submitViaSequentialQueueInternal()
+// （原在 ChatView.jsx，Step 抽离后移入控制器）。
 //
 // 测试范围 = 该函数前半段的"判定 + 兜底"决策（决定 abort / 重试 / 走 state / 走 history），
 // 不包含后半段实际 send chunks 的路径（依赖 ws context，由 e2e 覆盖）。
 //
-// KEEP IN SYNC: ChatView.jsx _submitViaSequentialQueueInternal 三段式决策若变化（自检条件 /
+// KEEP IN SYNC: askFlowController.js _submitViaSequentialQueueInternal 三段式决策若变化（自检条件 /
 // 重试次数 / history 兜底过滤），同步修改本文件的 decideRetry() 镜像。
 //
 // 引入真实的 promptClassifier 而不是 mock —— 保证决策与生产用同一份分类规则。
@@ -14,14 +14,14 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { isPlanApprovalPrompt, isDangerousOperationPrompt } from '../src/utils/promptClassifier.js';
 
-// 内联镜像 ChatView.jsx 第 2932-2934 行的 isValidAskPrompt 表达式
+// 内联镜像 askFlowController.js 的 isValidAskPrompt 表达式
 function isValidAskPrompt(p) {
   return !!(p && Array.isArray(p.options) && p.options.length > 0
     && !isPlanApprovalPrompt(p)
     && !isDangerousOperationPrompt(p));
 }
 
-// 内联镜像 ChatView.jsx 第 2947-2951 行的 history 兜底查找
+// 内联镜像 askFlowController.js 的 history 兜底查找
 function findFallbackAskPromptFromHistory(history) {
   if (!Array.isArray(history)) return null;
   return history.slice().reverse()

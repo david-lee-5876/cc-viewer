@@ -606,6 +606,7 @@ class Mobile extends AppBase {
 
   render() {
     const { filteredRequests, fileLoading, fileLoadingCount, mainAgentSessions } = this.renderPrepare();
+    const prefs = this._prefValues();
 
     // 工作区选择器模式
     if (this.state.workspaceMode) {
@@ -912,10 +913,10 @@ class Mobile extends AppBase {
                     mainAgentSessions={mainAgentSessions}
                     streamingLatest={this.state.streamingLatest}
                     userProfile={this.state.userProfile}
-                    collapseToolResults={this.state.collapseToolResults}
-                    expandThinking={this.state.expandThinking}
-                    showFullToolContent={this.state.showFullToolContent}
-                    showThinkingSummaries={this.state.showThinkingSummaries}
+                    collapseToolResults={prefs.collapseToolResults}
+                    expandThinking={prefs.expandThinking}
+                    showFullToolContent={prefs.showFullToolContent}
+                    showThinkingSummaries={prefs.showThinkingSummaries}
                     onViewRequest={null}
                     scrollToTimestamp={null}
                     onScrollTsDone={() => {}}
@@ -1199,22 +1200,22 @@ class Mobile extends AppBase {
                 <div className={styles.mobileSettingsRow}>
                   <span className={styles.mobileSettingsLabel}>{t('ui.expandThinking')}</span>
                   <Switch
-                    checked={!!this.state.expandThinking}
+                    checked={prefs.expandThinking}
                     onChange={this.handleExpandThinkingChange}
                   />
                 </div>
                 <div className={styles.mobileSettingsRow}>
                   <span className={styles.mobileSettingsLabel}>{t('ui.showFullToolContent')}</span>
                   <Switch
-                    checked={!!this.state.showFullToolContent}
+                    checked={prefs.showFullToolContent}
                     onChange={this.handleShowFullToolContentChange}
                   />
                 </div>
-                {this.state.showFullToolContent && (
+                {prefs.showFullToolContent && (
                   <div className={styles.mobileSettingsRow}>
                     <span className={styles.mobileSettingsLabel}>{t('ui.collapseToolResults')}</span>
                     <Switch
-                      checked={!!this.state.collapseToolResults}
+                      checked={prefs.collapseToolResults}
                       onChange={this.handleCollapseToolResultsChange}
                     />
                   </div>
