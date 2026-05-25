@@ -1,6 +1,6 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
-import { Space, Tag, Button, Dropdown, Popover, Modal, Collapse, Drawer, Switch, Radio, Tabs, Spin, Input, Select, message } from 'antd';
+import { Space, Tag, Button, Dropdown, Popover, Modal, Collapse, Drawer, Switch, Radio, Tabs, Spin, Input, Select, Segmented, message } from 'antd';
 import { MessageOutlined, FileTextOutlined, ImportOutlined, DashboardOutlined, ExportOutlined, DownloadOutlined, SettingOutlined, BarChartOutlined, CodeOutlined, CopyOutlined, ApiOutlined, SwapOutlined } from '@ant-design/icons';
 import { QRCodeCanvas } from 'qrcode.react';
 import { formatTokenCount, computeTokenStats, computeCacheRebuildStats, computeToolUsageStats, computeSkillUsageStats, resolveCalibrationTokens, AUTO_COMPACT_USABLE_RATIO } from '../../utils/helpers';
@@ -45,6 +45,21 @@ import styles from './AppHeader.module.css';
 import sharedChrome from '../common/sharedChrome.module.css';
 
 
+// 认证 state 的单一形状工厂 —— 初始态 / 401 降级 / 服务端回包归一化三处共用，避免字段漂移。
+// 服务端权威生产者是 server/routes/auth.js 的 buildState(同样字段集)。
+function makeAuthState(over = {}) {
+  return {
+    enabled: false,
+    isAdmin: false,
+    password: null,
+    scope: 'global',
+    hasProjectOverride: false,
+    projectDir: null,
+    global: { enabled: false, password: null },
+    ...over,
+  };
+}
+
 // countryToFlag 已随地理位置控件一起迁到 src/components/common/CountryFlag.jsx
 
 // Bridges the useProjectAlias hook into AppHeader (class component). Renders
@@ -82,6 +97,17 @@ class AppHeader extends React.Component {
       _claudeMd: null,
       // CLAUDE.md 明细 Modal：与 _memoryDetail 分槽，避免 memory 链接点击与 CLAUDE 链接点击交叉污染
       _claudeMdDetail: null,
+      // 密码登录认证态：/api/auth/state 返回 effective + scope 信息。
+      // isAdmin 仅本机(127.0.0.1)为 true，决定二维码下方是否显示管理区。
+      // scope='project'|'global'(当前生效来源)；hasProjectOverride=本项目是否有专用配置；
+      // global={enabled,password}=全局默认；projectDir=本 server 项目(非 CLI 为 null)。
+      // 远程登录窗口期 fetch 可能 401 → catch 降级为非 admin、视为已开启，不破坏 header。
+      authState: makeAuthState(),
+      // 密码输入框临时编辑态（受控），与权威值区分；null=未进入编辑
+      _authPasswordDraft: null,
+      _authSaving: false,
+      // 管理区当前选中的作用域 tab；null=跟随生效 scope。切换 tab 时清空草稿。
+      _authScope: null,
     };
     this._countdownTimer = null;
     this._expiredTimer = null;
@@ -100,6 +126,16 @@ class AppHeader extends React.Component {
     fetch(apiUrl('/api/local-url')).then(r => r.json()).then(data => {
       if (data.url) this.setState({ localUrl: data.url });
     }).catch(() => {});
+    // 认证态：非 2xx(远程登录窗口期会 401) 或网络错误 → 降级为非 admin、视为已开启，
+    // 既不暴露管理区也不破坏 header。本机(admin)会拿到真实 { enabled, isAdmin:true, password }。
+    fetch(apiUrl('/api/auth/state')).then(r => {
+      if (!r.ok) throw new Error('auth-state ' + r.status);
+      return r.json();
+    }).then(data => {
+      this._applyAuthState(data);
+    }).catch(() => {
+      this.setState({ authState: makeAuthState({ enabled: true, global: { enabled: true, password: null } }) });
+    });
     // claude-settings 由 SettingsProvider 集中 fetch,这里只订阅 Promise 拿 model 字段
     this.context._claudeSettingsReady.then(data => {
       if (data && data.model) this.setState({ settingsModel: data.model });
@@ -131,6 +167,185 @@ class AppHeader extends React.Component {
   }
 
   reloadFsSkills = async () => SeqLoaders.loadFsSkills(this, { isLocalLog: this.props.isLocalLog });
+
+  // 把服务端返回的认证 state 写入本地(含 scope 信息),并清空编辑草稿。
+  _applyAuthState(data) {
+    this.setState({
+      authState: makeAuthState({
+        enabled: !!data.enabled,
+        isAdmin: !!data.isAdmin,
+        password: data.password ?? null,
+        scope: data.scope === 'project' ? 'project' : 'global',
+        hasProjectOverride: !!data.hasProjectOverride,
+        projectDir: data.projectDir || null,
+        global: data.global && typeof data.global === 'object' ? data.global : { enabled: false, password: null },
+      }),
+      _authPasswordDraft: null,
+    });
+  }
+
+  // 提交认证配置变更(admin-only)。body = { scope?, enabled?, password?, clearOverride? }；
+  // 成功后用服务端回的权威 state 覆盖本地。失败 → message.error 不改 state。
+  postAuthConfig = async (body) => {
+    if (this.state._authSaving) return;
+    this.setState({ _authSaving: true });
+    try {
+      const r = await fetch(apiUrl('/api/auth/config'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!r.ok) throw new Error('auth-config ' + r.status);
+      this._applyAuthState(await r.json());
+      message.success(t('ui.auth.saved'));
+    } catch {
+      message.error(t('ui.auth.saveFailed'));
+    } finally {
+      this.setState({ _authSaving: false });
+    }
+  };
+
+  // 二维码 / URL 输入框要展示的分享地址。
+  // 密码保护开启时,远程用户不再需要 token —— 空密码模式直接放行,非空密码则进登录页用密码进入;
+  // 故去掉 ?token= 给出更干净、可长期收藏/扫码的 URL。关闭时仍需 token,保留原始地址。
+  // authState.enabled 变化会触发 re-render,二维码随之重绘。
+  shareUrl() {
+    const { localUrl, authState } = this.state;
+    if (!localUrl || !authState.enabled) return localUrl;
+    const i = localUrl.indexOf('?');
+    return i === -1 ? localUrl : localUrl.slice(0, i);
+  }
+
+  // 二维码下方的密码管理区（仅 admin 渲染）。支持两个作用域：全局默认 + 本项目专用覆盖。
+  // 顶部 Segmented 切 tab；本项目无覆盖时显示"继承全局/设为专用";有覆盖/全局时显示开关+密码编辑。
+  renderPasswordSection() {
+    const { authState, _authScope, _authSaving } = this.state;
+    const hasProject = !!authState.projectDir;
+    // 极简入口：仅在"什么都没配置"时(本项目无生效防护、无项目覆盖、且全局也未开)显示单个开启按钮。
+    // 默认开启「本项目」密码(无项目则全局)。一旦存在项目覆盖(即便被禁用)或全局已开,就进入完整管理
+    // 界面 —— 否则「禁用的项目覆盖 + 已开的全局」会把 admin 困在只有开启按钮、无法切到全局/移除覆盖。
+    if (!authState.enabled && !authState.hasProjectOverride && !authState.global.enabled) {
+      return (
+        <div className={styles.authSection}>
+          <Button size="small" type="primary" loading={_authSaving} onClick={() => this.postAuthConfig({ scope: hasProject ? 'project' : 'global', enabled: true })}>
+            {t('ui.auth.enableBtn')}
+          </Button>
+        </div>
+      );
+    }
+    // 选中的作用域：跟随用户切换，默认落在当前生效来源。无项目时强制 global。
+    const scope = hasProject ? (_authScope || authState.scope || 'global') : 'global';
+    // 各作用域当前配置：global 始终可读；project 仅在有覆盖时等于 effective,否则 null(继承)。
+    const globalCfg = authState.global || { enabled: false, password: null };
+    const projectCfg = authState.hasProjectOverride ? { enabled: authState.enabled, password: authState.password } : null;
+    const cfg = scope === 'project' ? projectCfg : globalCfg;
+    // 当前查看的作用域是否已启用(可能与 effective 不同：如禁用的项目覆盖 + 启用的全局)。
+    const displayedEnabled = !!(cfg && cfg.enabled);
+    return (
+      <div className={styles.authSection}>
+        {/* 标题行：当前查看的作用域已启用、或确有防护生效时才显示(全都未启用时隐藏，保持极简)。
+            开关(关闭当前作用域)上移到标题右侧，省掉原来的"访问密码 + 开关"独立一行。 */}
+        {(displayedEnabled || authState.enabled) && (
+          <div className={styles.authHeaderRow}>
+            <span className={styles.authTitle}>{t('ui.auth.title')}</span>
+            {displayedEnabled && (
+              <Switch size="small" checked={true} loading={_authSaving} onChange={() => this.postAuthConfig({ scope, enabled: false })} title={t('ui.auth.disable')} />
+            )}
+          </div>
+        )}
+        {hasProject && (
+          <Segmented
+            size="small"
+            block
+            value={scope}
+            onChange={(v) => this.setState({ _authScope: v, _authPasswordDraft: null })}
+            options={[
+              { label: t('ui.auth.scopeProject'), value: 'project' },
+              { label: t('ui.auth.scopeGlobal'), value: 'global' },
+            ]}
+          />
+        )}
+        {scope === 'project' && !authState.hasProjectOverride
+          ? this.renderInheritGlobal()
+          : this.renderScopeEditor(scope, cfg)}
+      </div>
+    );
+  }
+
+  // 本项目无专用配置：提示继承全局 + 一键创建专用密码。
+  renderInheritGlobal() {
+    const { _authSaving } = this.state;
+    return (
+      <>
+        <div className={styles.authPasswordLabel}>{t('ui.auth.inheritsGlobal')}</div>
+        <Button size="small" type="primary" loading={_authSaving} onClick={() => this.postAuthConfig({ scope: 'project', enabled: true })}>
+          {t('ui.auth.setProjectSpecific')}
+        </Button>
+      </>
+    );
+  }
+
+  // 编辑某作用域(global / project-with-override)：关闭→开启按钮;开启→密码框+复制+保存。
+  // 全局作用域下、且处于项目上下文时，在全局密码下方放一个"共用全局密码"开关：
+  //   开 = 本项目共用全局密码(无专用覆盖)；关 = 本项目改设专用密码(跳到本项目 tab 显示新密码)。
+  renderScopeEditor(scope, cfg) {
+    const { _authPasswordDraft, _authSaving, authState } = this.state;
+    const hasProject = !!authState.projectDir;
+    const shareGlobalRow = (scope === 'global' && hasProject) ? (
+      <div className={styles.authHeaderRow}>
+        <span className={styles.authPasswordLabel}>{t('ui.auth.useGlobal')}</span>
+        <Switch
+          size="small"
+          checked={!authState.hasProjectOverride}
+          loading={_authSaving}
+          title={t('ui.auth.useGlobal')}
+          onChange={(checked) => {
+            if (checked) { this.setState({ _authScope: 'global' }); this.postAuthConfig({ clearOverride: true }); }
+            else { this.setState({ _authScope: 'project' }); this.postAuthConfig({ scope: 'project', enabled: true }); }
+          }}
+        />
+      </div>
+    ) : null;
+    if (!cfg.enabled) {
+      return (
+        <Button size="small" type="primary" loading={_authSaving} onClick={() => this.postAuthConfig({ scope, enabled: true })}>
+          {t('ui.auth.enableBtn')}
+        </Button>
+      );
+    }
+    // 密码统一以大写展示(登录侧忽略大小写,见 routes/auth.js)；输入也强制大写,所见即所存。
+    const pw = (cfg.password ?? '').toUpperCase();
+    const draft = _authPasswordDraft == null ? pw : _authPasswordDraft;
+    const dirty = _authPasswordDraft != null && _authPasswordDraft !== pw;
+    return (
+      <>
+        <Input
+          value={draft}
+          className={styles.authPasswordInput}
+          onChange={e => this.setState({ _authPasswordDraft: e.target.value.toUpperCase() })}
+          onPressEnter={() => dirty && this.postAuthConfig({ scope, password: draft })}
+          suffix={
+            <CopyOutlined
+              className={styles.qrcodeUrlCopy}
+              title={t('ui.auth.copy')}
+              onClick={() => {
+                // 复制已保存的密码(pw),而非未保存的草稿(draft) —— 否则编辑未保存时复制会分享出
+                // 一个尚未生效的密码,远程登录会失败。
+                navigator.clipboard.writeText(pw).then(() => message.success(t('ui.auth.copied'))).catch(() => {});
+              }}
+            />
+          }
+        />
+        {dirty && (
+          <Button size="small" type="primary" loading={_authSaving} className={styles.authSaveBtn} onClick={() => this.postAuthConfig({ scope, password: draft })}>
+            {t('ui.auth.save')}
+          </Button>
+        )}
+        {draft === '' && <div className={styles.authEmptyWarn}>{t('ui.auth.emptyWarning')}</div>}
+        {shareGlobalRow}
+      </>
+    );
+  }
 
   loadMemory = async () => SeqLoaders.loadProjectMemory(this);
 
@@ -1224,22 +1439,23 @@ class AppHeader extends React.Component {
                    单独触发关闭只通过 trigger 元素自身或外部空白处。 */
                 <div className={styles.qrcodePopover} onClick={e => e.stopPropagation()}>
                   <div className={styles.qrcodeTitle}>{t('ui.scanToCoding')} <ConceptHelp doc="QRCode" /></div>
-                  <QRCodeCanvas value={this.state.localUrl} size={200} bgColor={themeColor === 'light' ? '#ffffff' : '#141414'} fgColor={themeColor === 'light' ? '#1a1a1a' : '#d9d9d9'} level="M" />
+                  <QRCodeCanvas value={this.shareUrl()} size={200} bgColor={themeColor === 'light' ? '#ffffff' : '#141414'} fgColor={themeColor === 'light' ? '#1a1a1a' : '#d9d9d9'} level="M" />
                   <Input
                     readOnly
-                    value={this.state.localUrl}
+                    value={this.shareUrl()}
                     className={styles.qrcodeUrlInput}
                     suffix={
                       <CopyOutlined
                         className={styles.qrcodeUrlCopy}
                         onClick={() => {
-                          navigator.clipboard.writeText(this.state.localUrl).then(() => {
+                          navigator.clipboard.writeText(this.shareUrl()).then(() => {
                             message.success(t('ui.copied'));
                           }).catch(() => {});
                         }}
                       />
                     }
                   />
+                  {this.state.authState.isAdmin && this.renderPasswordSection()}
                 </div>
               }
               /* 移动端 hover/focus 不可靠(tap → focus → 立即触发外部 click 关闭),改 click 受控:

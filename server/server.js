@@ -27,6 +27,7 @@ import { workspacesRoutes } from './routes/workspaces.js';
 import { eventsRoutes } from './routes/events.js';
 import { askPermRoutes } from './routes/ask-perm.js';
 import { teamRoutes } from './routes/team.js';
+import { authRoutes } from './routes/auth.js';
 
 const execFileAsync = promisify(execFile);
 const execAsync = promisify(exec);
@@ -53,7 +54,8 @@ function execWithStdin(cmd, args, input, options) {
 }
 import { LOG_FILE, _initPromise, _resumeState, _projectName, _logDir, streamingState, resetStreamingState, PROFILE_PATH, setLivePort } from './interceptor.js';
 import { LOG_DIR, setLogDir, getClaudeConfigDir } from '../findcc.js';
-import { t } from './i18n.js';
+import { t, getLang } from './i18n.js';
+import { loadAuthConfig, loadAuthState, saveAuthConfig, clearProjectOverride, generatePassword, decideAuth, parseCookies, renderLoginPage, localeFromAcceptLanguage } from './lib/auth.js';
 import { checkAndUpdate } from './lib/updater.js';
 import { loadPlugins, runWaterfallHook, runParallelHook } from './lib/plugin-loader.js';
 import { CONTEXT_WINDOW_FILE, readModelContextSize } from './lib/context-watcher.js';
@@ -289,6 +291,33 @@ const ACCESS_TOKEN = randomBytes(16).toString('hex');
 // token can't double as a bridge auth bypass for same-host CSRF (round-3 P1).
 const INTERNAL_TOKEN = randomBytes(16).toString('hex');
 
+// 密码登录配置（与 token 并存的第二种远程访问方式）。持久化为 preferences.json：全局 `auth`
+// 键 + 可选 `authByProject[<projectDir>]` 覆盖（密码 base64 轻混淆 + 文件 0600）。
+// AUTH_PROJECT = 本 server 服务的项目（CLI 模式取 CCV_PROJECT_DIR）；非 CLI/日志模式为 null
+// → 只认全局。鉴权用 effective = 项目覆盖(若存在) else 全局。
+// 同时在 --usePassword(CCV_USE_PASSWORD) 时取项目：该 flag 是「项目启动」专用，必须写「本项目」密码。
+// 不能只靠 isCliMode —— 它在模块顶层只求值一次，而 server.js 可能经 interceptor 在 cli.js 设置
+// CCV_CLI_MODE 之前就被加载(isCliMode=false)，导致 --usePassword 误写全局。
+const AUTH_PROJECT = (isCliMode || process.env.CCV_USE_PASSWORD === '1')
+  ? (process.env.CCV_PROJECT_DIR || process.cwd())
+  : null;
+let authConfig = loadAuthConfig(AUTH_PROJECT);
+// CLI --usePassword 交接（cli.js 在 import 本模块前写入 env）：写入本项目作用域（无项目则全局）。
+// 优先级 显式值(CCV_PASSWORD) > 该作用域已持久化密码 > 随机生成。
+if (process.env.CCV_USE_PASSWORD === '1') {
+  const explicit = process.env.CCV_PASSWORD;
+  let password = authConfig.password;
+  if (typeof explicit === 'string' && explicit.length > 0) password = explicit;
+  else if (!password) password = generatePassword();
+  const scope = AUTH_PROJECT ? 'project' : 'global';
+  saveAuthConfig({ enabled: true, password }, { scope, projectDir: AUTH_PROJECT });
+  authConfig = loadAuthConfig(AUTH_PROJECT);
+}
+// 钩子已消费完毕：清掉这两个 env，避免明文密码随 {...process.env} 泄漏进 spawn 出的 Claude 子进程
+// （与刻意不把 ACCESS_TOKEN 放进 env 的策略一致）。此后无人再读它们（仅上面这段读取）。
+delete process.env.CCV_USE_PASSWORD;
+delete process.env.CCV_PASSWORD;
+
 let clients = [];
 let server;
 let actualPort = 0;
@@ -418,6 +447,22 @@ const deps = {
   maskProfiles: _maskProfiles,
   maskApiKey: _maskApiKey,
   isMasked: _isMasked,
+  // Password-auth config. authConfig = the EFFECTIVE config the gate enforces for this
+  // server's project (project override else global). Mutations persist to the chosen
+  // scope then recompute the effective in-memory value.
+  get authConfig() { return authConfig; },
+  get authProject() { return AUTH_PROJECT; },
+  getAuthState() { return loadAuthState(AUTH_PROJECT); },
+  setAuthConfig(c, scope) {
+    saveAuthConfig(c, { scope: scope === 'global' ? 'global' : (AUTH_PROJECT ? 'project' : 'global'), projectDir: AUTH_PROJECT });
+    authConfig = loadAuthConfig(AUTH_PROJECT);
+    return authConfig;
+  },
+  clearAuthOverride() {
+    clearProjectOverride(AUTH_PROJECT);
+    authConfig = loadAuthConfig(AUTH_PROJECT);
+    return authConfig;
+  },
   // Constants local to server.js.
   ACCESS_TOKEN,
   INTERNAL_TOKEN,
@@ -441,6 +486,7 @@ const deps = {
 // dispatch() runs after the request prelude; an unmatched request returns false and
 // falls through to static-file serving / 404.
 const _routes = [
+  ...authRoutes,
   ...projectMetaRoutes,
   ...miscRoutes,
   ...preferencesRoutes,
@@ -479,18 +525,42 @@ async function handleRequest(req, res) {
     return;
   }
 
-  // 局域网访问 token 验证（本地 127.0.0.1 / ::1 免验证，静态资源免验证）
+  // 局域网访问验证：decideAuth() 统一决策（本地 127.0.0.1/::1 免验、静态资源免验、
+  // ?token=/cookie/密码登录三选一）。详见 server/lib/auth.js。
+  // 不变式：login-page/unauthorized/forbidden 必须 return；只有 allow 才继续往下进
+  // Host allowlist + 路由。
   const remoteIp = req.socket.remoteAddress;
   const isLocal = remoteIp === '127.0.0.1' || remoteIp === '::1' || remoteIp === '::ffff:127.0.0.1';
   const isStaticAsset = url.startsWith('/assets/') || url === '/favicon.ico';
-  if (!isLocal && !isStaticAsset) {
-    const urlToken = parsedUrl.searchParams.get('token');
-    if (urlToken !== ACCESS_TOKEN) {
-      res.writeHead(403, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: 'Forbidden: invalid token' }));
-      return;
-    }
+  const wantsHtml = method === 'GET' && ((req.headers.accept || '').includes('text/html') || url === '/');
+  const authDecision = decideAuth({
+    isStaticAsset,
+    pathname: url,
+    isLocal,
+    urlToken: parsedUrl.searchParams.get('token'),
+    cookieToken: parseCookies(req.headers.cookie).ccv_auth,
+    accessToken: ACCESS_TOKEN,
+    enabled: authConfig.enabled,
+    password: authConfig.password,
+    wantsHtml,
+  });
+  if (authDecision.action === 'login-page') {
+    const lang = localeFromAcceptLanguage(req.headers['accept-language']) || getLang();
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+    res.end(renderLoginPage({ lang }));
+    return;
   }
+  if (authDecision.action === 'unauthorized') {
+    res.writeHead(401, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Unauthorized' }));
+    return;
+  }
+  if (authDecision.action === 'forbidden') {
+    res.writeHead(403, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Forbidden: invalid token' }));
+    return;
+  }
+  // action === 'allow' → 继续
 
   // DNS rebinding 防护:即使带了正确 token,Host header 必须落在 allowlist 里。
   // 默认放行 loopback + 本机所有 LAN IPv4(getAllLocalIps()):cc-viewer 核心场景就是手机扫码访问 LAN URL,
@@ -719,6 +789,10 @@ export async function startViewer() {
             for (const _ip of _ips) {
               console.error(t('server.startedNetwork', { protocol: serverProtocol, ip: _ip, port, token: ACCESS_TOKEN }));
             }
+            if (authConfig.enabled) {
+              if (authConfig.password === '') console.error(t('server.passwordEmptyWarn'));
+              else console.error(t('server.passwordActive', { password: authConfig.password }));
+            }
           }
           // v2.0.69 之前的版本会清空控制台，自动打开浏览器确保用户能看到界面
           try {
@@ -862,14 +936,34 @@ async function setupTerminalWebSocket(httpServer) {
     };
 
     httpServer.on('upgrade', (req, socket, head) => {
-      const pathname = new URL(req.url, `${serverProtocol}://${req.headers.host}`).pathname;
+      const wsUrl = new URL(req.url, `${serverProtocol}://${req.headers.host}`);
+      const pathname = wsUrl.pathname;
+      // 与 HTTP 一致的鉴权（此前 WS upgrade 完全不校验 token，远程终端实为无门禁——本次堵洞）。
+      // 在此显式计算 isLocal（与 handleRequest 同款三态判断），WS 视作非 HTML 请求。
+      const wsRemoteIp = req.socket.remoteAddress;
+      const wsIsLocal = wsRemoteIp === '127.0.0.1' || wsRemoteIp === '::1' || wsRemoteIp === '::ffff:127.0.0.1';
+      const wsAuth = decideAuth({
+        isStaticAsset: false,
+        pathname,
+        isLocal: wsIsLocal,
+        urlToken: wsUrl.searchParams.get('token'),
+        cookieToken: parseCookies(req.headers.cookie).ccv_auth,
+        accessToken: ACCESS_TOKEN,
+        enabled: authConfig.enabled,
+        password: authConfig.password,
+        wantsHtml: false,
+      });
+      if (wsAuth.action !== 'allow') {
+        socket.destroy();
+        return;
+      }
       if (pathname === '/ws/terminal') {
         wss.handleUpgrade(req, socket, head, (ws) => {
           wss.emit('connection', ws, req);
         });
       } else if (pathname === '/ws/terminal-scratch') {
         // 校验 id：缺失或非法 → destroy（避免 Map<id> 被注入空键 / 超长 / 特殊字符）
-        const scratchId = new URL(req.url, `${serverProtocol}://${req.headers.host}`).searchParams.get('id');
+        const scratchId = wsUrl.searchParams.get('id');
         if (!scratchId || !SCRATCH_ID_RE.test(scratchId)) {
           socket.destroy();
           return;
@@ -1389,6 +1483,13 @@ export function getAccessToken() {
 
 export function getInternalToken() {
   return INTERNAL_TOKEN;
+}
+
+// Effective password-auth config for this server's project (enabled + plaintext password).
+// Used by cli.js to print the active password at CLI-mode startup (the non-CLI startup log
+// can't run in CLI mode). Plaintext is fine: this stays in-process (admin terminal).
+export function getAuthConfig() {
+  return authConfig;
 }
 
 // In-process broadcast helper for the `turn_end` SSE event. Two callers:

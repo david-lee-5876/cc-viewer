@@ -139,6 +139,53 @@
   color: var(--color-primary-light);
 }
 
+/* 二维码下方的密码管理区（admin-only），复用 .qrcodeSection 的盒子风格 */
+.authSection {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  width: 100%;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--border-secondary);
+  border-radius: 8px;
+  background: var(--bg-container);
+  gap: 8px;
+}
+
+.authHeaderRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.authTitle {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.authPasswordLabel {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.authPasswordInput {
+  font-size: 12px;
+  font-family: Menlo, Monaco, monospace;
+}
+
+.authSaveBtn {
+  align-self: flex-end;
+}
+
+.authEmptyWarn {
+  font-size: 12px;
+  color: var(--color-error-light);
+  line-height: 1.4;
+}
+
+
 /* Settings group box */
 .settingsGroupBox {
   border: 1px solid var(--border-secondary);

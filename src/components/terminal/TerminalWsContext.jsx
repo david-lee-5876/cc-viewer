@@ -1,4 +1,5 @@
 import React, { createContext } from 'react';
+import { appendToken } from '../../utils/apiUrl';
 
 /**
  * Single shared `/ws/terminal` connection.
@@ -64,7 +65,9 @@ export class TerminalWsProvider extends React.Component {
     let url;
     try {
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      url = `${protocol}//${window.location.host}/ws/terminal`;
+      // 带上 LAN token —— 服务端 WS upgrade 与 HTTP 同款鉴权,远程 ?token= 终端必须携带凭证。
+      // 密码登录用户由浏览器自动随握手发送 ccv_auth cookie,此处无 token 时原样返回。
+      url = appendToken(`${protocol}//${window.location.host}/ws/terminal`);
     } catch (e) {
       return; // SSR / 测试环境兜底
     }

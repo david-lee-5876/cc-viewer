@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.6.276 (2026-05-25)
+
+- feat(auth): 新增密码登录认证(与 URL token 并存) —— 远程未授权访问弹极简密码页,输对后服务端 `Set-Cookie: ccv_auth`(SameSite=Strict)并自动刷新进入;本机(127.0.0.1)永远免密且为 admin,在二维码 popover 下方可开启/改密/复制/关闭(空密码=无防护并警告),启用后二维码与 URL 自动去掉 ?token=(远程改走密码页登录);登录页密码框带显隐(眼睛)切换;CLI `--usePassword[=<pwd>]` 启动即开启(裸 flag 随机 6 位大写字母+数字,大写展示、登录忽略大小写,写入「本项目」作用域而非全局,并在启动输出中打印当前密码),开关与密码持久化为 `preferences.json`:全局 `auth` 键 + 可选 `authByProject[<projectDir>]` 项目级覆盖(项目级优先、否则回退全局;admin 可在二维码下方按「本项目/全局」切换管理、一键移除覆盖回退全局);密码 base64 轻混淆、非裸明文,文件 0600;`/api/preferences` 读写均剥离 `auth`/`authByProject` 键防密码泄漏与跨项目越权篡改;`--usePassword` 消费后即清除 env 避免泄漏进 Claude 子进程;鉴权统一收敛为纯函数 `decideAuth()`,HTTP 与 WS upgrade 共用(顺带补上 WS 此前缺失的鉴权);`/api/auth/login` 按源 IP 内存限流(60s/20 次→429);新增 `server/lib/auth.js` + `server/routes/auth.js` + `test/auth-lib.test.js` / `test/api-auth.test.js` / `test/usepassword-startup.test.js`
+- chore(css): 文件查看器 Markdown 预览内边距收窄(24/36→10/20);MdxEditor 工具栏/代码块/表格控件整体瘦身(图标统一 12–14px、语言/类型选择框收窄、删除按钮 inline-flex 居中、hover 透明度 0.5→0.22)
+
 ## 1.6.275 (2026-05-25)
 
 - refactor(server): `server/server.js`(5467 → 1791 行)的 `handleRequest` 巨型 if-chain(84 路由)按功能域拆到 `server/routes/*` 14 个模块(project-meta / misc / preferences / git / plugins / logs / voice-pack / skills / files-fs / files-content / workspaces / events / ask-perm / team)+ 无依赖的 `_dispatch.js` 有序首匹配 dispatcher(保留方法区分与 prefix/exact 顺序语义,`/api/file-raw` 与 `/api/ask-hook/:id/result` 用 predicate);路由经单例 `deps`(getter 暴露可变运行时状态、直引共享 Map、helper/常量)注入,prelude / 静态服务 / WebSocket / lifecycle / 全部 export 仍留 `server.js`,纯搬移零行为变更;`stopViewer` 的 `clients` 改原地清空(`clients.length = 0`)保持引用稳定,消除 stop/start 循环的悬垂引用;清理 `server.js` 迁移后失效的死 import 与 `deps` 冗余键;新增 `test/route-dispatch.test.js` 守方法区分 + predicate 路由不变量

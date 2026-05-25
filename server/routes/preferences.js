@@ -1,5 +1,5 @@
 // Preferences, Claude settings, and proxy-profile routes (moved verbatim from server.js).
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, chmodSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
 import { LOG_DIR, setLogDir, getClaudeConfigDir } from '../../findcc.js';
@@ -12,6 +12,11 @@ import { sendEventToClients } from '../lib/log-watcher.js';
 function preferencesGet(req, res, parsedUrl, isLocal, deps) {
   let prefs = {};
   try { if (existsSync(deps.getPrefsFile())) prefs = JSON.parse(readFileSync(deps.getPrefsFile(), 'utf-8')); } catch { }
+  // auth 配置(含明文密码)与偏好同存于 preferences.json,但绝不能从这里下发 ——
+  // 密码仅由 admin-only 的 /api/auth/state 暴露给本机。否则远程密码登录用户也能读到明文。
+  // 全局 auth 与每个项目的 authByProject 覆盖都要剥离(后者同样含明文密码)。
+  delete prefs.auth;
+  delete prefs.authByProject;
   prefs.logDir = LOG_DIR; // 始终返回当前运行时的日志目录
   // home-friendly 展示形态：设了 CLAUDE_CONFIG_DIR 的用户看到真实路径，默认用户看到 "~/.claude"
   // join() 而非字符串拼接，避免 Windows 分隔符不匹配导致比较失败
@@ -32,6 +37,11 @@ function preferencesPost(req, res, parsedUrl, isLocal, deps) {
   req.on('end', () => {
     try {
       const incoming = JSON.parse(body);
+      // auth 只能经 admin-only 的 /api/auth/config 修改;剥掉 incoming.auth 与 incoming.authByProject
+      // 防止任意已授权客户端(含远程密码登录用户)借 /api/preferences 改开关/密码、或植入/篡改
+      // 任意项目的覆盖,绕过 admin 门禁。
+      delete incoming.auth;
+      delete incoming.authByProject;
       // 如果修改了日志目录，先切换再保存到新位置（新目录下生成 preferences.json）
       if (incoming.logDir && typeof incoming.logDir === 'string') {
         setLogDir(incoming.logDir);
@@ -52,6 +62,9 @@ function preferencesPost(req, res, parsedUrl, isLocal, deps) {
       const prefsDir = dirname(prefsFile);
       if (!existsSync(prefsDir)) mkdirSync(prefsDir, { recursive: true });
       writeFileSync(prefsFile, JSON.stringify(prefs, null, 2));
+      // preferences.json 可能携带 auth 的 base64 密码 —— 与 lib/auth.js writePrefs 一致地
+      // 重申 0600,避免该路径(无 mode/不 chmod)把密码文件留成默认 umask 的可读权限。
+      try { chmodSync(prefsFile, 0o600); } catch { /* best-effort; non-POSIX or race */ }
       // 主题切换时同步到 Claude Code CLI：发 /theme，监听输出验证结果，不对就再发一次
       if (incoming.themeColor && deps.writeToPty && deps.onPtyData) {
         const target = incoming.themeColor === 'light' ? 'light' : 'dark';
@@ -76,6 +89,10 @@ function preferencesPost(req, res, parsedUrl, isLocal, deps) {
         const timeout = setTimeout(() => { removeListener(); }, 5000);
         try { deps.writeToPty('/theme\r'); } catch {}
       }
+      // 回显里也剥离 auth/authByProject(含 base64 密码) —— GET 已剥离,POST 回显同样不能漏给
+      // 已授权的远程客户端。磁盘上的值已在上面写入,这里只清内存对象供响应用。
+      delete prefs.auth;
+      delete prefs.authByProject;
       prefs.logDir = LOG_DIR;
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(prefs));

@@ -386,6 +386,13 @@ async function runCliMode(extraClaudeArgs = [], cwd, noOpen = false) {
   for (const _ip of _lanIps) {
     console.log(`  ➜ Network: ${protocol}://${_ip}:${port}?token=${_token}`);
   }
+  // 密码登录已启用时,把当前密码打印出来 —— 否则 `ccv --usePassword`(随机密码)在 CLI 模式下
+  // 用户无从得知密码(server.js 的密码打印只在非 CLI 模式生效)。空密码=无防护,给出警告。
+  const _auth = serverMod.getAuthConfig && serverMod.getAuthConfig();
+  if (_auth && _auth.enabled) {
+    if (_auth.password === '') console.error(`  ${t('server.passwordEmptyWarn')}`);
+    else console.log(`  ${t('server.passwordActive', { password: _auth.password })}`);
+  }
 
   // 5. 注册退出处理
   const cleanup = () => {
@@ -498,6 +505,13 @@ async function runSdkMode(extraClaudeArgs = [], cwd, noOpen = false) {
   const _token = serverMod.getAccessToken();
   for (const _ip of _lanIps) {
     console.log(`  ➜ Network: ${protocol}://${_ip}:${port}?token=${_token}`);
+  }
+  // 密码登录已启用时,把当前密码打印出来 —— 否则 `ccv --usePassword`(随机密码)在 CLI 模式下
+  // 用户无从得知密码(server.js 的密码打印只在非 CLI 模式生效)。空密码=无防护,给出警告。
+  const _auth = serverMod.getAuthConfig && serverMod.getAuthConfig();
+  if (_auth && _auth.enabled) {
+    if (_auth.password === '') console.error(`  ${t('server.passwordEmptyWarn')}`);
+    else console.log(`  ${t('server.passwordActive', { password: _auth.password })}`);
   }
 
   // 注册退出处理
@@ -643,6 +657,21 @@ if (userAvatarIdx !== -1) {
     console.error(t('cli.userAvatarRequired'));
     process.exit(1);
   }
+}
+
+// Extract --usePassword[=<pwd>] — enable password login at startup.
+// Bare form → random 6-char password; =<pwd> form → explicit. server.js resolves
+// the final value: explicit > already-persisted > random.
+const usePwdIdx = args.findIndex((a) => a === '--usePassword' || a.startsWith('--usePassword='));
+if (usePwdIdx !== -1) {
+  const arg = args[usePwdIdx];
+  process.env.CCV_USE_PASSWORD = '1';
+  const eq = arg.indexOf('=');
+  if (eq !== -1) {
+    const val = arg.slice(eq + 1);
+    if (val.length > 0) process.env.CCV_PASSWORD = val;
+  }
+  args.splice(usePwdIdx, 1);
 }
 
 // ccv 自有命令判断

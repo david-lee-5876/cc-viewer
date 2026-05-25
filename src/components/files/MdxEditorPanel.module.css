@@ -85,7 +85,7 @@
 .container :global(.mdxeditor-root-contenteditable) {
   flex: 1;
   overflow: auto;
-  padding: 16px 24px;
+  padding: 10px 10px;
 }
 
 /* =====================================================================
@@ -395,7 +395,7 @@
 .container :global([class*='_toolbarRoot']) {
   border-bottom: 1px solid var(--border-secondary);
   border-radius: 0;
-  padding: 6px 8px;
+  padding: 4px 4px;
   gap: 4px;
   flex-wrap: nowrap;
   overflow-x: auto;
@@ -489,12 +489,14 @@
   margin: 4px 6px;
 }
 
-/* Block type select 触发器 */
+/* Block type select 触发器 — MDXEditor 默认 width: var(--spacing-36)=9rem(144px)，
+   这里显式收窄到 124px（-20px） */
 .container :global([class*='_selectTrigger']) {
   background: var(--bg-elevated);
   border: 1px solid var(--border-secondary);
   border-radius: 4px;
   height: 32px;
+  width: 124px;
   padding: 0 8px;
   color: var(--text-primary);
   cursor: pointer;
@@ -537,9 +539,10 @@
   border-top: 0;
   border-right: 0;
   border-bottom-left-radius: 4px;
-  padding: 3px 4px;
+  padding: 2px 3px;
   display: flex;
-  gap: 4px;
+  align-items: center;
+  gap: 3px;
   opacity: 0;
   transition: opacity 0.18s ease;
 }
@@ -549,24 +552,35 @@
   opacity: 1;
 }
 
-/* 语言选择 trigger 单独瘦身：从 192×32 (MDX 默认 spacing-48) 压到 110×24，字号 11px。
+/* 语言选择 trigger 单独瘦身：从 192×32 (MDX 默认 spacing-48) 压到 92×20，字号 10px。
    长语言名（"TypeScript" 等）超出走 ellipsis，hover 时 toolbar 已浮起看得清；
    下拉 content (_toolbarCodeBlockLanguageSelectContent) 宽度不动，保留 192px 让列表可读。 */
 .container :global([class*='_toolbarCodeBlockLanguageSelectTrigger']) {
-  width: 110px;
-  height: 24px;
-  font-size: 11px;
-  padding: 0 6px;
+  width: 92px;
+  height: 20px;
+  font-size: 10px;
+  padding: 0 5px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-/* 删除代码块的 icon button 也跟着瘦身保持视觉协调 */
+/* 删除代码块的 icon button 也跟着瘦身保持视觉协调；
+   inline-flex 居中让垃圾桶 svg 垂直对齐语言选择框（默认按钮内容会偏上）。 */
 .container :global([class*='_codeMirrorToolbar'] button) {
-  height: 24px;
-  min-width: 24px;
-  padding: 0 4px;
+  height: 20px;
+  min-width: 20px;
+  padding: 0 3px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* toolbar 内所有图标（语言选择的下拉箭头 + 删除垃圾桶）统一收到 14px，
+   跟控件整体瘦身保持比例。 */
+.container :global([class*='_codeMirrorToolbar'] svg) {
+  width: 14px;
+  height: 14px;
 }
 
 .container :global(.cm-editor) {
@@ -660,7 +674,7 @@
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
   z-index: 1500;
   padding: 4px;
-  min-width: 144px;
+  min-width: 124px;
 }
 
 :global([class*='_selectItem']) {
@@ -829,6 +843,17 @@
   transition: opacity 0.18s ease, color 0.15s ease;
 }
 
+/* 图标本身缩到 12px——MDXEditor 默认不给这些表格工具按钮的 svg 设尺寸（走库
+   内在 ~20px），这里显式收小让控件整体更不显眼。 */
+.container :global([class*='_tableEditor'] [class*='_tableColumnEditorTrigger'] svg),
+.container :global([class*='_tableEditor'] [class*='_tableRowEditorTrigger'] svg),
+.container :global([class*='_tableEditor'] [class*='_addRowButton'] svg),
+.container :global([class*='_tableEditor'] [class*='_addColumnButton'] svg),
+.container :global([class*='_tableEditor'] [class*='_iconButton'] svg) {
+  width: 12px;
+  height: 12px;
+}
+
 @media (hover: hover) {
   /* 表格被 hover 时：所有控件半透明显形（提示存在）*/
   .container :global([class*='_tableEditor']:hover [class*='_tableColumnEditorTrigger']),
@@ -836,7 +861,7 @@
   .container :global([class*='_tableEditor']:hover [class*='_addRowButton']),
   .container :global([class*='_tableEditor']:hover [class*='_addColumnButton']),
   .container :global([class*='_tableEditor']:hover [class*='_iconButton']) {
-    opacity: 0.5;
+    opacity: 0.22;
   }
 
   /* 单独控件被 hover 时：完全显形 + 主题色提示可点击 */
@@ -855,7 +880,7 @@
   .container :global([class*='_tableEditor']:focus-within [class*='_addRowButton']),
   .container :global([class*='_tableEditor']:focus-within [class*='_addColumnButton']),
   .container :global([class*='_tableEditor']:focus-within [class*='_iconButton']) {
-    opacity: 0.5;
+    opacity: 0.22;
   }
 }
 

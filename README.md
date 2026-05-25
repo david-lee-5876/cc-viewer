@@ -129,6 +129,17 @@ You can even scan a QR code and code from a mobile device:
 
 Everything you imagined about mobile coding — plus a plugin mechanism: if you need to customize for your own coding habits, stay tuned for plugin hook updates.
 
+### Password protection
+
+By default, remote (LAN) access requires the `?token=` query that ccv prints at startup. As an alternative that's friendlier to share, scan, or bookmark, you can turn on **password login**:
+
+* Start with `ccv --usePassword` to enable it immediately. A bare flag auto-generates a 6-character password (uppercase letters + digits) and prints it to the console; `ccv --usePassword=<your-password>` sets a specific one. The password is shown in uppercase but matched case-insensitively at login, so it's easy to type on a phone.
+* The machine that opens ccv on `127.0.0.1` is the **admin**: it never needs a password and is the only one allowed to view or change it. Open the QR-code popover — directly below the QR you can enable protection, edit/copy the password, or turn it back off.
+* Remote devices opening the LAN URL (without a token) are shown a minimal password page; entering the correct password sets an `HttpOnly` cookie and the page refreshes into the app. The existing `?token=` URL keeps working in parallel.
+* An **empty password means no protection at all** — it is allowed, but the admin UI shows a clear security warning.
+* **Global default + per-project override:** by default one password covers every project. From the QR popover the admin can switch between **This project** and **Global** — set a project-specific password that overrides the global default for that project only, or remove the override to inherit the global setting again. (A disabled project override means "no protection for this project", which is different from removing it.)
+* The on/off state and password(s) are persisted alongside your other settings in cc-viewer's `preferences.json` — a global `auth` key plus an optional `authByProject` map (the password is base64-obfuscated, not stored as raw plaintext; file mode `0600`). The login cookie is tied to the per-launch token, so restarting ccv requires remote devices to log in again.
+
 ### Logger mode (view the complete Claude Code session)
 
 <img height="768" width="1500" alt="image" src="https://github.com/user-attachments/assets/a8a9f3f7-d876-4f6b-a64d-f323a05c4d21" />
