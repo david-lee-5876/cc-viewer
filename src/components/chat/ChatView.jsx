@@ -9,7 +9,7 @@ import ImageLightbox from '../common/ImageLightbox';
 import GitChanges from '../git/GitChanges';
 import GitDiffView from '../git/GitDiffView';
 import ToolApprovalPanel from '../approval/ToolApprovalPanel';
-import { getModelInfo, getEffectiveModel, resolveProducerModelInfo } from '../../utils/helpers';
+import { getModelInfo, getEffectiveModel, resolveProducerModelInfo, AUTO_APPROVE_INSTANT } from '../../utils/helpers';
 import { getTeammateAvatar } from '../../utils/teammateAvatars';
 import { isSystemText, classifyUserContent, isMainAgent, isTeammate, resolveTeammateNames } from '../../utils/contentFilter';
 import { classifyRequest, formatRequestTag, formatTeammateLabel } from '../../utils/requestType';
@@ -55,6 +55,10 @@ import styles from './ChatView.module.css';
 const { Text } = Typography;
 
 const QUEUE_THRESHOLD = 20;
+
+// 免审批下 PTY 子代理 prompt 去重时窗：同一 prompt 在该窗口内被反复检测时只放行一次，
+// 挡住 PTY 慢回显/重绘导致的二次自动放行（_promptSubmitting 仅 500ms，不足以覆盖）。
+const AUTO_ALLOW_PTY_DEDUPE_MS = 2000;
 
 const MOBILE_ITEM_LIMIT = 240;
 const IOS_ITEM_LIMIT = 150;
@@ -2081,13 +2085,21 @@ class ChatView extends React.Component {
           // SDK mode: ExitPlanMode — show plan approval UI
           this.setState({ pendingPlanApproval: { id: msg.id, input: msg.input } });
         } else if (msg.type === 'perm-hook-pending') {
-          // Queue support: if a permission panel is already showing, queue the new one
-          this.setState(state => {
-            if (state.pendingPermission) {
-              return { permissionQueue: [...state.permissionQueue, { id: msg.id, toolName: msg.toolName, input: msg.input }] };
-            }
-            return { pendingPermission: { id: msg.id, toolName: msg.toolName, input: msg.input } };
-          });
+          // 免审批：在请求到达处直接放行，不设 pendingPermission、不入队，从源头绕过
+          // ToolApprovalPanel（否则面板会先挂载再于下一 tick 自动批准，残留一帧 + 200ms
+          // 退场动画的闪烁）。ws 未连通时 autoAllow 返回 false → 回落到正常面板/队列路径，
+          // 保持请求可见可恢复（重连服务端会重放），不静默丢成 timeout-deny。
+          const instantAllowed = this.props.autoApproveSeconds === AUTO_APPROVE_INSTANT
+            && this._permission.autoAllow({ id: msg.id });
+          if (!instantAllowed) {
+            // Queue support: if a permission panel is already showing, queue the new one
+            this.setState(state => {
+              if (state.pendingPermission) {
+                return { permissionQueue: [...state.permissionQueue, { id: msg.id, toolName: msg.toolName, input: msg.input }] };
+              }
+              return { pendingPermission: { id: msg.id, toolName: msg.toolName, input: msg.input } };
+            });
+          }
         } else if (msg.type === 'perm-hook-timeout') {
           // Timeout carries id — only clear if it matches the active request, or remove from queue
           this.setState(state => {
@@ -2249,6 +2261,21 @@ class ChatView extends React.Component {
       // SubAgent permission prompt: route to ToolApprovalPanel instead of renderDangerApproval
       // when hooks don't fire (subAgent tool calls bypass PreToolUse hooks)
       if (isDangerousOperationPrompt(prompt) && !this.state.pendingPermission) {
+        // 免审批：子代理权限提示同样从源头放行 —— 直接选「允许」项，不弹 ToolApprovalPanel。
+        // 结构性防重入：免审批不设 pendingPermission（旧的 !pendingPermission 闸失效），仅靠
+        // handlePromptOptionClick 的 _promptSubmitting(500ms) 不足以挡住「PTY 慢回显/重绘期间
+        // 同一 prompt 被反复检测」——用 prompt 签名 + 短时窗去重，避免二次 ↓↵ 打进已变化的焦点。
+        if (this.props.autoApproveSeconds === AUTO_APPROVE_INSTANT) {
+          const sig = `${prompt.question} ${(prompt.options || []).map(o => o.text).join('')}`;
+          const now = Date.now();
+          const dup = this._autoAllowedPtySig === sig && (now - (this._autoAllowedPtyAt || 0)) < AUTO_ALLOW_PTY_DEDUPE_MS;
+          if (!dup) {
+            this._autoAllowedPtySig = sig;
+            this._autoAllowedPtyAt = now;
+            this._permission.autoAllow({ source: 'pty', ptyPrompt: prompt });
+          }
+          return;
+        }
         const toolInfo = parseToolInfoFromBuffer(this._ptyBuffer, question, options);
         const id = `pty_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
         this._currentPtyPrompt = prompt;
@@ -2322,6 +2349,7 @@ class ChatView extends React.Component {
   _clearPtyPrompt() {
     this._ptyBuffer = '';
     this._currentPtyPrompt = null;
+    this._autoAllowedPtySig = null; // 重置免审批去重签名，下一轮 PTY 提示重新判定
     if (this._ptyDebounceTimer) clearTimeout(this._ptyDebounceTimer);
     if (this.state.ptyPrompt) {
       this.setState({ ptyPrompt: null });
@@ -3540,7 +3568,6 @@ class ChatView extends React.Component {
                 visible={!!this.state.pendingPermission}
                 autoApproveSeconds={this.props.autoApproveSeconds}
                 onAutoApproveChange={this.props.onAutoApproveChange}
-                modelName={this._reqScanCache?.modelName}
                 source={this.state.pendingPermission?.source}
                 queueDepth={this.state.permissionQueue.length}
               />

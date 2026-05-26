@@ -334,18 +334,11 @@ export function getModelInfo(modelName) {
   return info;
 }
 
-// 按模型族的 tool use 可靠性分级，决定自动审批默认倒计时秒数
-const AUTO_APPROVE_DEFAULTS = {
-  Claude: 3, OpenAI: 3,                  // Tier 1: tool use 成熟
-  Gemini: 5, DeepSeek: 5, Qwen: 5,       // Tier 2: 原生支持，稍逊
-  GLM: 10, Kimi: 10, MiniMax: 10,        // Tier 3: 较新，保守
-};
-const FALLBACK_AUTO_SECONDS = 10;
-
-export function getAutoApproveDefault(modelName) {
-  const info = getModelInfo(modelName);
-  return (info && AUTO_APPROVE_DEFAULTS[info.provider]) || FALLBACK_AUTO_SECONDS;
-}
+// 自动审批 autoApproveSeconds 的三态语义（持久化于 preferences.autoApproveSeconds）：
+//   0   = 关闭（手动审批）
+//   > 0 = 倒计时该秒数后自动批准
+//   -1  = 免审批（AUTO_APPROVE_INSTANT）：请求到达即放行，从源头绕过审批面板
+export const AUTO_APPROVE_INSTANT = -1;
 
 export function getSvgAvatar(type) {
   if (type === 'user') {

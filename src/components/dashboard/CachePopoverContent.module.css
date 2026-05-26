@@ -67,35 +67,6 @@
   user-select: none;
 }
 
-.cacheSectionTitle {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-light);
-  margin-bottom: 4px;
-  padding: 4px 0;
-  background: none;
-  border: none;
-  cursor: pointer;
-  user-select: none;
-  flex: 0 0 auto;
-  text-align: left;
-}
-
-.cacheSectionTitle:hover {
-  color: var(--text-secondary);
-}
-
-.cacheSectionArrow {
-  display: inline-block;
-  width: 12px;
-  font-size: 10px;
-  color: var(--text-muted);
-  flex-shrink: 0;
-}
-
 .toolChipGridVertical {
   display: flex;
   flex-direction: column;

@@ -4,7 +4,7 @@ import { BranchesOutlined, DownloadOutlined, DeleteOutlined, RollbackOutlined, R
 import AppBase, { styles, OPTIMISTIC_CLEAR_PERCENT } from './AppBase';
 import { isIOS, isPad, setViewMode } from './env';
 import { isMainAgent, isSystemText, classifyUserContent } from './utils/contentFilter';
-import { getModelMaxTokens, getEffectiveModel, AUTO_COMPACT_USABLE_RATIO } from './utils/helpers';
+import { getModelMaxTokens, getEffectiveModel, AUTO_COMPACT_USABLE_RATIO, AUTO_APPROVE_INSTANT } from './utils/helpers';
 import ChatView from './components/chat/ChatView';
 import TerminalPanel from './components/terminal/TerminalPanel';
 import { TerminalWsProvider } from './components/terminal/TerminalWsContext';
@@ -1116,10 +1116,7 @@ class Mobile extends AppBase {
                       { label: '3s', value: 3 },
                       { label: '5s', value: 5 },
                       { label: '10s', value: 10 },
-                      { label: '15s', value: 15 },
-                      { label: '20s', value: 20 },
-                      { label: '30s', value: 30 },
-                      { label: '60s', value: 60 },
+                      { label: t('ui.permission.autoApprove.instant'), value: AUTO_APPROVE_INSTANT },
                     ]}
                     style={{ width: 100 }}
                   />
@@ -1306,7 +1303,6 @@ class Mobile extends AppBase {
             global={true}
             autoApproveSeconds={this.state.autoApproveSeconds}
             onAutoApproveChange={this.handleAutoApproveChange}
-            modelName={this.state.globalPermission.modelName}
           />
         )}
         {this.state.globalPlanApproval && (

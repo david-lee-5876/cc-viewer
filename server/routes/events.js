@@ -118,6 +118,14 @@ function resumeChoice(req, res, parsedUrl, isLocal, deps) {
 }
 
 // SSE endpoint
+// 构造「有新版」徽标的 SSE 帧（pending = {version, source}）。pending 为空返回 null。
+// 抽成纯函数便于单测帧格式；events() 在新连接上调用它补推，使版本徽标跨刷新持续显示。
+export function sseUpdateBadgeFrame(pending) {
+  return pending
+    ? `event: update_major_available\ndata: ${JSON.stringify(pending)}\n\n`
+    : null;
+}
+
 async function events(req, res, parsedUrl, isLocal, deps) {
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
@@ -150,6 +158,11 @@ async function events(req, res, parsedUrl, isLocal, deps) {
   if (_resumeState) {
     res.write(`event: resume_prompt\ndata: ${JSON.stringify({ recentFileName: _resumeState.recentFileName })}\n\n`);
   }
+
+  // 补推「有新版」徽标：复用启动检查缓存的结果，让刷新/新标签页连上即恢复徽标。
+  // 置于 deps.clients.push(res) 之前 → 新客户端仅得一份，不与一次性广播竞态。
+  const updFrame = sseUpdateBadgeFrame(deps.pendingMajorUpdate);
+  if (updFrame) res.write(updFrame);
 
   // 增量加载参数：移动端带 since/cc/project 请求增量数据
   const sinceParam = parsedUrl.searchParams.get('since');

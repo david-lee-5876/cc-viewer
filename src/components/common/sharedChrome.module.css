@@ -81,6 +81,15 @@
 .titleIcon {
   margin-right: 8px;
 }
+/* 明细 Modal 内 markdown 的描边卡片容器，与 CachePopoverContent 的 .cacheSectionBordered
+   (官方工具等区块) 视觉保持一致：1px 边框 + 6px 圆角 + 8/10 内边距 + 容器背景。 */
+.detailMarkdownCard {
+  border: 1px solid var(--border-secondary);
+  border-radius: 6px;
+  padding: 8px 10px;
+  background: var(--bg-container);
+}
+
 .memoryMarkdown {
   font-size: 12.5px;
   line-height: 1.55;

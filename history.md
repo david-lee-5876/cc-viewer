@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.6.277 (2026-05-26)
+
+- fix(update): 「new」版本徽标跨刷新持久化——server 把启动检查发现的「有新版」结果(major_available/deferred_busy/brew_managed)缓存到内存(`pendingMajorUpdate`,经 `deps` getter 暴露),`events` 路由在新 SSE 连接(刷新/新标签页)上补推 `update_major_available`;原先徽标仅靠启动后 30s 那一次广播,刷新即丢、须重启才再现。内存级,进程重启归零;新增纯函数 `sseUpdateBadgeFrame` + `test/sse-update-badge-frame.test.js`
+- feat(terminal): 主终端右下角新增悬浮「刷新」按钮——抖动 `.terminalHost` 高度(收缩-恢复,幅度足以改变行数)驱动 xterm 本地重建 canvas + 清 WebGL 纹理图集 + 全量 refresh,修复 web 终端偶发花屏/白屏;中间尺寸不发 PTY、仅末尾按原尺寸 resize 一次,滚动位置保留;常驻半透明、hover 提亮,仅桌面/iPad 显示
+- fix(test): `npm test`/`test:coverage` 加 `--test-force-exit`——多个起真实监听服务(端口 7010+)/ fs-watcher 的用例测完不释放句柄,进程隔离下 worker 不退出致 runner 永久挂起;改为测完即退(全量 ~8s、2413 pass);`engines.node` 提到 `>=20.14.0`(该 flag 起始版本)
+- fix(ui): 从血条 Popover 内打开 CLAUDE.md / 记忆条目 / Skill 管理明细 Modal 时,背后的血条面板不再消失——Popover 改为受控(`open={cachePopoverOpen}`),`handleCachePopoverOpenChange` 在明细 Modal 打开期间忽略 hover 离开触发的关闭(原 hover Popover 因鼠标移到 Modal 上 mouseleave 即关);并去掉 `handleOpenSkillsModal` 里打开 Skill 管理时强制 `_cachePopoverOpen:false` 的关闭
+- chore(ui): CLAUDE.md / 持久记忆条目明细 Modal(MemoryDetailModal)的 markdown 套上描边卡片容器(`.detailMarkdownCard`:1px 边框 + 6px 圆角 + 8/10 内边距 + 容器背景),与上下文弹窗「官方工具」等区块的 `cacheSectionBordered` 视觉保持一致
+- chore(ui): 上下文(血条)弹窗「内置工具」改名为「官方工具」,并由可折叠分组(默认收起)改成与下方 MCP/Skill/CLAUDE.md 一致的 `cacheSectionBordered` 常驻展开样式;移除随之失效的 `renderGroup`/`sectionCollapsed` 及 `.cacheSectionTitle`/`.cacheSectionArrow` 死代码
+- chore(auth): 二维码下方密码管理区重做为「项目中心」模型——整块代表当前项目防护:顶部开关=本项目是否受保护(关=写入禁用的项目覆盖,既不用自有也不用全局即豁免),开启时才显示「本项目/全局」tab 选择密码来源(本项目自有 / 继承全局);删除原「共用全局密码」开关(tab 已表达继承 vs 独立);切到「全局」而全局尚未启用时自动启用全局共享密码再清本项目覆盖(`postAuthConfig` 加 `thenClearOverride` 两步合一只弹一次提示);无项目上下文退化为单一全局维度
+- chore(approval): 自动审批下拉删除 15/20/30/60 选项(保留 3/5/10)并新增「免审批」—— 经 `PermissionController.autoAllow` 在请求到达处直接放行:hook 路径(`perm-hook-pending`)回 allow、pty 子代理路径直接选「允许」项,均不设 pendingPermission,从源头绕过 ToolApprovalPanel(消除面板挂载再自动批准的一帧 + 退场动画闪烁);ToolApprovalPanel 保留 `<0` 立即批准分支兜底「已挂起时切到免审批」边界;免审批哨兵值收敛为命名常量 `AUTO_APPROVE_INSTANT`;pty 路径加 prompt 签名 + 时窗去重,防 PTY 慢回显/重绘期同一 prompt 二次放行;hook 路径 ws 未连通时 autoAllow 返回 false 回落面板路径,不静默丢成 timeout-deny;去掉按模型族区分默认倒计时的逻辑,默认统一 3s
+
 ## 1.6.276 (2026-05-25)
 
 - feat(auth): 新增密码登录认证(与 URL token 并存) —— 远程未授权访问弹极简密码页,输对后服务端 `Set-Cookie: ccv_auth`(SameSite=Strict)并自动刷新进入;本机(127.0.0.1)永远免密且为 admin,在二维码 popover 下方可开启/改密/复制/关闭(空密码=无防护并警告),启用后二维码与 URL 自动去掉 ?token=(远程改走密码页登录);登录页密码框带显隐(眼睛)切换;CLI `--usePassword[=<pwd>]` 启动即开启(裸 flag 随机 6 位大写字母+数字,大写展示、登录忽略大小写,写入「本项目」作用域而非全局,并在启动输出中打印当前密码),开关与密码持久化为 `preferences.json`:全局 `auth` 键 + 可选 `authByProject[<projectDir>]` 项目级覆盖(项目级优先、否则回退全局;admin 可在二维码下方按「本项目/全局」切换管理、一键移除覆盖回退全局);密码 base64 轻混淆、非裸明文,文件 0600;`/api/preferences` 读写均剥离 `auth`/`authByProject` 键防密码泄漏与跨项目越权篡改;`--usePassword` 消费后即清除 env 避免泄漏进 Claude 子进程;鉴权统一收敛为纯函数 `decideAuth()`,HTTP 与 WS upgrade 共用(顺带补上 WS 此前缺失的鉴权);`/api/auth/login` 按源 IP 内存限流(60s/20 次→429);新增 `server/lib/auth.js` + `server/routes/auth.js` + `test/auth-lib.test.js` / `test/api-auth.test.js` / `test/usepassword-startup.test.js`

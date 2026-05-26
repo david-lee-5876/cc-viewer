@@ -1,6 +1,6 @@
 {
   "name": "cc-viewer",
-  "version": "1.6.276",
+  "version": "1.6.277",
   "description": "Claude Code Logger visualization management tool",
   "license": "MIT",
   "main": "server.js",
@@ -18,8 +18,8 @@
     "build": "node build.js",
     "build:sourcemap": "CCV_SOURCEMAP=1 node build.js",
     "start": "node server.js",
-    "test": "CCV_LOG_DIR=tmp node --test",
-    "test:coverage": "CCV_LOG_DIR=tmp node --test --experimental-test-coverage --test-coverage-include='server/**/*.js' --test-coverage-include='src/utils/**/*.js' --test-coverage-include='*.js'",
+    "test": "CCV_LOG_DIR=tmp node --test --test-force-exit",
+    "test:coverage": "CCV_LOG_DIR=tmp node --test --test-force-exit --experimental-test-coverage --test-coverage-include='server/**/*.js' --test-coverage-include='src/utils/**/*.js' --test-coverage-include='*.js'",
     "test:coverage:html": "CCV_LOG_DIR=tmp c8 --reporter=text-summary --reporter=html node --test",
     "prepublishOnly": "npm run build",
     "electron:dev": "electron electron/main.js",
@@ -45,7 +45,7 @@
   },
   "homepage": "https://github.com/weiesky/cc-viewer#readme",
   "engines": {
-    "node": ">=20"
+    "node": ">=20.14.0"
   },
   "files": [
     "dist/",

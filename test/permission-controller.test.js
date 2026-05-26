@@ -96,6 +96,38 @@ describe('PermissionController — PTY 路径', () => {
   });
 });
 
+describe('PermissionController — autoAllow（免审批源头直放）', () => {
+  it('hook 路径：发 perm-hook-answer allow，返回 true，且不动 pendingPermission/queue', () => {
+    const host = makeHost({ pendingPermission: null, permissionQueue: [{ id: 'q1' }] });
+    const c = new PermissionController(host);
+    const ok = c.autoAllow({ id: 'h1' });
+    assert.equal(ok, true, 'ws 开通已发送 → 返回 true');
+    assert.deepEqual(host._sent[0], { type: 'perm-hook-answer', id: 'h1', decision: 'allow' });
+    // 关键不变量：不入队、不出队、不设 pendingPermission（故调用方不会弹面板）
+    assert.equal(host._state.pendingPermission, null);
+    assert.deepEqual(host._state.permissionQueue.map(p => p.id), ['q1']);
+  });
+
+  it('PTY 路径：走 promptOptionClick(Yes=1)，返回 true，不发 ws，不动 state', () => {
+    const host = makeHost({ pendingPermission: null });
+    const c = new PermissionController(host);
+    const ok = c.autoAllow({ source: 'pty', ptyPrompt });
+    assert.equal(ok, true);
+    assert.equal(host._sent.length, 0, 'PTY 路径不发 ws');
+    assert.deepEqual(host._ptyClicks, [1], 'allow → Yes 选项 1');
+    assert.equal(host._state.pendingPermission, null);
+  });
+
+  it('hook 路径 ws 关闭：返回 false 且不发送（让调用方回落到面板路径）', () => {
+    const host = makeHost({ wsOpen: false });
+    const c = new PermissionController(host);
+    let ok;
+    assert.doesNotThrow(() => { ok = c.autoAllow({ id: 'h1' }); });
+    assert.equal(ok, false, 'ws 未连通 → 返回 false');
+    assert.equal(host._sent.length, 0);
+  });
+});
+
 describe('PermissionController — _findPtyOptionNumber 兜底', () => {
   it('无匹配选项时各 decision 的兜底号', () => {
     const c = new PermissionController(makeHost());

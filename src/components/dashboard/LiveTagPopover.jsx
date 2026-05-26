@@ -73,6 +73,7 @@ function LiveTagPopover({
       trigger="hover"
       placement="topRight"
       overlayInnerStyle={POPOVER_OVERLAY_STYLE}
+      open={cachePopoverOpen}
       onOpenChange={onOpenChange}
     >
       <span className={styles.liveTag} style={triggerStyle}>

@@ -1,11 +1,11 @@
 import React, { useMemo, useRef, useEffect, useCallback, useState } from 'react';
 import { t } from '../../i18n';
-import { getAutoApproveDefault } from '../../utils/helpers';
+import { AUTO_APPROVE_INSTANT } from '../../utils/helpers';
 import styles from './ToolApprovalPanel.module.css';
 
 const DEFAULT_AUTO_SECONDS = 3;
 
-function ToolApprovalPanel({ toolName, toolInput, requestId, onAllow, onAllowSession, onDeny, visible, global: isGlobal, autoApproveSeconds = 0, onAutoApproveChange, modelName, source, queueDepth = 0 }) {
+function ToolApprovalPanel({ toolName, toolInput, requestId, onAllow, onAllowSession, onDeny, visible, global: isGlobal, autoApproveSeconds = 0, onAutoApproveChange, source, queueDepth = 0 }) {
   const panelRef = useRef(null);
   const allowRef = useRef(null);
   const prevFocusRef = useRef(null);
@@ -20,8 +20,8 @@ function ToolApprovalPanel({ toolName, toolInput, requestId, onAllow, onAllowSes
       setShow(true);
       setExiting(false);
       deniedRef.current = false;
-      // 自动审批开启时不抢焦点，避免打断用户在其他输入框的正常输入
-      if (autoApproveSeconds <= 0) {
+      // 自动审批开启时（倒计时或免审批）不抢焦点，避免打断用户在其他输入框的正常输入
+      if (autoApproveSeconds === 0) {
         prevFocusRef.current = document.activeElement;
         requestAnimationFrame(() => allowRef.current?.focus());
       }
@@ -35,7 +35,13 @@ function ToolApprovalPanel({ toolName, toolInput, requestId, onAllow, onAllowSes
   // 自动审批倒计时
   useEffect(() => {
     if (countdownRef.current) { clearInterval(countdownRef.current); countdownRef.current = null; }
-    if (visible && autoApproveSeconds > 0 && requestId) {
+    if (visible && autoApproveSeconds === AUTO_APPROVE_INSTANT && requestId) {
+      // 免审批（兜底路径）：仅用于「面板已挂载后用户切到免审批」——正常的新请求已在 ChatView
+      // 源头被 autoAllow 直放、不会走到这里。归零触发立即批准（复用下方 countdown===0 → onAllow
+      // 路径，不新增调用点）。
+      deniedRef.current = false;
+      setCountdown(0);
+    } else if (visible && autoApproveSeconds > 0 && requestId) {
       deniedRef.current = false;
       setCountdown(autoApproveSeconds);
       countdownRef.current = setInterval(() => {
@@ -71,13 +77,13 @@ function ToolApprovalPanel({ toolName, toolInput, requestId, onAllow, onAllowSes
   // 简化按钮：点击切换开启/关闭
   const handleAutoApproveToggle = useCallback(() => {
     if (onAutoApproveChange) {
-      const enabling = autoApproveSeconds <= 0;
-      onAutoApproveChange(enabling ? getAutoApproveDefault(modelName) : 0);
+      const enabling = autoApproveSeconds === 0;
+      onAutoApproveChange(enabling ? DEFAULT_AUTO_SECONDS : 0);
       if (enabling && requestId && onAllow) {
         onAllow(requestId);
       }
     }
-  }, [onAutoApproveChange, autoApproveSeconds, modelName, requestId, onAllow]);
+  }, [onAutoApproveChange, autoApproveSeconds, requestId, onAllow]);
 
   const handleKeyDown = useCallback((e) => {
     if (e.key === 'Escape') {
@@ -137,9 +143,9 @@ function ToolApprovalPanel({ toolName, toolInput, requestId, onAllow, onAllowSes
     ? t('ui.permission.allowCountdown', { seconds: countdown })
     : t('ui.permission.allow');
 
-  const autoApproveBtnLabel = autoApproveSeconds > 0
+  const autoApproveBtnLabel = autoApproveSeconds !== 0
     ? t('ui.permission.autoApprove.disable')
-    : t('ui.permission.autoApprove.enable', { seconds: getAutoApproveDefault(modelName) });
+    : t('ui.permission.autoApprove.enable', { seconds: DEFAULT_AUTO_SECONDS });
 
   return (
     <div ref={panelRef} className={`${isGlobal ? styles.panelGlobal : styles.panel}${exiting ? ` ${styles.exiting}` : ''}`} onKeyDown={handleKeyDown}>
@@ -161,7 +167,7 @@ function ToolApprovalPanel({ toolName, toolInput, requestId, onAllow, onAllowSes
       <div className={styles.actions}>
         {onAutoApproveChange && (
           <button
-            className={`${styles.autoApproveBtn}${autoApproveSeconds > 0 ? ` ${styles.autoApproveActive}` : ''}`}
+            className={`${styles.autoApproveBtn}${autoApproveSeconds !== 0 ? ` ${styles.autoApproveActive}` : ''}`}
             onClick={handleAutoApproveToggle}
           >
             {autoApproveBtnLabel}

@@ -148,6 +148,16 @@ function ScratchTerminalIcon() {
   );
 }
 
+function RefreshIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="23 4 23 10 17 10" />
+      <polyline points="1 20 1 14 7 14" />
+      <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+    </svg>
+  );
+}
+
 // 虚拟按键定义：label 显示文字，seq 为发送到终端的转义序列
 const VIRTUAL_KEYS = [
   { label: '↑', seq: '\x1b[A' },
@@ -573,6 +583,7 @@ class TerminalPanel extends React.Component {
     if (this._unsubWsState) { try { this._unsubWsState(); } catch {} this._unsubWsState = null; }
     if (this._resizeDebounceTimer) clearTimeout(this._resizeDebounceTimer);
     if (this._webglRecoveryTimer) clearTimeout(this._webglRecoveryTimer);
+    if (this._refreshRaf) cancelAnimationFrame(this._refreshRaf);
     if (this.resizeObserver) {
       this.resizeObserver.disconnect();
     }
@@ -909,6 +920,63 @@ class TerminalPanel extends React.Component {
       this.ws.send(JSON.stringify(msg));
     }
   }
+
+  // 强制重绘终端：先清 WebGL 纹理图集 + 全量 refresh（零 PTY 影响），再做一次"收缩-恢复"
+  // 高度抖动驱动本地 canvas 重建——复现用户手动改高度治花屏/白屏的效果。
+  // 关键：sub-row 高度变化 fit() 会 no-op，收缩量需足以改变行数；中间尺寸不发 PTY，
+  // 仅本地 terminal.resize() 重绘 canvas，末尾按还原后（=原始）尺寸 sendResize 一次。
+  handleForceRefresh = () => {
+    const host = this.containerRef.current;
+    const term = this.terminal;
+    if (!host || !term) return;
+
+    const fullRedraw = (t) => {
+      try { t.clearTextureAtlas?.(); } catch {}
+      try { t.refresh(0, t.rows - 1); } catch {}
+    };
+    fullRedraw(term);
+
+    // 按钮已 gate 在动态 fit 路径，理论上 fitAddon 必在；缺失则仅做全量 refresh
+    if (!this.fitAddon) return;
+
+    // 保存 scroll 位置（与 setupResizeObserver 中一致，fit 会重置 viewport）
+    const vp = host.querySelector('.xterm-viewport');
+    const prevScrollTop = vp?.scrollTop ?? 0;
+    const prevScrollHeight = vp?.scrollHeight ?? 1;
+    const wasAtBottom = vp ? (prevScrollTop + vp.clientHeight >= prevScrollHeight - 5) : true;
+
+    // 收缩量足以改变行数，fit() 才会真正 resize 并重建 canvas
+    const baseH = host.clientHeight;
+    const shrink = Math.min(24, Math.max(8, Math.floor(baseH * 0.25)));
+    host.style.flex = 'none';
+    host.style.height = Math.max(8, baseH - shrink) + 'px';
+    void host.offsetHeight; // 强制 reflow
+    try { this.fitAddon.fit(); } catch {}
+
+    if (this._refreshRaf) cancelAnimationFrame(this._refreshRaf);
+    this._refreshRaf = requestAnimationFrame(() => {
+      this._refreshRaf = null;
+      const h = this.containerRef.current;
+      if (!h || !this.terminal) return;
+      // 还原高度（清空内联样式，回到 flex:1）
+      h.style.flex = '';
+      h.style.height = '';
+      void h.offsetHeight; // 强制 reflow
+      try { this.fitAddon?.fit(); } catch {}
+      fullRedraw(this.terminal);
+      // 恢复 scroll 位置
+      const vp2 = h.querySelector('.xterm-viewport');
+      if (vp2) {
+        if (wasAtBottom) {
+          vp2.scrollTop = vp2.scrollHeight;
+        } else {
+          const ratio = prevScrollHeight > 0 ? prevScrollTop / prevScrollHeight : 0;
+          vp2.scrollTop = ratio * vp2.scrollHeight;
+        }
+      }
+      this.sendResize();
+    });
+  };
 
   setupResizeObserver() {
     // 移动端使用固定尺寸，不需要 ResizeObserver（iPad 例外，走动态 fit）
@@ -1416,6 +1484,18 @@ class TerminalPanel extends React.Component {
           className={`${styles.terminalContainer}${this.state.terminalFocused ? ` ${styles.terminalContainerFocused}` : ''}`}
         >
           <div ref={this.containerRef} className={styles.terminalHost} />
+          {(!isMobile || isPad) && (
+            <button
+              type="button"
+              className={styles.terminalRefreshBtn}
+              title={t('ui.terminal.refreshTip')}
+              aria-label={t('ui.terminal.refresh')}
+              onClick={this.handleForceRefresh}
+            >
+              <RefreshIcon />
+              <span>{t('ui.terminal.refresh')}</span>
+            </button>
+          )}
         </div>
         {pendingImages?.length > 0 && (
           <div className={styles.pendingFileStrip}>

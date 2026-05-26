@@ -116,7 +116,6 @@ export default function CachePopoverContent({
       message.error(t('ui.skills.uploadFailed', { reason: err?.message || 'pack failed' }));
     }
   };
-  const [sectionCollapsed, setSectionCollapsed] = useState({});
   // 手机端 chip 描述 Modal 的当前条目；null = 关。{ title, description } 形态由 chip render 函数填入。
   const [chipModal, setChipModal] = useState(null);
 
@@ -223,24 +222,6 @@ export default function CachePopoverContent({
       >
         <span className={sharedChrome.cacheToolChip}>{name}</span>
       </Popover>
-    );
-  };
-
-  const renderGroup = (sectionKey, titleKey, count, defaultCollapsed, body, rightAction = null) => {
-    const state = sectionCollapsed[sectionKey];
-    const collapsed = state !== undefined ? !!state : defaultCollapsed;
-    const toggle = () => setSectionCollapsed(prev => ({ ...prev, [sectionKey]: !collapsed }));
-    return (
-      <div className={styles.cacheSection}>
-        <div className={styles.cacheSectionHeader}>
-          <button type="button" className={styles.cacheSectionTitle} onClick={toggle} aria-expanded={!collapsed}>
-            <span className={styles.cacheSectionArrow}>{collapsed ? '▶' : '▼'}</span>
-            {t(titleKey)} ({count})
-          </button>
-          {rightAction}
-        </div>
-        {!collapsed && body}
-      </div>
     );
   };
 
@@ -421,7 +402,14 @@ export default function CachePopoverContent({
         </div>
       </div>
       <div className={styles.cacheScrollArea}>
-        {hasBuiltin && renderGroup('tools_builtin', 'ui.builtinTools', builtin.length, true, builtinBody)}
+        {hasBuiltin && (
+          <div className={`${styles.cacheSection} ${styles.cacheSectionBordered}`}>
+            <div className={styles.cacheSectionLabel}>
+              {t('ui.builtinTools')} ({builtin.length})
+            </div>
+            {builtinBody}
+          </div>
+        )}
         {hasMcp && (
           <div className={`${styles.cacheSection} ${styles.cacheSectionBordered}`}>
             <div className={styles.cacheSectionLabel}>

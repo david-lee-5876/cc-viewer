@@ -53,7 +53,7 @@ export default function MemoryDetailModal({ detail, onClose, onOpenMemoryDetail,
   } else {
     body = (
       <div
-        className={styles.memoryMarkdown}
+        className={`${styles.detailMarkdownCard} ${styles.memoryMarkdown}`}
         onClick={handleLinkClick}
         dangerouslySetInnerHTML={{ __html: renderMarkdown(content) }}
       />

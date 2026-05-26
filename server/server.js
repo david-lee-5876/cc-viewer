@@ -319,6 +319,10 @@ delete process.env.CCV_USE_PASSWORD;
 delete process.env.CCV_PASSWORD;
 
 let clients = [];
+// 内存级缓存：30s 启动检查若发现「有新版」(major_available / deferred_busy / brew_managed)，
+// 在此存下 {version, source}，供 events 路由向新连接(刷新/新标签页)补推 update_major_available，
+// 让版本徽标在本进程存续期内跨刷新持续显示。进程重启即归零(不落盘)。
+let pendingMajorUpdate = null;
 let server;
 let actualPort = 0;
 let serverProtocol = 'http';
@@ -452,6 +456,8 @@ const deps = {
   // scope then recompute the effective in-memory value.
   get authConfig() { return authConfig; },
   get authProject() { return AUTH_PROJECT; },
+  // 重新赋值的运行时状态 → 必须 getter，请求时读最新值（详见 let pendingMajorUpdate 注释）
+  get pendingMajorUpdate() { return pendingMajorUpdate; },
   getAuthState() { return loadAuthState(AUTH_PROJECT); },
   setAuthConfig(c, scope) {
     saveAuthConfig(c, { scope: scope === 'global' ? 'global' : (AUTH_PROJECT ? 'project' : 'global'), projectDir: AUTH_PROJECT });
@@ -1817,7 +1823,9 @@ if (!isWorkspaceMode) {
           // brew_managed 走这里至关重要：否则 Electron / GUI 用户看不到升级提示，
           // 仅 stderr 一行 console.error 在桌面模式下不可见。
           if (result.status === 'major_available' || result.status === 'deferred_busy' || result.status === 'brew_managed') {
-            const payload = JSON.stringify({ version: result.remoteVersion, source: result.status });
+            // 先缓存：之后新连接的 SSE 客户端会在 events 路由里补推此事件
+            pendingMajorUpdate = { version: result.remoteVersion, source: result.status };
+            const payload = JSON.stringify(pendingMajorUpdate);
             clients.forEach(client => {
               try { client.write(`event: update_major_available\ndata: ${payload}\n\n`); } catch { }
             });
