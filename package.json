@@ -1,6 +1,6 @@
 {
   "name": "cc-viewer",
-  "version": "1.6.277",
+  "version": "1.6.278",
   "description": "Claude Code Logger visualization management tool",
   "license": "MIT",
   "main": "server.js",
@@ -102,6 +102,7 @@
   },
   "dependencies": {
     "adm-zip": "^0.5.17",
+    "dingtalk-stream": "2.1.5",
     "dompurify": "^3.3.3",
     "node-pty": "^1.1.0",
     "undici": "^7.22.0",

@@ -1,0 +1,26 @@
+/* Bare clickable icon — no pill/border, just the DingTalk SVG. Plain inline (no flex) so it
+ * sits on the same baseline as the ☰ menu / project label and stays vertically centered. */
+.chip {
+  line-height: 0;
+  cursor: pointer;
+  user-select: none;
+  transition: opacity 0.15s;
+}
+
+.chip:hover {
+  opacity: 0.75;
+}
+
+.logo {
+  display: block;
+  transition: color 0.15s;
+}
+
+/* Connection state conveyed by icon color: blue = connected, grey = not (incl. error). */
+.connected {
+  color: #1677ff; /* DingTalk brand blue */
+}
+
+.disconnected {
+  color: var(--text-tertiary, #999);
+}

@@ -4,6 +4,7 @@ import { BranchesOutlined, DownloadOutlined, DeleteOutlined, RollbackOutlined, R
 import AppBase, { styles, OPTIMISTIC_CLEAR_PERCENT } from './AppBase';
 import { isIOS, isPad, setViewMode } from './env';
 import { isMainAgent, isSystemText, classifyUserContent } from './utils/contentFilter';
+import { parseImOrigin } from './utils/imOrigin';
 import { getModelMaxTokens, getEffectiveModel, AUTO_COMPACT_USABLE_RATIO, AUTO_APPROVE_INSTANT } from './utils/helpers';
 import ChatView from './components/chat/ChatView';
 import TerminalPanel from './components/terminal/TerminalPanel';
@@ -434,7 +435,7 @@ class Mobile extends AppBase {
     for (const msg of messages) {
       if (msg.role !== 'user') continue;
       if (typeof msg.content === 'string') {
-        const text = msg.content.trim();
+        const text = parseImOrigin(msg.content).text.trim();
         if (!text) continue;
         if (!isSystemText(text)) {
           if (/Implement the following plan:/i.test(text)) continue;

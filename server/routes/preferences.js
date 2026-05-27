@@ -4,6 +4,7 @@ import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
 import { LOG_DIR, setLogDir, getClaudeConfigDir } from '../../findcc.js';
 import { PROFILE_PATH, _defaultConfig, getActiveProfileId, setActiveProfileForWorkspace, _loadProxyProfile } from '../interceptor.js';
+import { setLang } from '../i18n.js';
 import { reconcileVoicePackPrefs as vpReconcile } from '../lib/voice-pack-manager.js';
 import { mergeApprovalModalPrefs as vpMergeAM } from '../lib/approval-modal-prefs.js';
 import { readClaudeProjectModel } from '../lib/context-watcher.js';
@@ -17,6 +18,9 @@ function preferencesGet(req, res, parsedUrl, isLocal, deps) {
   // 全局 auth 与每个项目的 authByProject 覆盖都要剥离(后者同样含明文密码)。
   delete prefs.auth;
   delete prefs.authByProject;
+  // dingtalk 配置（含 base64 app_secret）同存于 preferences.json，只能经 admin-only 的
+  // /api/dingtalk/* 暴露（且 secret 始终脱敏）；绝不能从这里下发给已授权的远程客户端。
+  delete prefs.dingtalk;
   prefs.logDir = LOG_DIR; // 始终返回当前运行时的日志目录
   // home-friendly 展示形态：设了 CLAUDE_CONFIG_DIR 的用户看到真实路径，默认用户看到 "~/.claude"
   // join() 而非字符串拼接，避免 Windows 分隔符不匹配导致比较失败
@@ -42,6 +46,8 @@ function preferencesPost(req, res, parsedUrl, isLocal, deps) {
       // 任意项目的覆盖,绕过 admin 门禁。
       delete incoming.auth;
       delete incoming.authByProject;
+      // dingtalk 同理：只能经 admin-only 的 /api/dingtalk/config 修改，禁止借 /api/preferences 植入凭据。
+      delete incoming.dingtalk;
       // 如果修改了日志目录，先切换再保存到新位置（新目录下生成 preferences.json）
       if (incoming.logDir && typeof incoming.logDir === 'string') {
         setLogDir(incoming.logDir);
@@ -62,6 +68,9 @@ function preferencesPost(req, res, parsedUrl, isLocal, deps) {
       const prefsDir = dirname(prefsFile);
       if (!existsSync(prefsDir)) mkdirSync(prefsDir, { recursive: true });
       writeFileSync(prefsFile, JSON.stringify(prefs, null, 2));
+      // UI 切语言时同步服务端 i18n currentLang，让 DingTalk 桥接等服务端 t() 立即跟随。
+      // setLang 自带 locale 校验，非法值回落 en。
+      if (incoming.lang) setLang(incoming.lang);
       // preferences.json 可能携带 auth 的 base64 密码 —— 与 lib/auth.js writePrefs 一致地
       // 重申 0600,避免该路径(无 mode/不 chmod)把密码文件留成默认 umask 的可读权限。
       try { chmodSync(prefsFile, 0o600); } catch { /* best-effort; non-POSIX or race */ }
@@ -93,6 +102,7 @@ function preferencesPost(req, res, parsedUrl, isLocal, deps) {
       // 已授权的远程客户端。磁盘上的值已在上面写入,这里只清内存对象供响应用。
       delete prefs.auth;
       delete prefs.authByProject;
+      delete prefs.dingtalk;
       prefs.logDir = LOG_DIR;
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(prefs));
@@ -145,10 +155,16 @@ function proxyProfilesGet(req, res, parsedUrl, isLocal, deps) {
     const data = existsSync(PROFILE_PATH) ? JSON.parse(readFileSync(PROFILE_PATH, 'utf-8')) : deps.defaultProxyProfiles;
     // 用 interceptor.getActiveProfileId() 返回 effective active（workspace > profile.json.active > 'max'）
     const effectiveActive = getActiveProfileId();
-    const masked = deps.maskProfiles({ ...data, active: effectiveActive });
-    if (_defaultConfig) masked.defaultConfig = { ..._defaultConfig, apiKey: _defaultConfig.apiKey ? deps.maskApiKey(_defaultConfig.apiKey) : null };
+    // 本机(127.0.0.1)= admin：下发明文 profile.apiKey 供本人在编辑表单(👁 折叠)里查阅/复制；已授权
+    // 的远程客户端只拿脱敏值(****+后4位)。保存时若回传脱敏值，POST 侧 isMasked() 会保留磁盘原值。
+    // 镜像 /api/auth/state 的密码、/api/dingtalk/status 的 appSecret 策略。
+    const full = { ...data, active: effectiveActive };
+    const payload = isLocal ? full : deps.maskProfiles(full);
+    // defaultConfig.apiKey 始终脱敏：它在列表里是常显文本(无 👁 折叠)，且 Max/OAuth 默认配置的 key
+    // 可能是 OAuth token；只有可编辑 profile 的 key 才按 isLocal 明文下发。
+    if (_defaultConfig) payload.defaultConfig = { ..._defaultConfig, apiKey: _defaultConfig.apiKey ? deps.maskApiKey(_defaultConfig.apiKey) : null };
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify(masked));
+    res.end(JSON.stringify(payload));
   } catch {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(deps.defaultProxyProfiles));

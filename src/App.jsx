@@ -442,7 +442,7 @@ class App extends AppBase {
             <p><strong>{t('ui.update.current')}:</strong> v{typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : ''}</p>
             {this.state.updateInfo && <p><strong>{t('ui.update.latest')}:</strong> v{this.state.updateInfo.version}</p>}
             <p style={{ marginTop: 12 }}><strong>{t('ui.update.npm')}</strong></p>
-            <code style={{ display: 'block', background: 'var(--bg-code)', padding: '8px 12px', borderRadius: 6, fontSize: 13 }}>npm update -g cc-viewer</code>
+            <code style={{ display: 'block', background: 'var(--bg-code)', padding: '8px 12px', borderRadius: 6, fontSize: 13 }}>npm install -g cc-viewer</code>
             {isElectron && (<>
               <p style={{ marginTop: 16 }}><strong>{t('ui.update.electron')}</strong></p>
               <p style={{ color: 'var(--text-tertiary)', fontSize: 13 }}>{t('ui.update.electronDesc')}</p>

@@ -59,10 +59,17 @@ try {
   stdinData = (buf.length > 64 * 1024 ? buf.slice(0, 64 * 1024) : buf).toString('utf-8');
 } catch { /* stdin may not be piped — fine, still notify */ }
 let sessionId = null;
-try { sessionId = JSON.parse(stdinData)?.session_id || null; } catch { /* fine */ }
+let transcriptPath = null;
+try {
+  const parsed = JSON.parse(stdinData);
+  sessionId = parsed?.session_id || null;
+  // transcript_path lets the DingTalk bridge read the final assistant turn straight from
+  // Claude's own JSONL (the clean source, free of ANSI noise / the log-dedup bug).
+  transcriptPath = parsed?.transcript_path || null;
+} catch { /* fine */ }
 
 const internalToken = process.env.CCVIEWER_INTERNAL_TOKEN || '';
-const body = JSON.stringify({ sessionId, ts: Date.now() });
+const body = JSON.stringify({ sessionId, transcriptPath, ts: Date.now() });
 const reqOpts = {
   hostname: '127.0.0.1',
   port: parseInt(port, 10),

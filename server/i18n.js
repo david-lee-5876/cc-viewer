@@ -627,6 +627,18 @@ const i18nData = {
     "tr": "Parolayı göster/gizle",
     "uk": "Показати/сховати пароль"
   },
+  "server.dingtalk.replyChunkTitle": { "zh": "Claude", "en": "Claude" },
+  "server.dingtalk.truncated": { "zh": "（回复过长已截断，完整内容请见 Web 界面）", "en": "(reply truncated — see the web UI for the full content)" },
+  "server.dingtalk.noTextReply": { "zh": "（本轮无文本回复）", "en": "(no text reply this turn)" },
+  "server.dingtalk.interrupted": { "zh": "已中断当前回合。", "en": "Interrupted the current turn." },
+  "server.dingtalk.noSession": { "zh": "当前没有活跃的 Claude 会话，无法处理。", "en": "No active Claude session — cannot process." },
+  "server.dingtalk.notBound": { "zh": "该会话未绑定到本机，已忽略。", "en": "This conversation is not bound; ignored." },
+  "server.dingtalk.notAuthorized": { "zh": "你不在允许的发送人白名单内。", "en": "You are not in the allowed sender list." },
+  "server.dingtalk.busyQueued": { "zh": "Claude 正在忙，你的消息已排队。", "en": "Claude is busy; your message is queued." },
+  "server.dingtalk.skipPermWarning": { "zh": "收到，正在思考", "en": "Got it, thinking…" },
+  "server.dingtalk.skipPermBlocked": { "zh": "收到，正在思考", "en": "Got it, thinking…" },
+  "server.dingtalk.injectFailed": { "zh": "注入失败（会话已结束或不可用），请确认 Claude 会话仍在运行。", "en": "Injection failed (session ended or unavailable) — check the Claude session is still running." },
+  "server.dingtalk.queueFull": { "zh": "消息队列已满，已丢弃该消息，请稍后再发。", "en": "Message queue is full; this message was dropped. Try again later." },
   "update.updating": {
     "zh": "正在更新到 v{version}...",
     "en": "Updating to v{version}...",

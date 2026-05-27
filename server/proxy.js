@@ -28,6 +28,18 @@ export function stripZstdAcceptEncoding(headers) {
   return { ...headers, [key]: filtered || 'gzip, deflate, br' };
 }
 
+// 代理会改写请求 body（interceptor 的模型替换 JSON.parse→改 model→JSON.stringify），
+// 客户端声明的 content-length 随之失真。透传旧值会触发 undici
+// UND_ERR_REQ_CONTENT_LENGTH_MISMATCH → 502 → CLI 静默重试退避（表现为请求卡住）。
+// 删除该头，交给 undici 按实际 body 重算（已知长度的 Buffer/string 不会退化为 chunked）。
+export function stripContentLengthHeader(headers) {
+  if (!headers) return headers;
+  const key = Object.keys(headers).find(k => k.toLowerCase() === 'content-length');
+  if (!key) return headers;
+  const { [key]: _omit, ...rest } = headers;
+  return rest;
+}
+
 function getBaseUrlFromSettings(settingsPath) {
   try {
     if (existsSync(settingsPath)) {
@@ -86,6 +98,7 @@ export function startProxy() {
         let headers = { ...req.headers };
         delete headers.host; // Let fetch set the host
         headers = stripZstdAcceptEncoding(headers);
+        headers = stripContentLengthHeader(headers); // body 会被改写，旧 content-length 必须丢弃
 
         const buffers = [];
         for await (const chunk of req) {

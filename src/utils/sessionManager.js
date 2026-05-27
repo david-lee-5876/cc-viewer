@@ -1,4 +1,6 @@
 // Wire format 协议详见 docs/WIRE_FORMAT.md（applyInPlaceLastMsgReplace 信号驱动短路是其客户端唯一消费方）
+import { parseImOrigin } from './imOrigin.js';
+
 export const HOT_SESSION_COUNT = 8;
 
 /**
@@ -118,7 +120,7 @@ export function buildSessionIndex(entries, mainAgentSessions) {
       if (session.messages) {
         for (const msg of session.messages) {
           if (msg.role === 'user') {
-            const text = extractTextContent(msg);
+            const text = parseImOrigin(extractTextContent(msg)).text;
             if (text) {
               preview = text.slice(0, 80);
               break;

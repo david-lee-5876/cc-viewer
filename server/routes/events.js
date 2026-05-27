@@ -40,7 +40,7 @@ function turnEndNotify(req, res, parsedUrl, isLocal, deps) {
       res.end(JSON.stringify({ error: 'malformed JSON body' }));
       return;
     }
-    deps.scheduleTurnEndBroadcast(payload.sessionId || null, payload.ts || Date.now());
+    deps.scheduleTurnEndBroadcast(payload.sessionId || null, payload.ts || Date.now(), payload.transcriptPath || null);
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ ok: true }));
   });

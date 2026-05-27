@@ -1,0 +1,48 @@
+.subtitle {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 14px;
+}
+
+.layout {
+  display: flex;
+  gap: 18px;
+  align-items: stretch;
+}
+
+.toolList {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 140px;
+  flex-shrink: 0;
+}
+
+.toolItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-align: start;
+  padding: 9px 12px;
+  font-size: 14px;
+  color: var(--text-primary, inherit);
+  background: transparent;
+  border: 1px solid var(--border-color, #3a3a3a);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.toolItem:hover {
+  border-color: var(--color-primary, #4a6cf7);
+}
+
+.toolItemActive {
+  border-color: var(--color-primary, #4a6cf7);
+  background: var(--color-primary-bg, rgba(74, 108, 247, 0.12));
+}
+
+.toolBody {
+  flex: 1;
+  min-width: 0;
+}

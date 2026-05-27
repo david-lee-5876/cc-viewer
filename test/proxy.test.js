@@ -75,6 +75,17 @@ function stripZstdAcceptEncoding(headers) {
   return { ...headers, [key]: filtered || 'gzip, deflate, br' };
 }
 
+// Replicated from proxy.js: drop client-declared content-length before forwarding,
+// since the interceptor rewrites the body (model replacement) and the stale length
+// would trigger undici UND_ERR_REQ_CONTENT_LENGTH_MISMATCH.
+function stripContentLengthHeader(headers) {
+  if (!headers) return headers;
+  const key = Object.keys(headers).find(k => k.toLowerCase() === 'content-length');
+  if (!key) return headers;
+  const { [key]: _omit, ...rest } = headers;
+  return rest;
+}
+
 // Error message formatting logic from startProxy catch block
 function formatProxyError(err) {
   let msg = err.message;
@@ -566,6 +577,38 @@ describe('proxy', () => {
     it('returns input untouched when input is null/undefined', () => {
       assert.equal(stripZstdAcceptEncoding(null), null);
       assert.equal(stripZstdAcceptEncoding(undefined), undefined);
+    });
+  });
+
+  describe('stripContentLengthHeader (avoid stale content-length after body rewrite)', () => {
+    it('removes content-length (lowercase header)', () => {
+      const out = stripContentLengthHeader({ 'content-type': 'application/json', 'content-length': '123' });
+      assert.equal(out['content-length'], undefined);
+      assert.equal(out['content-type'], 'application/json', 'other headers preserved');
+    });
+
+    it('removes Content-Length (TitleCase header)', () => {
+      const out = stripContentLengthHeader({ 'Content-Length': '456' });
+      assert.equal(out['Content-Length'], undefined);
+      assert.equal(out['content-length'], undefined);
+    });
+
+    it('returns headers untouched when content-length is absent', () => {
+      const input = { 'content-type': 'application/json' };
+      const out = stripContentLengthHeader(input);
+      assert.equal(out, input);
+    });
+
+    it('returns a new object and does not mutate input', () => {
+      const input = { 'content-length': '10', 'content-type': 'application/json' };
+      const out = stripContentLengthHeader(input);
+      assert.notEqual(out, input);
+      assert.equal(input['content-length'], '10', 'input must remain untouched');
+    });
+
+    it('returns input untouched when input is null/undefined', () => {
+      assert.equal(stripContentLengthHeader(null), null);
+      assert.equal(stripContentLengthHeader(undefined), undefined);
     });
   });
 });

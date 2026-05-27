@@ -9,6 +9,9 @@ import { t } from '../../i18n';
 import { useMarkdownExport } from '../../hooks/useMarkdownExport';
 import styles from './MarkdownBlock.module.css';
 
+// markdown ≤ 此字符数视为「简短」，隐藏 hover 的「另存为」操作栏 —— 短内容无下载价值，可直接选中复制。
+const SHORT_MD_CHAR_THRESHOLD = 200;
+
 function MarkdownBlock({ text, className, style, trailingCursor }) {
   const [hovered, setHovered] = useState(false);
   const [saveMenuOpen, setSaveMenuOpen] = useState(false);
@@ -66,7 +69,7 @@ function MarkdownBlock({ text, className, style, trailingCursor }) {
         style={style}
         dangerouslySetInnerHTML={{ __html: html }}
       />
-      {(!isMobile || isPad) && hovered && (
+      {(!isMobile || isPad) && hovered && text.length > SHORT_MD_CHAR_THRESHOLD && (
         <div className={styles.actionBar} data-html2canvas-ignore>
           <div className={`${styles.hoverPad} ${styles.hoverPadTop}`} aria-hidden="true" />
           <div className={styles.saveAsWrap}

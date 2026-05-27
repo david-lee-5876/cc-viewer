@@ -28,6 +28,9 @@ import { eventsRoutes } from './routes/events.js';
 import { askPermRoutes } from './routes/ask-perm.js';
 import { teamRoutes } from './routes/team.js';
 import { authRoutes } from './routes/auth.js';
+import { dingtalkRoutes } from './routes/dingtalk.js';
+import * as dingtalkBridge from './lib/dingtalk-bridge.js';
+import { loadDingTalkConfig } from './lib/dingtalk-config.js';
 
 const execFileAsync = promisify(execFile);
 const execAsync = promisify(exec);
@@ -54,7 +57,7 @@ function execWithStdin(cmd, args, input, options) {
 }
 import { LOG_FILE, _initPromise, _resumeState, _projectName, _logDir, streamingState, resetStreamingState, PROFILE_PATH, setLivePort } from './interceptor.js';
 import { LOG_DIR, setLogDir, getClaudeConfigDir } from '../findcc.js';
-import { t, getLang } from './i18n.js';
+import { t, getLang, setLang } from './i18n.js';
 import { loadAuthConfig, loadAuthState, saveAuthConfig, clearProjectOverride, generatePassword, decideAuth, parseCookies, renderLoginPage, localeFromAcceptLanguage } from './lib/auth.js';
 import { checkAndUpdate } from './lib/updater.js';
 import { loadPlugins, runWaterfallHook, runParallelHook } from './lib/plugin-loader.js';
@@ -470,6 +473,12 @@ const deps = {
     return authConfig;
   },
   // Constants local to server.js.
+  // DingTalk bridge admin surface (config route → bridge lifecycle).
+  dingtalk: {
+    getBridgeStatus: () => dingtalkBridge.getBridgeStatus(),
+    reloadBridge: () => dingtalkBridge.reloadBridge(),
+    testConnection: (cfg) => dingtalkBridge.testConnection(cfg),
+  },
   ACCESS_TOKEN,
   INTERNAL_TOKEN,
   MAX_POST_BODY,
@@ -507,6 +516,7 @@ const _routes = [
   ...eventsRoutes,
   ...askPermRoutes,
   ...teamRoutes,
+  ...dingtalkRoutes,
 ];
 const dispatch = createDispatcher(_routes);
 
@@ -783,6 +793,15 @@ export async function startViewer() {
         currentServer.listen(port, HOST, async () => {
           server = currentServer;
           actualPort = port;
+          // 把服务端 i18n 的 currentLang 同步成用户在 UI 配置的语言（preferences.lang）。
+          // 否则服务端 t() 恒为默认 'zh'——DingTalk 桥接的系统提示、登录页回落语言都不跟随配置。
+          // setLang 自带 locale 校验，非法/缺失值回落 en，读 prefs 失败也安全跳过。
+          try {
+            if (existsSync(getPrefsFile())) {
+              const _prefs = JSON.parse(readFileSync(getPrefsFile(), 'utf-8'));
+              if (_prefs.lang) setLang(_prefs.lang);
+            }
+          } catch { /* 读 prefs 失败就保持默认语言 */ }
           // interceptor.js runs in this same process (via proxy.js → setupInterceptor).
           // Inject live-port via module-level setter instead of process.env to avoid
           // polluting env of child_process.spawn descendants (Bash tools / MCP / Electron tabs).
@@ -880,6 +899,21 @@ export async function startViewer() {
               resolveSdkApproval: (...args) => _sdkResolveApproval?.(...args),
             },
           });
+          // DingTalk Stream bridge: only meaningful in CLI mode (where the singleton PTY
+          // lives). startBridge saves deps then no-ops unless enabled+creds present, so
+          // calling it unconditionally also primes reloadBridge() for later enable-via-UI.
+          if (isCliMode) {
+            const pmb = await import('./pty-manager.js');
+            dingtalkBridge.startBridge({
+              writeToPty: pmb.writeToPty,
+              writeToPtySequential: pmb.writeToPtySequential,
+              getPtyState: pmb.getPtyState,
+              getPtyKind: pmb.getPtyKind,
+              getPtySkipPermissions: pmb.getPtySkipPermissions,
+              isStreaming: () => streamingState.active,
+              getConfig: () => loadDingTalkConfig(),
+            });
+          }
           resolve(server);
         });
 
@@ -1554,13 +1588,16 @@ function _normalizeKey(sessionId) {
   return (typeof sessionId === 'string' && sessionId) ? sessionId : null;
 }
 
-function _emitTurnEnd(sessionId, ts) {
+function _emitTurnEnd(sessionId, ts, transcriptPath = null) {
   const sid = _normalizeKey(sessionId);
   const t = ts || Date.now();
   try {
     if (clients.length > 0 && sendEventToClients) {
       sendEventToClients(clients, 'turn_end', { sessionId: sid, ts: t });
     }
+    // Forward the (clean) assistant reply for this turn to DingTalk, if the bridge is live.
+    // Fire-and-forget: a bridge failure must never affect SSE broadcast.
+    try { dingtalkBridge.notifyTurnEnd(sid, t, transcriptPath); } catch { /* best-effort */ }
     if (typeof _onTurnEndBroadcastForTests === 'function') {
       try { _onTurnEndBroadcastForTests({ sessionId: sid, ts: t }); }
       catch (e) { if (process.env.NODE_ENV === 'test') throw e; /* prod 不让测试桩污染 */ }
@@ -1570,7 +1607,7 @@ function _emitTurnEnd(sessionId, ts) {
   }
 }
 
-function _scheduleTurnEndBroadcast(sessionId, ts) {
+function _scheduleTurnEndBroadcast(sessionId, ts, transcriptPath = null) {
   if (_isStopping) return;
   const sid = _normalizeKey(sessionId);
   const t = ts || Date.now();
@@ -1581,7 +1618,7 @@ function _scheduleTurnEndBroadcast(sessionId, ts) {
   if (existing) clearTimeout(existing.timer);
   const timer = setTimeout(() => {
     _pendingTurnEndTimers.delete(sid);
-    _emitTurnEnd(sid, t);
+    _emitTurnEnd(sid, t, transcriptPath);
   }, TURN_END_DEBOUNCE_MS);
   if (typeof timer.unref === 'function') timer.unref();
   _pendingTurnEndTimers.set(sid, { timer, ts: t });
@@ -1695,6 +1732,9 @@ async function _doStop() {
   // 对称 startViewer：下一次启动后第一次 active 才算 rising edge
   _lastSdkActive = false;
   _lastCliActive = false;
+  // Tear down the DingTalk Stream connection so a stop/start cycle (Electron tab switch,
+  // tests) never leaks a second WS to the same app_key. Idempotent + swallows errors.
+  try { await dingtalkBridge.stopBridge(); } catch { }
   try { await Promise.race([runParallelHook('serverStopping'), new Promise(r => setTimeout(r, 3000))]); } catch { }
   // 如果用户未做选择，将临时文件转为正式文件
   if (_resumeState && _resumeState.tempFile) {

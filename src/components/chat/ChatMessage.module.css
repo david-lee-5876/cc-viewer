@@ -134,6 +134,24 @@
   margin-left: auto;
 }
 
+/* IM-source icon + username grouped together, kept right-aligned as a unit. */
+.imSourceNameGroup {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.imSourceName {
+  font-size: 11px;
+}
+
+.imSourceIcon {
+  display: inline-flex;
+  align-items: center;
+  line-height: 0;
+}
+
 /* === Bubble color variants === */
 
 .bubbleUser {

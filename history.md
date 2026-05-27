@@ -1,7 +1,19 @@
 # Changelog
 
+## 1.6.278 (2026-05-27)
+
+- feat(security): 本机(127.0.0.1=admin)打开代理热切换 / 钉钉设置时可查阅明文 API Key 与 AppSecret(编辑表单 👁 显示、可复制),已授权的远程客户端仍只拿脱敏值(代理 apiKey 仅 `****`+后4位、钉钉仅 `hasSecret`);门禁在 `GET /api/proxy-profiles` 与 `GET /api/dingtalk/status` 按 `isLocal` 切换,镜像 `/api/auth/state` 的密码明文策略;`defaultConfig.apiKey`(列表常显文本)始终脱敏
+- feat(dingtalk): 对话中来自钉钉的消息在用户名左侧显示钉钉图标(Tooltip「来自钉钉」)——桥接注入时给消息加前置标记 `⟦im:dingtalk⟧`(斜杠命令跳过,避免破坏 CLI 命令识别),前端 `parseImOrigin` 剥离标记并据此渲染图标,会话预览/去重处一并剥离;新增 `src/utils/imOrigin.js` + `test/im-origin.test.js`,扩展 `test/dingtalk-bridge.test.js`
+- feat(dingtalk): 钉钉设置面板精简——去掉顶部说明文案;AppKey/AppSecret 标记必填(`*`)、staffId 白名单标记「选填」;安全须知默认折叠到「查看详情」;连接状态指示由小圆点改为图标着色(已连接=蓝、否则=灰),并移至顶栏最左(紧邻汉堡菜单),去掉外层圆角描边只留图标
+- chore(ui): 对话中 markdown ≤200 字符时隐藏 hover 的「另存为」操作栏(短内容无下载价值,可直接选中复制)
+- fix(update): 版本信息弹窗的更新命令由 `npm update -g cc-viewer` 改为 `npm install -g cc-viewer`(update 跨大版本升级全局包常失败)
+
 ## 1.6.277 (2026-05-26)
 
+- feat(dingtalk): 汉堡菜单新增「通讯软件」入口(可扩展多 IM,当前仅钉钉),钉钉 Stream 模式双向桥接当前 Claude Code 会话——仅填 AppKey/AppSecret(无需公网):钉钉消息以括号粘贴注入会话,整轮 `turn_end` 后读会话 transcript JSONL 回干净 markdown(主动发送 API、按 ~3800 字分块 + 令牌桶限流、token 缓存);`/stop`/`停止` 发 ESC 中断当前回合;收到即 ack + msgId LRU 去重防重投重复执行;忙时排队、无 Claude 会话(或裸 shell)拒绝注入且不自动 spawn;访问控制为可选 staffId 白名单(留空=绑定首个会话);skip-permissions 会话注入时回风险提示并写审计日志;桥接随 server 启停、保存配置即热重载。`server/pty-manager.js` 加进程类型标记(claude/shell)+ skip-permissions 标记;Stop hook 透传 `transcript_path`;凭据存 `preferences.json` `dingtalk` 键(base64、0600),写操作 loopback-only、appSecret 脱敏且从 `/api/preferences` 剥离;新增 `server/lib/dingtalk-config.js` / `dingtalk-bridge.js` / `server/routes/dingtalk.js` / 前端 `MessagingModal`+`DingTalkSettings`,依赖 `dingtalk-stream`,新增 `test/dingtalk-config.test.js` / `dingtalk-bridge.test.js` / `api-dingtalk.test.js`
+- fix(dingtalk): 多角色 review 修复一批桥接问题——注入失败(PTY 退出/中途死亡)现回失败提示并立即解除队列,不再悬空到 10 分钟超时;`GET /api/dingtalk/status` 对非本机调用只回 `{enabled,hasSecret,connection.running}`,剥离 appKey/白名单/绑定会话/原始错误;回复去重改为按 turn 时间戳(不再误吞重复短确认语如「完成。」);入站消毒补剥 CR(`\r`);入站队列封顶 50,溢出回提示;新增「免审批会话拒绝注入」可选开关(`blockOnSkipPermissions`,默认关);`MessagingModal` 加 `destroyOnClose` 修关闭后仍轮询的泄漏;补限流/分块截断/群会话/token 缓存等护栏测试
+- fix(dingtalk): 桥接系统提示(忙时排队/已中断/未授权/无会话等)改为跟随用户在 UI 配置的语言——服务端 i18n `currentLang` 此前恒为默认 `zh` 且从不同步,提示固定中文;现 server 启动读 `preferences.lang` 调 `setLang`、保存偏好(`/api/preferences`)时同步切换(登录页回落语言一并跟随),桥接 `t()` 自动生效无需改动;`test/dingtalk-bridge.test.js` 加语言路由用例
+- fix(proxy): 代理热切换设了模型覆盖(`activeModel`)的 profile(如 aliyun/deepseek/theta)请求卡住/超时——proxy 转发时剥离客户端 `content-length` 头:interceptor 的模型替换会改写 body 长度,旧 `content-length` 透传给上游触发 undici `UND_ERR_REQ_CONTENT_LENGTH_MISMATCH` → 502 → CLI 静默重试退避;新增纯函数 `stripContentLengthHeader` + `test/proxy.test.js` 用例
 - fix(update): 「new」版本徽标跨刷新持久化——server 把启动检查发现的「有新版」结果(major_available/deferred_busy/brew_managed)缓存到内存(`pendingMajorUpdate`,经 `deps` getter 暴露),`events` 路由在新 SSE 连接(刷新/新标签页)上补推 `update_major_available`;原先徽标仅靠启动后 30s 那一次广播,刷新即丢、须重启才再现。内存级,进程重启归零;新增纯函数 `sseUpdateBadgeFrame` + `test/sse-update-badge-frame.test.js`
 - feat(terminal): 主终端右下角新增悬浮「刷新」按钮——抖动 `.terminalHost` 高度(收缩-恢复,幅度足以改变行数)驱动 xterm 本地重建 canvas + 清 WebGL 纹理图集 + 全量 refresh,修复 web 终端偶发花屏/白屏;中间尺寸不发 PTY、仅末尾按原尺寸 resize 一次,滚动位置保留;常驻半透明、hover 提亮,仅桌面/iPad 显示
 - fix(test): `npm test`/`test:coverage` 加 `--test-force-exit`——多个起真实监听服务(端口 7010+)/ fs-watcher 的用例测完不释放句柄,进程隔离下 worker 不退出致 runner 永久挂起;改为测完即退(全量 ~8s、2413 pass);`engines.node` 提到 `>=20.14.0`(该 flag 起始版本)

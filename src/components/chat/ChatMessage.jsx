@@ -7,6 +7,8 @@ import { compactResultPreview } from '../../utils/toolResultCore.js';
 import { extractWebSearchGroups } from '../../utils/webSearchGrouping';
 import WebSearchResultsView from '../viewers/WebSearchResultsView';
 import MarkdownBlock from '../viewers/MarkdownBlock';
+import DingTalkIcon from '../common/DingTalkIcon';
+import { parseImOrigin } from '../../utils/imOrigin';
 import { getTeammateAvatar } from '../../utils/teammateAvatars';
 import { renderAssistantText } from '../../utils/systemTags';
 import { apiUrl } from '../../utils/apiUrl';
@@ -27,6 +29,12 @@ import ImageLightbox from '../common/ImageLightbox';
 import defaultAvatarUrl from '../../img/default-avatar.svg';
 import defaultModelAvatarUrl from '../../img/default-model-avatar.svg';
 import styles from './ChatMessage.module.css';
+
+// IM-source badge: maps the id captured from a ⟦im:<id>⟧ marker to its brand icon + color.
+// Extend here when adding another IM bridge. Unknown ids render no icon.
+const IM_SOURCE_ICONS = {
+  dingtalk: { Icon: DingTalkIcon, color: '#1677ff' },
+};
 
 const { Text } = Typography;
 
@@ -943,10 +951,29 @@ class ChatMessage extends React.Component {
     );
   }
 
+  // Small IM-source icon shown left of the username (e.g. DingTalk). null when no/unknown source.
+  renderImSourceBadge(imSource) {
+    const entry = imSource && IM_SOURCE_ICONS[imSource];
+    if (!entry) return null;
+    const { Icon, color } = entry;
+    const label = t(`ui.imSource.${imSource}`);
+    return (
+      <Tooltip title={label} mouseEnterDelay={0.3} placement="top">
+        <span className={styles.imSourceIcon} role="img" aria-label={label}>
+          <Icon size={13} style={{ color }} />
+        </span>
+      </Tooltip>
+    );
+  }
+
   renderUserMessage() {
-    const { text, timestamp } = this.props;
+    const { timestamp } = this.props;
+    // Strip a leading IM-origin marker (⟦im:dingtalk⟧) so the bubble shows clean text; imSource
+    // drives the IM icon shown left of the username. Normal typed messages have no marker.
+    const { text, imSource } = parseImOrigin(this.props.text);
     const timeStr = this.formatTime(timestamp);
     const userName = this.getUserName();
+    const imBadge = this.renderImSourceBadge(imSource);
 
     // 检测 /compact 消息
     const isCompact = text && text.includes('This session is being continued from a previous conversation that ran out of context');
@@ -995,7 +1022,14 @@ class ChatMessage extends React.Component {
           <div className={styles.labelRow}>
             {timeStr && <Text className={styles.timeTextNoMargin}>{timeStr}</Text>}
             {this.renderViewRequestBtn()}
-            <Text type="secondary" className={styles.labelTextRight}>{userName}</Text>
+            {imBadge
+              ? (
+                <span className={styles.imSourceNameGroup}>
+                  {imBadge}
+                  <Text type="secondary" className={styles.imSourceName}>{userName}</Text>
+                </span>
+              )
+              : <Text type="secondary" className={styles.labelTextRight}>{userName}</Text>}
           </div>
           {this.renderHighlightBubble(styles.bubbleUser, bubbleContent)}
         </div>

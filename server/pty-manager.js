@@ -10,6 +10,13 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 let ptyProcess = null;
+// Kind of the current PTY: 'claude' (real Claude Code session), 'shell' (fallback bare
+// shell auto-spawned on input), or null (none). The DingTalk bridge uses this to refuse
+// injecting into a bare shell — typing a prompt into a shell would execute it as a command.
+let ptyKind = null;
+// Whether the current Claude session was launched with --dangerously-skip-permissions
+// (cli.js canonicalizes --d/--ad before spawn). Surfaced for the bridge's RCE warning.
+let ptySkipPermissions = false;
 let dataListeners = [];
 let exitListeners = [];
 let lastExitCode = null;
@@ -235,6 +242,9 @@ export async function spawnClaude(proxyPort, cwd, extraArgs = [], claudePath = n
     cwd: currentWorkspacePath,
     env,
   });
+  ptyKind = 'claude';
+  // --allow-dangerously-skip-permissions only enables a later toggle, so it must NOT count.
+  ptySkipPermissions = extraArgs.includes('--dangerously-skip-permissions');
 
   ptyProcess.onData((data) => {
     outputBuffer += data;
@@ -254,6 +264,8 @@ export async function spawnClaude(proxyPort, cwd, extraArgs = [], claudePath = n
     flushBatch();
     lastExitCode = exitCode;
     ptyProcess = null;
+    ptyKind = null;
+    ptySkipPermissions = false;
 
     // Auto-retry without -c/--continue if "No conversation found"
     // 注意：早退 return 会跳过下方的 exitListeners 广播——第一次失败的 pty 死亡对消费者
@@ -330,7 +342,10 @@ export function writeToPtySequential(chunks, onComplete, opts = {}) {
   const sendNext = () => {
     if (idx >= chunks.length || !ptyProcess) {
       cleanup();
-      if (onComplete) onComplete(true);
+      // Report success only if every chunk was sent. A PTY that died mid-sequence (idx <
+      // length) is a partial/failed injection — callers (e.g. the DingTalk bridge) must learn
+      // this to avoid wedging on a turn that will never produce output.
+      if (onComplete) onComplete(idx >= chunks.length);
       return;
     }
 
@@ -387,6 +402,8 @@ export async function spawnShell() {
     cwd,
     env: shellSpawn.env,
   });
+  ptyKind = 'shell';
+  ptySkipPermissions = false;
 
   ptyProcess.onData((data) => {
     outputBuffer += data;
@@ -406,6 +423,8 @@ export async function spawnShell() {
     flushBatch();
     lastExitCode = exitCode;
     ptyProcess = null;
+    ptyKind = null;
+    ptySkipPermissions = false;
     currentWorkspacePath = null;
     for (const cb of exitListeners) {
       try { cb(exitCode); } catch { }
@@ -430,6 +449,8 @@ export function killPty() {
     batchScheduled = false;
     try { ptyProcess.kill(); } catch { }
     ptyProcess = null;
+    ptyKind = null;
+    ptySkipPermissions = false;
   }
 }
 
@@ -456,6 +477,16 @@ export function getPtyState() {
     running: !!ptyProcess,
     exitCode: lastExitCode,
   };
+}
+
+/** Kind of the active PTY: 'claude' | 'shell' | null. */
+export function getPtyKind() {
+  return ptyKind;
+}
+
+/** True iff the active Claude session was launched with --dangerously-skip-permissions. */
+export function getPtySkipPermissions() {
+  return ptyKind === 'claude' && ptySkipPermissions;
 }
 
 export function getCurrentWorkspace() {

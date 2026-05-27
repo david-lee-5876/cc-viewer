@@ -5,6 +5,7 @@ import { MessageOutlined, FileTextOutlined, ImportOutlined, DashboardOutlined, E
 import { QRCodeCanvas } from 'qrcode.react';
 import { formatTokenCount, computeTokenStats, computeCacheRebuildStats, computeToolUsageStats, computeSkillUsageStats, resolveCalibrationTokens, AUTO_COMPACT_USABLE_RATIO, AUTO_APPROVE_INSTANT } from '../../utils/helpers';
 import { isSystemText, classifyUserContent, isMainAgent } from '../../utils/contentFilter';
+import { parseImOrigin } from '../../utils/imOrigin';
 import { classifyRequest } from '../../utils/requestType';
 import { resolveTeammateNames } from '../../utils/contentFilter';
 import { t, getLang, setLang, LANG_OPTIONS } from '../../i18n';
@@ -22,6 +23,8 @@ import ProcessModal from '../settings/ProcessModal';
 import ProxyModal from '../settings/ProxyModal';
 import VoicePackSettings from '../settings/VoicePackSettings';
 import ProjectAliasEditor from '../settings/ProjectAliasEditor';
+import MessagingModal from '../settings/MessagingModal';
+import DingTalkStatusChip from '../settings/DingTalkStatusChip';
 import { useProjectAlias } from '../../hooks/useProjectAlias';
 import appConfig from '../../config.json';
 import { OPTIMISTIC_CLEAR_PERCENT } from '../../AppBase';
@@ -81,7 +84,7 @@ class AppHeader extends React.Component {
 
   constructor(props) {
     super(props);
-    this.state = { countdownText: '', promptModalVisible: false, promptData: [], promptViewMode: 'original', settingsDrawerVisible: false, globalSettingsVisible: false, projectStatsVisible: false, projectStats: null, projectStatsLoading: false, localUrl: '', pluginModalVisible: false, processModalVisible: false, logoDropdownOpen: false, cacheHighlightIdx: null, cacheHighlightFading: false, calibrationModel: readCalibrationModel(), proxyModalVisible: false, logDirDraft: null, qrPopoverOpen: false, _skillsModal: { open: false, loading: false, skills: [], error: null, toggling: new Set() },
+    this.state = { countdownText: '', promptModalVisible: false, promptData: [], promptViewMode: 'original', settingsDrawerVisible: false, globalSettingsVisible: false, projectStatsVisible: false, projectStats: null, projectStatsLoading: false, localUrl: '', pluginModalVisible: false, processModalVisible: false, logoDropdownOpen: false, cacheHighlightIdx: null, cacheHighlightFading: false, calibrationModel: readCalibrationModel(), proxyModalVisible: false, messagingModalVisible: false, messagingInitialTool: null, logDirDraft: null, qrPopoverOpen: false, _skillsModal: { open: false, loading: false, skills: [], error: null, toggling: new Set() },
       // 文件系统权威的 skill 列表（/api/skills 返回）；live-tail 下作为 popover chip 和管理弹窗的共享数据源。
       // null=未加载 / false=失败 / [] 或 Array=加载结果。workspace 切换由 componentDidUpdate + seq 控制。
       _fsSkills: null,
@@ -584,7 +587,7 @@ class AppHeader extends React.Component {
     for (const msg of messages) {
       if (msg.role !== 'user') continue;
       if (typeof msg.content === 'string') {
-        const text = msg.content.trim();
+        const text = parseImOrigin(msg.content).text.trim();
         if (!text) continue;
         if (!isSystemText(text)) {
           if (/Implement the following plan:/i.test(text)) continue;
@@ -1366,6 +1369,12 @@ class AppHeader extends React.Component {
         label: t('ui.projectStats'),
         onClick: this.handleShowProjectStats,
       },
+      {
+        key: 'messaging',
+        icon: <MessageOutlined />,
+        label: t('ui.messaging.menu'),
+        onClick: () => this.setState({ messagingModalVisible: true, messagingInitialTool: null }),
+      },
       ...(viewMode === 'raw' ? [{
         key: 'global-settings',
         icon: <SettingOutlined />,
@@ -1382,12 +1391,13 @@ class AppHeader extends React.Component {
 
     return (
       <div className={styles.headerBar}>
-        <Space size="middle">
+        <Space size="middle" align="center">
           <Dropdown menu={{ items: menuItems, className: 'logo-dropdown-menu' }} trigger={['hover']} onOpenChange={(open) => this.setState({ logoDropdownOpen: open })} align={{ offset: [-4, 0] }}>
             <span className={`${styles.logoWrap}${this.state.logoDropdownOpen ? ` ${styles.logoWrapActive}` : ''}`}>
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`${styles.logoImage}${this.state.logoDropdownOpen ? ` ${styles.logoImageActive}` : ''}`}><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
             </span>
           </Dropdown>
+          <DingTalkStatusChip onClick={() => this.setState({ messagingModalVisible: true, messagingInitialTool: 'dingtalk' })} />
           {this.props.activeProxyId && this.props.activeProxyId !== 'max' && (() => {
             const p = (this.props.proxyProfiles || []).find(x => x.id === this.props.activeProxyId);
             return p ? (
@@ -1809,6 +1819,11 @@ class AppHeader extends React.Component {
           activeProxyId={this.props.activeProxyId}
           defaultConfig={this.props.defaultConfig}
           onProxyProfileChange={this.props.onProxyProfileChange}
+        />
+        <MessagingModal
+          open={this.state.messagingModalVisible}
+          initialTool={this.state.messagingInitialTool}
+          onClose={() => this.setState({ messagingModalVisible: false })}
         />
 
         {/* Skills Manager Modal — 从 AppHeader popover「已载入 Skill」→「管理」按钮打开 */}
