@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.6.281 (2026-05-29)
+
+- feat(terminal): 刷新按钮改用 xterm 官方 escape hatch 取代 DOM 高度抖动 hack——L1=clearTextureAtlas+refresh / L2=+fit / L3=dispose+reload WebglAddon(onContextLoss 同款配方,保 cols/rows/scrollback,不动 DOM 高度);60s 后台自动从 L3 降到 L2 避免长期 GPU context churn,L3 留给用户手动判定画面坏掉时的兜底;fit 调用统一走 _fitPreservingScroll(wasAtBottom 贴底 / 否则比例换算),修旧版本中刷新后 viewport 跳到顶或错位 ≈shrink 像素的 bug
+- feat(ultraplan): 自定义专家 tab 编辑铅笔图标修复选中态遮挡 + 容器裁切——铅笔 z-index: 2 / top: 0,选中态(.roleBtnActive z-index: 1)不再覆盖,横向 tabs 行的 overflow: hidden 不再裁顶部
+- feat(ultraplan): 内嵌 textarea 卡片的文件列表限高滚动(modal 80px / popover 60px)+ flex-shrink: 0,粘贴大量文件时 fileList 不再把 textarea 挤压到 0,超出限高内部出现滚动条
+- feat(ultraplan): popover 默认初始尺寸由 420×520 调整为 560×480 (宽扁,匹配单次发问的常见交互)
+
 ## 1.6.280 (2026-05-28)
 
 - feat(ultraplan): 自定义专家弹窗左栏(参考文档)加可折叠开关(14px 竖条 chevron,借鉴 Terminal 切换按钮),折叠/展开走 CSS 过渡(flex-basis + opacity + padding/border,250ms ease)而非硬切换;.split 固定 65vh 高度避免 Modal 在两种状态间跳动,折叠态 textarea 自动撑满多出的纵向空间;状态用 localStorage 跨弹窗记住

@@ -233,46 +233,6 @@ export default function UltraPlanModal({
               )}
             </div>
 
-            {files.length > 0 && (
-              <div className={styles.fileList}>
-                {files.map((f, i) => {
-                  const isImage = /\.(png|jpe?g|gif|svg|bmp|webp|avif|ico|icns)$/i.test(f.name);
-                  const src = apiUrl(`/api/file-raw?path=${encodeURIComponent(f.path)}`);
-                  return isImage ? (
-                    <div key={i} className={styles.imageItem} title={f.name}>
-                      <img
-                        src={src}
-                        className={styles.imageThumb}
-                        alt={f.name}
-                        role="button"
-                        tabIndex={0}
-                        onClick={(e) => { e.stopPropagation(); setLightbox({ src, alt: f.name }); }}
-                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setLightbox({ src, alt: f.name }); } }}
-                      />
-                      <ConfirmRemoveButton
-                        title={t('ui.chatInput.confirmRemoveImage')}
-                        onConfirm={() => onRemoveFile(i)}
-                        className={styles.imageRemove}
-                        ariaLabel={t('ui.chatInput.removeImage')}
-                      >&times;</ConfirmRemoveButton>
-                    </div>
-                  ) : (
-                    <span key={i} className={styles.fileChip} title={f.name}>
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-                      <span className={styles.fileName}>{f.name}</span>
-                      <ConfirmRemoveButton
-                        title={t('ui.chatInput.confirmRemoveFile')}
-                        onConfirm={() => onRemoveFile(i)}
-                        className={styles.fileRemove}
-                        ariaLabel={t('ui.chatInput.removeImage')}
-                        tag="span"
-                      >&times;</ConfirmRemoveButton>
-                    </span>
-                  );
-                })}
-              </div>
-            )}
-
             <div className={styles.textareaWrap}>
               <textarea
                 ref={textareaRef}
@@ -290,6 +250,45 @@ export default function UltraPlanModal({
                 /* 真手机回到原生 resize: vertical(CSS 默认是 none) */
                 style={ENABLE_RESIZE_HANDLE ? undefined : { resize: 'vertical' }}
               />
+              {files.length > 0 && (
+                <div className={styles.fileList}>
+                  {files.map((f, i) => {
+                    const isImage = /\.(png|jpe?g|gif|svg|bmp|webp|avif|ico|icns)$/i.test(f.name);
+                    const src = apiUrl(`/api/file-raw?path=${encodeURIComponent(f.path)}`);
+                    return isImage ? (
+                      <div key={i} className={styles.imageItem} title={f.name}>
+                        <img
+                          src={src}
+                          className={styles.imageThumb}
+                          alt={f.name}
+                          role="button"
+                          tabIndex={0}
+                          onClick={(e) => { e.stopPropagation(); setLightbox({ src, alt: f.name }); }}
+                          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setLightbox({ src, alt: f.name }); } }}
+                        />
+                        <ConfirmRemoveButton
+                          title={t('ui.chatInput.confirmRemoveImage')}
+                          onConfirm={() => onRemoveFile(i)}
+                          className={styles.imageRemove}
+                          ariaLabel={t('ui.chatInput.removeImage')}
+                        >&times;</ConfirmRemoveButton>
+                      </div>
+                    ) : (
+                      <span key={i} className={styles.fileChip} title={f.name}>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                        <span className={styles.fileName}>{f.name}</span>
+                        <ConfirmRemoveButton
+                          title={t('ui.chatInput.confirmRemoveFile')}
+                          onConfirm={() => onRemoveFile(i)}
+                          className={styles.fileRemove}
+                          ariaLabel={t('ui.chatInput.removeImage')}
+                          tag="span"
+                        >&times;</ConfirmRemoveButton>
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
             </div>
 
             <div className={styles.footer}>

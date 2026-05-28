@@ -466,13 +466,13 @@ class TerminalPanel extends React.Component {
       this.sendResize();
     }
     this.setupResizeObserver();
-    // 定时强制刷新:每 60s 触发 L3 抖动,主动防止 xterm/WebGL 长时间运行后状态机漂移导致的
-    // 白屏/严重偏移。tab 隐藏时跳过(无渲染需求)。仅在用动态 fit 的平台启用(mobile 非 iPad 跳过)。
-    // 直接走 _executeRefresh(3) 不更新连击窗口,与用户手动点击互不干扰。
+    // 定时强制刷新:每 60s 触发 L2(clearTextureAtlas + refresh + fit),主动防止 xterm/WebGL
+    // 长时间运行后纹理脏导致的花屏。tab 隐藏时跳过(无渲染需求)。仅在动态 fit 平台启用。
+    // L3(dispose+reload WebglAddon)留给用户手动判定"画面真的坏了"时升级,避免长期 GPU 抖动。
     if (!isMobile || isPad) {
       this._autoRefreshInterval = setInterval(() => {
         if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
-        this._executeRefresh(3);
+        this._executeRefresh(2);
       }, 60000);
     }
     // claude-settings 由 SettingsContext 集中提供;通过 props 派生 agentTeamEnabled,
@@ -592,7 +592,6 @@ class TerminalPanel extends React.Component {
     if (this._unsubWsState) { try { this._unsubWsState(); } catch {} this._unsubWsState = null; }
     if (this._resizeDebounceTimer) clearTimeout(this._resizeDebounceTimer);
     if (this._webglRecoveryTimer) clearTimeout(this._webglRecoveryTimer);
-    if (this._refreshRaf) cancelAnimationFrame(this._refreshRaf);
     if (this._autoRefreshInterval) { clearInterval(this._autoRefreshInterval); this._autoRefreshInterval = null; }
     if (this.resizeObserver) {
       this.resizeObserver.disconnect();
@@ -931,87 +930,68 @@ class TerminalPanel extends React.Component {
     }
   }
 
-  // 强制重绘终端的实际执行体:先清 WebGL 纹理图集 + 全量 refresh(零 PTY 影响),再做一次"收缩-恢复"
-  // 高度抖动驱动本地 canvas 重建——复现用户手动改高度治花屏/白屏的效果。
-  // 关键:sub-row 高度变化 fit() 会 no-op,收缩量需足以改变行数;中间尺寸不发 PTY,
-  // 仅本地 terminal.resize() 重绘 canvas,末尾按还原后(=原始)尺寸 sendResize 一次。
-  // 三档抖动量(px 都是上限,百分比仅在小尺寸终端才命中,典型 PC 500-900px 终端固定走上限值):
-  //   L1(min(32, baseH·25%))  治花屏轻症 / 局部错位
-  //   L2(min(80, baseH·50%))  治中度偏移 / 行高漂移
-  //   L3(min(160, baseH·75%)) 治整片白屏 / canvas 失同步重症
-  // 两条调用路径:handleForceRefresh(用户点击,连击窗口推进级别),60s 自动定时器(直接 L3 兜底)。
+  // 强制重绘终端,走 xterm 官方 escape hatch,**不**通过改 DOM 高度骗 fit() 重建 canvas
+  // (旧 hack 会让 viewport scrollTop 在 shrink/restore 之间错位 ≈shrink 像素)。
+  // 三档分别对应不同严重度的 xterm 渲染 issue:
+  //   L1: clearTextureAtlas + refresh —— 纹理脏 / sleep-wake 后小花屏
+  //   L2: L1 + fitAddon.fit() —— 维度漂移叠加纹理脏
+  //   L3: dispose+reload WebglAddon (onContextLoss 同款配方) + fit + 纹理重画 —— 整片白屏 / canvas 失同步
+  // 两条调用路径:handleForceRefresh(用户点击,连击窗口推进级别),60s 自动定时器(走 L2 做预防性维护)。
   _executeRefresh = (level) => {
-    // 上次 refresh 的 rAF 还没跑完(收缩态未还原)就直接 return,避免:
-    //   ① 在途的 inline-style 让本次 host.clientHeight 读到的是 shrunk 值,baseH 复读引入"叠加收缩";
-    //   ② 用户连点 + 自动定时器抢 16ms 窗口的罕见 race。
-    // 跳过本次就好,反正在途的 rAF 自己会收尾。
-    if (this._refreshRaf) return;
-    const host = this.containerRef.current;
     const term = this.terminal;
-    if (!host || !term) return;
+    if (!term) return;
 
-    const fullRedraw = (t) => {
-      try { t.clearTextureAtlas?.(); } catch {}
-      try { t.refresh(0, t.rows - 1); } catch {}
+    const fullRedraw = () => {
+      try { term.clearTextureAtlas?.(); } catch {}
+      try { term.refresh(0, term.rows - 1); } catch {}
     };
-    fullRedraw(term);
+    // 仅动态 fit 路径才允许 fit();移动端非 iPad 由 _mobileFixedResize 维护固定 60 列,
+    // 调 fit() 会把固定列覆盖成按容器算的动态列,破坏移动端契约。
+    const canFit = !isMobile || isPad;
 
-    // 动态 fit 路径才有意义;mobile(非 iPad)用固定尺寸,fit/收缩没用
-    if (!this.fitAddon) return;
-
-    // 保存 scroll 位置(与 setupResizeObserver 中一致,fit 会重置 viewport)
-    const vp = host.querySelector('.xterm-viewport');
-    const prevScrollTop = vp?.scrollTop ?? 0;
-    const prevScrollHeight = vp?.scrollHeight ?? 1;
-    const wasAtBottom = vp ? (prevScrollTop + vp.clientHeight >= prevScrollHeight - 5) : true;
-
-    // 按 level 选择收缩量;收缩量足以改变行数,fit() 才会真正 resize 并重建 canvas。
-    // L1 下限 32px(原 24)保证至少跨 2 行——24px 在默认 16-17px 行高下只 ~1.4 行,
-    // 偶发同行四舍五入会让 fit() no-op、抖动无效。
-    const baseH = host.clientHeight;
-    const shrink = level === 3
-      ? Math.min(160, Math.max(64, Math.floor(baseH * 0.75)))
-      : level === 2
-        ? Math.min(80, Math.max(32, Math.floor(baseH * 0.50)))
-        : Math.min(32, Math.max(8, Math.floor(baseH * 0.25)));
-    host.style.flex = 'none';
-    host.style.height = Math.max(8, baseH - shrink) + 'px';
-    void host.offsetHeight; // 强制 reflow
-    try { this.fitAddon.fit(); } catch {}
-
-    if (this._refreshRaf) cancelAnimationFrame(this._refreshRaf);
-    this._refreshRaf = requestAnimationFrame(() => {
-      this._refreshRaf = null;
-      const h = this.containerRef.current;
-      if (!h || !this.terminal) return;
-      // 还原高度(清空内联样式,回到 flex:1)
-      h.style.flex = '';
-      h.style.height = '';
-      void h.offsetHeight; // 强制 reflow
-      try { this.fitAddon?.fit(); } catch {}
-      fullRedraw(this.terminal);
-      // 恢复 scroll 位置
-      const vp2 = h.querySelector('.xterm-viewport');
-      if (vp2) {
-        if (wasAtBottom) {
-          vp2.scrollTop = vp2.scrollHeight;
-        } else {
-          const ratio = prevScrollHeight > 0 ? prevScrollTop / prevScrollHeight : 0;
-          vp2.scrollTop = ratio * vp2.scrollHeight;
-        }
-      }
-      this.sendResize();
-    });
+    if (level === 1) {
+      fullRedraw();
+    } else if (level === 2) {
+      fullRedraw();
+      if (canFit) this._fitPreservingScroll();
+    } else {
+      this._rebuildWebglAddon();
+      if (canFit) this._fitPreservingScroll();
+      fullRedraw();
+    }
+    if (canFit) this.sendResize();
   };
 
   // 用户点击入口:抖动级别按连击窗口推进(3s 内 L1→L2→L3,超时回 L1)。
-  // 越高级闪得越明显,所以默认从轻到重渐次试,只有用户不满意再点才会升级。
+  // 越高级动作越重,默认从轻到重渐次试,只有用户不满意再点才会升级。
   handleForceRefresh = () => {
     const now = Date.now();
     const within = (now - (this._lastRefreshAt || 0)) < 3000;
     this._refreshLevel = within ? Math.min(3, (this._refreshLevel || 1) + 1) : 1;
     this._lastRefreshAt = now;
     this._executeRefresh(this._refreshLevel);
+  };
+
+  // 调 fitAddon.fit() 并尽量保持用户的 scrollTop —— fit() 会重排 viewport,scrollHeight 变后
+  // scrollTop 默认会被重置。贴底时直接贴底,其他情况按 prev/new scrollHeight 比例换算。
+  // ResizeObserver 路径和 60s 自动刷新 / 手动 L2/L3 都走它,行为统一。
+  _fitPreservingScroll = () => {
+    if (!this.fitAddon || !this.containerRef.current) return;
+    try {
+      const vp = this.containerRef.current.querySelector('.xterm-viewport');
+      const prevScrollTop = vp?.scrollTop ?? 0;
+      const prevScrollHeight = vp?.scrollHeight ?? 1;
+      const wasAtBottom = vp ? (prevScrollTop + vp.clientHeight >= prevScrollHeight - 5) : true;
+      this.fitAddon.fit();
+      if (vp) {
+        if (wasAtBottom) {
+          vp.scrollTop = vp.scrollHeight;
+        } else {
+          const ratio = prevScrollHeight > 0 ? prevScrollTop / prevScrollHeight : 0;
+          vp.scrollTop = ratio * vp.scrollHeight;
+        }
+      }
+    } catch {}
   };
 
   setupResizeObserver() {
@@ -1022,26 +1002,8 @@ class TerminalPanel extends React.Component {
       if (this._resizeDebounceTimer) clearTimeout(this._resizeDebounceTimer);
       this._resizeDebounceTimer = setTimeout(() => {
         this._resizeDebounceTimer = null;
-        if (this.fitAddon && this.containerRef.current) {
-          try {
-            // 保存 scroll 位置，fit() 会重置 viewport 导致 scroll 跳到 0
-            const vp = this.containerRef.current.querySelector('.xterm-viewport');
-            const prevScrollTop = vp?.scrollTop ?? 0;
-            const prevScrollHeight = vp?.scrollHeight ?? 1;
-            const wasAtBottom = vp ? (prevScrollTop + vp.clientHeight >= prevScrollHeight - 5) : true;
-            this.fitAddon.fit();
-            // 恢复 scroll 位置（fit 后 scrollHeight 可能变化，按比例换算）
-            if (vp) {
-              if (wasAtBottom) {
-                vp.scrollTop = vp.scrollHeight;
-              } else {
-                const ratio = prevScrollHeight > 0 ? prevScrollTop / prevScrollHeight : 0;
-                vp.scrollTop = ratio * vp.scrollHeight;
-              }
-            }
-            this.sendResize();
-          } catch {}
-        }
+        this._fitPreservingScroll();
+        this.sendResize();
       }, 150);
     });
     if (this.containerRef.current) {
@@ -1067,6 +1029,23 @@ class TerminalPanel extends React.Component {
       this.webglAddon = null;
     }
   }
+
+  // L3 兜底:dispose 当前 WebglAddon 再 load 一个新的(xterm 官方 README 同款 onContextLoss
+  // 配方)。保留 cols/rows/scrollback,不动 DOM 高度,不影响其他 addon。
+  _rebuildWebglAddon = () => {
+    if (!this.terminal) return;
+    if (isIOS) return; // 与 init 中跳过 WebGL 的判断对齐:iOS 始终走 Canvas
+    // 抢在 onContextLoss recovery 之前清 timer,否则 1s 后醒来会把刚 rebuild 的 addon 再 load 一次
+    if (this._webglRecoveryTimer) {
+      clearTimeout(this._webglRecoveryTimer);
+      this._webglRecoveryTimer = null;
+    }
+    if (this.webglAddon) {
+      try { this.webglAddon.dispose(); } catch {}
+      this.webglAddon = null;
+    }
+    this._loadWebglAddon(false);
+  };
 
   /**
    * 移动端固定 60 列：通过调整 fontSize 使 60 列恰好撑满屏幕宽度，
@@ -1647,8 +1626,8 @@ class TerminalPanel extends React.Component {
                   padding: 0,
                   // popover 宽高由 state 驱动;拖拽期 _handleUltraplanResizePointerDown 会
                   // 直接改 .ant-popover-inner inline style(避免高频 setState),pointerup 落 state。
-                  width: this.state.ultraplanPopoverSize?.w || 420,
-                  height: this.state.ultraplanPopoverSize?.h || 520,
+                  width: this.state.ultraplanPopoverSize?.w || 560,
+                  height: this.state.ultraplanPopoverSize?.h || 480,
                 }}
                 content={
                   <div className={styles.ultraplanPanel} ref={this._ultraplanPanelRef}>
@@ -1721,58 +1700,60 @@ class TerminalPanel extends React.Component {
                         {t('ui.ultraplan.customExpert')}
                       </button>
                     </div>
-                    {this.state.ultraplanFiles.length > 0 && (
-                      <div className={styles.ultraplanFileList}>
-                        {this.state.ultraplanFiles.map((f, i) => {
-                          const isImage = /\.(png|jpe?g|gif|svg|bmp|webp|avif|ico|icns)$/i.test(f.name);
-                          const src = apiUrl(`/api/file-raw?path=${encodeURIComponent(f.path)}`);
-                          return isImage ? (
-                            <div key={i} className={styles.ultraplanImageItem} title={f.name}>
-                              <img
-                                src={src}
-                                className={styles.ultraplanImageThumb}
-                                alt={f.name}
-                                role="button"
-                                tabIndex={0}
-                                onClick={(e) => { e.stopPropagation(); this.setState({ ultraplanLightbox: { src, alt: f.name } }); }}
-                                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); this.setState({ ultraplanLightbox: { src, alt: f.name } }); } }}
-                              />
-                              <ConfirmRemoveButton
-                                title={t('ui.chatInput.confirmRemoveImage')}
-                                onConfirm={() => this.handleUltraplanRemoveFile(i)}
-                                onPopupOpenChange={(open) => this.setState({ ultraplanConfirming: open })}
-                                className={styles.ultraplanImageRemove}
-                                ariaLabel={t('ui.chatInput.removeImage')}
-                              >&times;</ConfirmRemoveButton>
-                            </div>
-                          ) : (
-                            <span key={i} className={styles.ultraplanFileChip} title={f.name}>
-                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-                              <span className={styles.ultraplanFileName}>{f.name}</span>
-                              <ConfirmRemoveButton
-                                tag="span"
-                                title={t('ui.chatInput.confirmRemoveFile')}
-                                onConfirm={() => this.handleUltraplanRemoveFile(i)}
-                                onPopupOpenChange={(open) => this.setState({ ultraplanConfirming: open })}
-                                className={styles.ultraplanFileRemove}
-                                ariaLabel={t('ui.chatInput.removeImage')}
-                              >&times;</ConfirmRemoveButton>
-                            </span>
-                          );
-                        })}
-                      </div>
-                    )}
-                    <textarea
-                      className={styles.ultraplanTextarea}
-                      value={this.state.ultraplanPrompt}
-                      onChange={(e) => this.setState({ ultraplanPrompt: e.target.value })}
-                      onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && (this.state.ultraplanPrompt.trim() || this.state.ultraplanFiles.length > 0)) { e.preventDefault(); this.handleUltraplanSend(); } }}
-                      onPaste={this.handleUltraplanPaste}
-                      placeholder={t('ui.ultraplan.placeholder')}
-                      /* rows={1} 让 CSS flex 完全控制高度,避免 rows*line-height 作 intrinsic baseline 干扰 grow */
-                      rows={1}
-                      autoFocus
-                    />
+                    <div className={styles.ultraplanInputBox}>
+                      <textarea
+                        className={styles.ultraplanTextarea}
+                        value={this.state.ultraplanPrompt}
+                        onChange={(e) => this.setState({ ultraplanPrompt: e.target.value })}
+                        onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && (this.state.ultraplanPrompt.trim() || this.state.ultraplanFiles.length > 0)) { e.preventDefault(); this.handleUltraplanSend(); } }}
+                        onPaste={this.handleUltraplanPaste}
+                        placeholder={t('ui.ultraplan.placeholder')}
+                        /* rows={1} 让 CSS flex 完全控制高度,避免 rows*line-height 作 intrinsic baseline 干扰 grow */
+                        rows={1}
+                        autoFocus
+                      />
+                      {this.state.ultraplanFiles.length > 0 && (
+                        <div className={styles.ultraplanFileList}>
+                          {this.state.ultraplanFiles.map((f, i) => {
+                            const isImage = /\.(png|jpe?g|gif|svg|bmp|webp|avif|ico|icns)$/i.test(f.name);
+                            const src = apiUrl(`/api/file-raw?path=${encodeURIComponent(f.path)}`);
+                            return isImage ? (
+                              <div key={i} className={styles.ultraplanImageItem} title={f.name}>
+                                <img
+                                  src={src}
+                                  className={styles.ultraplanImageThumb}
+                                  alt={f.name}
+                                  role="button"
+                                  tabIndex={0}
+                                  onClick={(e) => { e.stopPropagation(); this.setState({ ultraplanLightbox: { src, alt: f.name } }); }}
+                                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); this.setState({ ultraplanLightbox: { src, alt: f.name } }); } }}
+                                />
+                                <ConfirmRemoveButton
+                                  title={t('ui.chatInput.confirmRemoveImage')}
+                                  onConfirm={() => this.handleUltraplanRemoveFile(i)}
+                                  onPopupOpenChange={(open) => this.setState({ ultraplanConfirming: open })}
+                                  className={styles.ultraplanImageRemove}
+                                  ariaLabel={t('ui.chatInput.removeImage')}
+                                >&times;</ConfirmRemoveButton>
+                              </div>
+                            ) : (
+                              <span key={i} className={styles.ultraplanFileChip} title={f.name}>
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                                <span className={styles.ultraplanFileName}>{f.name}</span>
+                                <ConfirmRemoveButton
+                                  tag="span"
+                                  title={t('ui.chatInput.confirmRemoveFile')}
+                                  onConfirm={() => this.handleUltraplanRemoveFile(i)}
+                                  onPopupOpenChange={(open) => this.setState({ ultraplanConfirming: open })}
+                                  className={styles.ultraplanFileRemove}
+                                  ariaLabel={t('ui.chatInput.removeImage')}
+                                >&times;</ConfirmRemoveButton>
+                              </span>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
                     <div className={styles.ultraplanFooter}>
                       <button className={styles.ultraplanSendBtn} disabled={!this.state.ultraplanPrompt.trim() && this.state.ultraplanFiles.length === 0} onClick={this.handleUltraplanSend}>{t('ui.ultraplan.send')}</button>
                       <button className={styles.ultraplanUploadBtn} onClick={this.handleUltraplanUpload}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>{t('ui.ultraplan.upload')}</button>

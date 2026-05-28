@@ -79,10 +79,12 @@
   gap: 4px;
 }
 
+/* flex-shrink: 0 保证横向滚动场景下自定义专家 tab 不被压缩。 */
 .customWrap {
   position: relative;
   display: inline-flex;
   align-items: center;
+  flex-shrink: 0;
 }
 
 .customTitle {
@@ -108,6 +110,7 @@
   cursor: pointer;
   opacity: 0;
   transition: opacity 0.15s;
+  z-index: 2;
 }
 
 .customWrap:hover .editPencil {
@@ -130,19 +133,33 @@
   line-height: 1.5;
 }
 
+/* padding 0 20px:tabs 自然位置距 modal 左右各 20px,视觉上是"行进入"的呼吸区。
+   active tab 的 sticky 钉边位置是 left/right: 0,即贴 modal 内沿。两者不同 ——
+   只有当滚动开始、active tab 行进到达 left/right: 0 时才会"撞墙"钉住;不滚动时
+   tab 永远在 padding 自然位置,不会因为切换 active 而抖动。
+   flex-wrap: nowrap + overflow-x: auto 保持单行 Chrome-tab strip 风格;滚动条隐藏。 */
 .variantRow {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   gap: 8px;
-  padding: 0 16px 10px;
-  flex-wrap: wrap;
+  padding: 0 20px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.variantRow::-webkit-scrollbar {
+  display: none;
 }
 
+/* padding-y 从 7px 提到 9px,让专家按钮高度更厚实,与 box 衔接后视觉重量更平衡。
+   flex-shrink: 0 保证横向滚动场景下 tab 自身不被压缩,保持自然宽度。 */
 .roleBtn {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  padding: 7px 14px;
+  padding: 9px 14px;
   font-size: 15px;
   line-height: 1.6;
   border: 1px solid var(--border-color);
@@ -153,6 +170,7 @@
   transition: all 0.2s;
   user-select: none;
   white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .roleBtn:hover {
@@ -160,62 +178,119 @@
   color: var(--color-primary);
 }
 
-.roleBtnActive {
-  background: var(--color-primary);
-  color: #fff;
-  border-color: var(--color-primary);
+/* 选中态 = Chrome 浏览器头部 tab 形:顶圆角 + 底平 + bg 取 textarea 同色
+   (--bg-container,light=#FFF/dark=#111),与 modal 容器(--bg-elevated)有明显
+   对比,视觉上像 tab 拉出来贴合下方 textarea 内容区;border-bottom 同色"开口"
+   下沿,margin-bottom: -1px 让 tab 视觉上贴合 textarea 顶部。
+   position: relative + z-index: 1 让 active tab 渲染层级高于 textareaWrap,这样
+   box 顶边向上扩散的柔光阴影会被 active tab 同色 bg 视觉吃掉,衔接处保持纯白。
+   复合选择器 .roleBtn.roleBtnActive 让特异度 0,2,0 高于 .roleBtn:hover 的 0,1,1,
+   所以 hover 时不再触发 :hover 颜色覆盖,选中态样式一直生效 (DevTools 也不会再把
+   这条规则的属性标成 overridden)。
+   sticky 定位见下方两条规则 —— 内置专家 (button 直接是 variantRow 的 flex 子) 和
+   自定义专家 (customWrap 是 flex 子,button 套在里面) 分别处理。 */
+.roleBtn.roleBtnActive {
+  background: var(--bg-container);
+  color: var(--color-primary);
+  border-color: var(--border-primary);
+  border-bottom-color: var(--bg-container);
+  border-radius: 10px 10px 0 0;
+  font-weight: 500;
+  margin-bottom: -1px;
+  position: relative;
+  z-index: 1;
 }
 
-.roleBtnActive:hover {
-  color: #fff;
+/* 横向滚动时把 active tab 钉在 modal 内沿 (Chrome browser tab strip 风格):
+   - left/right 都设 0,即贴 scrollport 内沿;tabs 的自然位置在 padding 20px,
+     只有当用户滚动到 active tab 撞到内沿时 sticky 才接管,这是有反馈感的"撞墙"位置;
+   - 不滚动时 sticky 永远不激活,tab 都在 padding 自然位置,点击切换 active 零抖动;
+   - z-index: 2 让 active tab 渲染层级高于相邻 inactive tab,滚动时其它 tab 从下方穿过;
+   - 内置专家用 ">" 子选择器命中 (button 直接是 flex item);
+   - 自定义专家用 :has() 选中 customWrap (它才是 flex item,button 套在里面),
+     :has() 需要 Chrome 105+ / Safari 15.4+ / Firefox 121+ —— 当前主流浏览器都已支持。 */
+.variantRow > .roleBtn.roleBtnActive,
+.customWrap:has(> .roleBtn.roleBtnActive) {
+  position: sticky;
+  left: 0;
+  right: 0;
+  z-index: 2;
 }
 
+/* 浅色主题阴影:
+   - .textareaWrap 沿用对话气泡 --bubble-assistant-shadow-light 同款柔和下落阴影;
+   - .roleBtnActive 只走"向上"方向阴影 (offset-y: -3px),没有向下扩散,
+     和 box 的"向上"小尾巴一起被 active tab 自身的同色 bg 视觉吃掉,衔接处零阴影。
+   暗色主题不加阴影 (对照 chat 气泡:dark 也无 box-shadow,深底上阴影本身不可见)。 */
+[data-theme="light"] .textareaWrap {
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.08);
+}
+[data-theme="light"] .roleBtnActive {
+  box-shadow: 0 -3px 8px rgba(0, 0, 0, 0.06);
+}
+
+/* 无边框版:padding 上下各 6px,total height 显著短于 roleBtn;
+   align-self: center 覆盖父级 .variantRow 的 flex-end;
+   margin-bottom: 2px 把按钮向上微调 2px,贴合 PC 端 .ultraplanAddExpertBtn 的视觉对齐;
+   flex-shrink: 0 保证横向滚动场景下 +自定义专家 不被压缩。 */
 .addExpertBtn {
   display: inline-flex;
   align-items: center;
+  align-self: center;
   gap: 5px;
-  padding: 7px 14px;
+  padding: 6px 14px 6px;
   font-size: 15px;
   line-height: 1.6;
   margin-left: 4px;
-  border: 1px dashed var(--border-primary);
+  margin-bottom: 2px;
+  border: none;
   border-radius: 14px;
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
-  transition: all 0.2s;
+  transition: background 0.15s, color 0.15s;
   user-select: none;
   white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .addExpertBtn:hover {
-  border-style: solid;
-  border-color: var(--color-primary);
   color: var(--color-primary);
   background: var(--bg-surface);
 }
 
-/* light theme:dashed border + text-muted 在白底上对比度偏弱(static 状态接近
-   placeholder/disabled 视感),用 text-secondary 提色保留「新增 = 待激活」语义。 */
+/* light theme:text-muted 在白底上对比度偏弱(static 状态接近 placeholder/disabled
+   视感),用 text-secondary 提色保留「新增 = 待激活」语义。 */
 [data-theme="light"] .addExpertBtn {
   color: var(--text-secondary);
-  border-color: var(--text-disabled);
 }
 
+/* fileList 在 textareaWrap 内,位于 textarea 卡片下方:
+   - padding-top: 8px 给 textarea 卡片底边与 chip 之间留视觉呼吸;
+   - 横向 padding 14px 与 textarea 内 padding-x 对齐,chip 起始对齐文本起始;
+   - 底部 8px 让 chip 与外框 padding 边缘保持距离(外框 padding-bottom 4 + 这里 8 = 12)。 */
 .fileList {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  padding: 0 16px 10px;
+  padding: 8px 14px;
+  /* 限高 + 内部滚动:粘贴大量文件时 fileList 不会撑大把 textarea 挤到 0,
+     超过两行 chip 时 fileList 内部出现滚动条。flex-shrink: 0 让 textarea(flex:1 1 0)
+     抢剩余空间;textareaWrap 的 overflow: hidden 仍兜底防越界。 */
+  max-height: 80px;
+  overflow-y: auto;
+  flex-shrink: 0;
 }
 
+/* chip 被嵌入 inputBox 后,chip bg 与 box bg 同为 --bg-container 会"消失";
+   切到 --bg-elevated 让 chip 在 box 内有清晰边界(light/dark 都成立)。 */
 .fileChip {
   display: inline-flex;
   align-items: center;
   gap: 4px;
   padding: 2px 8px;
   border-radius: 4px;
-  background: var(--bg-container);
+  background: var(--bg-elevated);
   border: 1px solid var(--border-primary);
   font-size: 11px;
   color: var(--text-secondary);
@@ -302,41 +377,46 @@
   }
 }
 
-/* textarea wrap:column flex 容器,在 modal column 内 flex grow 撑满 footer 上方剩余高度。
-   flex-direction: column + min-height: 0 让 textarea 真能拿到余量,避免 flexbox 默认 min-
-   content 撑爆;flex: 1 1 0 而非 1 1 auto 让 wrap 严格按可用余量算高,不受 textarea
-   intrinsic height (rows=5) 干扰。 */
+/* textareaWrap = textarea + fileList 的白底容器,只给 bg + 圆角,无边框。
+   padding: 4px 让内部 textarea 卡片与外框留出呼吸距离,textarea 自身边框形成可见的
+   "卡片"轮廓(用户红框标记的位置)。overflow: hidden 保证 fileList 不越出圆角;
+   active tab 通过 margin-bottom:-1px 压进外框顶边的 padding 区,白底视觉融合。 */
 .textareaWrap {
   margin: 0 16px;
   display: flex;
   flex-direction: column;
-  /* flex grow 拿 modal 余量;min-height: 0 解锁 flex shrink 默认 min-content 约束;
-     不再写 min-height: 120(textarea 自身有,且会阻止 wrap shrink 时正确 grow) */
   flex: 1 1 0;
   min-height: 0;
+  background: var(--bg-container);
+  border-radius: 8px;
+  overflow: hidden;
+  padding: 4px;
 }
 
+/* textarea 自带圆角 + 常驻可见的浅色 border,标记输入框的可见范围(用户红框区域)。
+   focus 时 border-color 升级为 primary-pale 形成"亮框" —— 高亮局限在 textarea 自身,
+   不蔓延到 fileList 区域(用户明确要求)。 */
 .textarea {
-  /* textarea 是 column flex 子,flex: 1 1 0 + min-height: 0 严格按余量拉伸,
-     不再使用 rows=5 的 intrinsic 高度。width:100% + height:100% 强制双向贴合
-     wrap(flex 算法对 textarea 这种 form 控件有时不严格 stretch,显式 100% 兜底)。
-     box-sizing: border-box 避免 100% + padding 24px + border 2px 溢出 wrap 26px。 */
   flex: 1 1 0;
   width: 100%;
-  height: 100%;
   min-height: 0;
   box-sizing: border-box;
   padding: 12px 14px;
+  background: transparent;
   border: 1px solid var(--border-primary);
   border-radius: 8px;
-  background: var(--bg-container);
   color: var(--text-primary);
   font-size: 16px;
   line-height: 1.5;
   font-family: inherit;
+  transition: border-color 0.15s;
   /* 原生 resize 关掉(modal 整体 drag 接管)。手机模式 JS 会在 inline style 覆盖回 'vertical'。 */
   resize: none;
   outline: none;
+}
+
+.textarea:focus {
+  border-color: var(--color-primary-pale);
 }
 
 /* Modal 左上角 SVG resize handle:直角三角形,直角顶点在左上(rounded corner 圆弧
@@ -379,10 +459,6 @@
   height: 22px;
   top: 8px;
   left: 8px;
-}
-
-.textarea:focus {
-  border-color: var(--color-primary-pale);
 }
 
 .textarea::placeholder {
