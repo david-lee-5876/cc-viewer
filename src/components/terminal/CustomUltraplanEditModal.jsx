@@ -10,6 +10,13 @@ export default function CustomUltraplanEditModal({ open, initial, onSave, onDele
   const [content, setContent] = useState('');
   const [docHtml, setDocHtml] = useState('');
   const [docLoading, setDocLoading] = useState(false);
+  // 折叠左栏(参考文档),让右栏编辑区独占全宽;跨弹窗持久化。
+  // try/catch 与 TerminalPanel/AppBase 的 localStorage 读写一致:Safari 隐私模式 / 配额超限会抛
+  // SecurityError|QuotaExceededError;不裹会让 useState initializer 抛错直接挂掉整个弹窗渲染。
+  const [docCollapsed, setDocCollapsed] = useState(() => {
+    try { return localStorage.getItem('cc-viewer-custom-expert-doc-collapsed') === 'true'; }
+    catch { return false; }
+  });
   const docRef = useRef(null);
 
   useEffect(() => {
@@ -19,6 +26,13 @@ export default function CustomUltraplanEditModal({ open, initial, onSave, onDele
       setContent(initial?.id ? (initial.content || '') : t('ui.ultraplan.customContentTemplate'));
     }
   }, [open, initial]);
+
+  // 折叠状态持久化。与 TerminalPanel.jsx / AppBase.jsx 的 localStorage 写入约定一致,裹 try/catch:
+  // Safari 隐私模式 / 配额超限会让 setItem 抛错,不裹的话会冒到 React commit 作未捕获错误。
+  useEffect(() => {
+    try { localStorage.setItem('cc-viewer-custom-expert-doc-collapsed', String(docCollapsed)); }
+    catch { /* localStorage 不可用时降级到内存状态即可 */ }
+  }, [docCollapsed]);
 
   // 左栏:用与 ConceptHelp 相同的 /api/concept 请求(此处内联),把使用说明文档常驻显示供"抄作业"。
   useEffect(() => {
@@ -43,6 +57,8 @@ export default function CustomUltraplanEditModal({ open, initial, onSave, onDele
 
   // 文档渲染后,给每个代码块右上角加"复制"按钮(包一层相对定位容器避免随横向滚动跑掉)。
   useEffect(() => {
+    // 折叠改用 CSS 过渡(docPanel 不再卸载),按钮一次注入长期复用;
+    // 折叠态下 docPanel 整体 opacity:0 + flex-basis:0 + pointer-events:none,按钮不可见也不可点。
     const root = docRef.current;
     if (!root || !docHtml) return;
     const cleanups = [];
@@ -110,7 +126,9 @@ export default function CustomUltraplanEditModal({ open, initial, onSave, onDele
       </div>
       <div className={styles.footerRight}>
         <Button onClick={onClose}>{t('ui.ultraplan.customCancel')}</Button>
-        <Button type="primary" disabled={!canSave} onClick={handleSave}>{t('ui.ultraplan.customSave')}</Button>
+        <Button type="primary" disabled={!canSave} onClick={handleSave}>
+          {isEdit ? t('ui.ultraplan.customSave') : t('ui.ultraplan.customCreate')}
+        </Button>
       </div>
     </div>
   );
@@ -127,10 +145,30 @@ export default function CustomUltraplanEditModal({ open, initial, onSave, onDele
       styles={{ content: { background: 'var(--bg-elevated)', border: '1px solid var(--border-light)' }, header: { background: 'var(--bg-elevated)', borderBottom: 'none' } }}
     >
       <div className={styles.split}>
-        <div className={`chat-md ${styles.docPanel}`} ref={docRef}>
+        {/* 始终挂载,折叠/展开靠 CSS 过渡:flex-basis 50%↔0 + padding/border 渐变 + opacity 淡入淡出,
+            把手凭 margin-left:-20px 始终贴在 docPanel 右边界上,会随之平滑滑入/滑出。 */}
+        <div
+          className={`chat-md ${styles.docPanel} ${docCollapsed ? styles.docCollapsed : ''}`}
+          ref={docRef}
+          aria-hidden={docCollapsed}
+        >
           {docLoading
             ? <div className={styles.docLoading}><Spin /></div>
             : <div dangerouslySetInnerHTML={{ __html: docHtml }} />}
+        </div>
+        {/* 折叠把手:借鉴 ChatView 的 .terminalToggle。Terminal 在右、本面板在左,chevron 方向相对反转:
+            展开时 `<`(点击向左收回),折叠时 `>`(点击向右拉出),与图二参考一致。 */}
+        <div
+          className={styles.docToggle}
+          onClick={() => setDocCollapsed(v => !v)}
+          title={docCollapsed ? t('ui.ultraplan.expandDoc') : t('ui.ultraplan.collapseDoc')}
+        >
+          <svg viewBox="0 0 8 24" width="8" height="24">
+            {docCollapsed
+              ? <path d="M4 8 L7 12 L4 16" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+              : <path d="M4 8 L1 12 L4 16" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+            }
+          </svg>
         </div>
         <div className={styles.editPanel}>
           <div className={styles.field}>

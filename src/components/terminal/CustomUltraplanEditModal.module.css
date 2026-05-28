@@ -3,17 +3,35 @@
   display: flex;
   gap: 20px;
   align-items: stretch;
-  /* 双栏共享同一高度上限,左右分隔线齐平;左栏内部滚动,右栏 textarea 撑满。 */
-  max-height: 65vh;
+  /* 高度固定 65vh:docPanel 不卸载、靠 .docCollapsed 走 flex-basis→0 过渡折叠,
+     如果用 max-height,折叠态 .split 会按"toggle + editPanel"的子内容塌缩到 ~280px,
+     Modal 在两种状态间高度跳动;固定 height 让 .split 在两种状态下都占同一高度,
+     右栏 textarea 借 flex:1 自然撑满多出来的纵向空间(折叠态获得更大编辑区)。 */
+  height: 65vh;
 }
 
 .docPanel {
-  flex: 1 1 50%;
+  /* flex-grow:0 让 editPanel(grow:1)独占 docPanel 折叠时让出来的横向空间;
+     可 shrink 兼容窄屏。 */
+  flex: 0 1 50%;
   min-width: 0;
   overflow-y: auto;
   padding-right: 14px;
   border-right: 1px solid var(--border-primary);
   color: var(--text-primary);
+  /* 折叠/展开过渡:横向收缩(flex-basis) + 视觉收边(padding/border) + 淡出(opacity),
+     250ms ease 适中——既能感知到位移又不拖沓;把手凭 -20px margin-left 自然跟随。 */
+  transition: flex-basis 0.25s ease, padding-right 0.25s ease, border-right-width 0.25s ease, opacity 0.25s ease;
+}
+
+/* 折叠态:横向归零 + 视觉边线收掉 + 内容淡出 + 截断溢出 + 屏蔽指针事件(配合 JSX aria-hidden) */
+.docCollapsed {
+  flex-basis: 0;
+  padding-right: 0;
+  border-right-width: 0;
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
 }
 
 .editPanel {
@@ -21,6 +39,38 @@
   min-width: 0;
   display: flex;
   flex-direction: column;
+}
+
+/* 折叠把手(借鉴 ChatView 的 .terminalToggle):14×48 竖条,chevron 翻转表达方向。
+   方向语义反转:本面板在左,展开时 `<`(向左收回);折叠时 `>`(向右拉出)。 */
+.docToggle {
+  align-self: center;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 48px;
+  cursor: pointer;
+  color: var(--text-disabled);
+  background: var(--overlay-light-faint);
+  /* 圆角靠 docPanel 一侧为平边:展开时贴 docPanel 右边界,折叠时贴 modal 左边界,均为 tab 形态。 */
+  border-radius: 0 4px 4px 0;
+  transition: background 0.2s, color 0.2s;
+  z-index: 20;
+  position: relative;
+}
+
+.docToggle:hover {
+  background: var(--overlay-light-medium);
+  color: var(--text-tertiary);
+}
+
+/* 把手始终是 .split 的第二个子(docPanel 永不卸载,只是 flex-basis→0 折叠)→ -20px 抵消 split 的 gap,
+   让把手紧贴 docPanel 右边界;折叠态 docPanel 宽度收到 0,把手随之滑到 modal 左边缘,视觉过渡平滑。
+   注意:本 margin 量必须等于 .split 的 gap 才能两态都对齐,改一个时记得同步改另一个。 */
+.docToggle {
+  margin-left: -20px;
 }
 
 /* 每个代码块外包一层相对定位容器,复制按钮锚定其右上角,

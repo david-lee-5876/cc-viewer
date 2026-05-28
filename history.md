@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.6.280 (2026-05-28)
+
+- feat(ultraplan): 自定义专家弹窗左栏(参考文档)加可折叠开关(14px 竖条 chevron,借鉴 Terminal 切换按钮),折叠/展开走 CSS 过渡(flex-basis + opacity + padding/border,250ms ease)而非硬切换;.split 固定 65vh 高度避免 Modal 在两种状态间跳动,折叠态 textarea 自动撑满多出的纵向空间;状态用 localStorage 跨弹窗记住
+- feat(ultraplan): 自定义专家弹窗新建态主按钮文案改为「新建自定义专家」(对应 18 语言,ja/ko 沿用项目既定术语 カスタムエキスパート/커스텀 전문가),编辑态保留「保存」,语义更明确
+- feat(ultraplan): 打开自定义专家编辑器时不再关闭背后的 UltraPlan 面板——`openCustomUltraplanEditor` 去掉收起逻辑、Popover `onOpenChange` 守卫把 `customUltraplanEditOpen` 加入忽略列表(防止编辑器 mask 点击被识别为 Popover 外部点击,机制是 rc-trigger 的 capture-mousedown 早于 rc-dialog 的 bubble-click)
+- feat(terminal): 「刷新」按钮抖动量改为连击逐级加强——3 秒内连点 L1(25%/8-32px)→L2(50%/32-80px)→L3(75%/64-160px),空闲超时回 L1;轻症一击即愈,白屏/严重偏移可连点至 L3 跨多行强制 xterm 状态机翻新;并新增 60s 后台定时主动触发 L3 抖动(tab 隐藏跳过、mobile 非 iPad 不启用),预防长时间运行后渲染漂移堆积;在途 rAF 期间再次触发会被早返回守住,避免叠加 baseH 复读
+- chore(chat): suggestion chip 设固定 height 35px(content-box,内部 padding+border 后总高 ~51px)
+
 ## 1.6.279 (2026-05-27)
 
 - feat(ultraplan): 自定义专家弹窗改双栏——左栏常驻使用文档(代码块右上角一键复制),右栏编辑表单,去掉标题旁 ? 帮助入口;弹窗加宽至 ~1100;复制按钮在非安全上下文(局域网明文 HTTP)兜底不抛错、mermaid 代码块不挂复制按钮、弹窗开着时切语言重拉对应语种文档

@@ -9239,6 +9239,16 @@ const i18nData = {
     "ar": "حفظ", "no": "Lagre", "pt-BR": "Salvar",
     "th": "บันทึก", "tr": "Kaydet", "uk": "Зберегти"
   },
+  // 新建态(非编辑)的主按钮文案。语义比"保存"更明确,新建时是"添加一个新专家",
+  // 与编辑态(已有 id)用 customSave 的"保存"区分开。
+  "ui.ultraplan.customCreate": {
+    "zh": "新建自定义专家", "en": "Add custom expert", "zh-TW": "新增自訂專家",
+    "ko": "커스텀 전문가 추가", "ja": "カスタムエキスパートを追加", "de": "Benutzerdefinierten Experten hinzufügen",
+    "es": "Añadir experto personalizado", "fr": "Ajouter un expert personnalisé", "it": "Aggiungi esperto personalizzato",
+    "da": "Tilføj brugerdefineret ekspert", "pl": "Dodaj niestandardowego eksperta", "ru": "Добавить пользовательского эксперта",
+    "ar": "إضافة خبير مخصص", "no": "Legg til egendefinert ekspert", "pt-BR": "Adicionar especialista personalizado",
+    "th": "เพิ่มผู้เชี่ยวชาญที่กำหนดเอง", "tr": "Özel uzman ekle", "uk": "Додати користувацького експерта"
+  },
   "ui.ultraplan.customCancel": {
     "zh": "取消", "en": "Cancel", "zh-TW": "取消",
     "ko": "취소", "ja": "キャンセル", "de": "Abbrechen",
@@ -9279,6 +9289,47 @@ const i18nData = {
   // 发送时 buildCustomTemplate 幂等不重复包壳(见 src/utils/ultraplanTemplates.js)。
   "ui.ultraplan.customContentTemplate": {
     "en": "<system-reminder>\n[SCOPED INSTRUCTION] The following instructions apply only to the next 1–3 interactions. Once the task is complete, these instructions should gradually decrease in priority and no longer affect subsequent interactions. You should be adept at utilizing tools such as `AskUserQuestion`, `EnterPlanMode`, and `TeamCreate`, rather than relying solely on plain text processing.\n\n</system-reminder>"
+  },
+  // 自定义专家弹窗左栏(参考文档)折叠把手的 title 文案:折叠态 = 展开提示,展开态 = 折叠提示。
+  "ui.ultraplan.collapseDoc": {
+    "zh": "折叠参考文档",
+    "en": "Collapse reference docs",
+    "zh-TW": "摺疊參考文件",
+    "ko": "참고 문서 접기",
+    "ja": "リファレンス文書を折りたたむ",
+    "de": "Referenzdokumente einklappen",
+    "es": "Contraer documentos de referencia",
+    "fr": "Réduire les documents de référence",
+    "it": "Comprimi i documenti di riferimento",
+    "da": "Skjul referencedokumenter",
+    "pl": "Zwiń dokumenty referencyjne",
+    "ru": "Свернуть справочные документы",
+    "ar": "طي الوثائق المرجعية",
+    "no": "Skjul referansedokumenter",
+    "pt-BR": "Recolher documentos de referência",
+    "th": "ย่อเอกสารอ้างอิง",
+    "tr": "Referans belgelerini daralt",
+    "uk": "Згорнути довідкові документи"
+  },
+  "ui.ultraplan.expandDoc": {
+    "zh": "展开参考文档",
+    "en": "Expand reference docs",
+    "zh-TW": "展開參考文件",
+    "ko": "참고 문서 펼치기",
+    "ja": "リファレンス文書を展開",
+    "de": "Referenzdokumente ausklappen",
+    "es": "Expandir documentos de referencia",
+    "fr": "Développer les documents de référence",
+    "it": "Espandi i documenti di riferimento",
+    "da": "Vis referencedokumenter",
+    "pl": "Rozwiń dokumenty referencyjne",
+    "ru": "Развернуть справочные документы",
+    "ar": "توسيع الوثائق المرجعية",
+    "no": "Vis referansedokumenter",
+    "pt-BR": "Expandir documentos de referência",
+    "th": "ขยายเอกสารอ้างอิง",
+    "tr": "Referans belgelerini genişlet",
+    "uk": "Розгорнути довідкові документи"
   },
   "ui.taskNotification.result": {
     "zh": "结果详情",

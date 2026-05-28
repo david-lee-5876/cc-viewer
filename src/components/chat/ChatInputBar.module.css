@@ -285,6 +285,7 @@
   cursor: pointer;
   flex-shrink: 0;
   transition: background 0.15s;
+  height: 35px;
 }
 
 .suggestionChip:hover {

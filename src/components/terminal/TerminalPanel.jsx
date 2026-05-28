@@ -466,6 +466,15 @@ class TerminalPanel extends React.Component {
       this.sendResize();
     }
     this.setupResizeObserver();
+    // 定时强制刷新:每 60s 触发 L3 抖动,主动防止 xterm/WebGL 长时间运行后状态机漂移导致的
+    // 白屏/严重偏移。tab 隐藏时跳过(无渲染需求)。仅在用动态 fit 的平台启用(mobile 非 iPad 跳过)。
+    // 直接走 _executeRefresh(3) 不更新连击窗口,与用户手动点击互不干扰。
+    if (!isMobile || isPad) {
+      this._autoRefreshInterval = setInterval(() => {
+        if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+        this._executeRefresh(3);
+      }, 60000);
+    }
     // claude-settings 由 SettingsContext 集中提供;通过 props 派生 agentTeamEnabled,
     // mount 时若已 ready 同步 setState,否则等 componentDidUpdate 接力。
     if (this.props.claudeSettings) {
@@ -584,6 +593,7 @@ class TerminalPanel extends React.Component {
     if (this._resizeDebounceTimer) clearTimeout(this._resizeDebounceTimer);
     if (this._webglRecoveryTimer) clearTimeout(this._webglRecoveryTimer);
     if (this._refreshRaf) cancelAnimationFrame(this._refreshRaf);
+    if (this._autoRefreshInterval) { clearInterval(this._autoRefreshInterval); this._autoRefreshInterval = null; }
     if (this.resizeObserver) {
       this.resizeObserver.disconnect();
     }
@@ -921,11 +931,21 @@ class TerminalPanel extends React.Component {
     }
   }
 
-  // 强制重绘终端：先清 WebGL 纹理图集 + 全量 refresh（零 PTY 影响），再做一次"收缩-恢复"
+  // 强制重绘终端的实际执行体:先清 WebGL 纹理图集 + 全量 refresh(零 PTY 影响),再做一次"收缩-恢复"
   // 高度抖动驱动本地 canvas 重建——复现用户手动改高度治花屏/白屏的效果。
-  // 关键：sub-row 高度变化 fit() 会 no-op，收缩量需足以改变行数；中间尺寸不发 PTY，
-  // 仅本地 terminal.resize() 重绘 canvas，末尾按还原后（=原始）尺寸 sendResize 一次。
-  handleForceRefresh = () => {
+  // 关键:sub-row 高度变化 fit() 会 no-op,收缩量需足以改变行数;中间尺寸不发 PTY,
+  // 仅本地 terminal.resize() 重绘 canvas,末尾按还原后(=原始)尺寸 sendResize 一次。
+  // 三档抖动量(px 都是上限,百分比仅在小尺寸终端才命中,典型 PC 500-900px 终端固定走上限值):
+  //   L1(min(32, baseH·25%))  治花屏轻症 / 局部错位
+  //   L2(min(80, baseH·50%))  治中度偏移 / 行高漂移
+  //   L3(min(160, baseH·75%)) 治整片白屏 / canvas 失同步重症
+  // 两条调用路径:handleForceRefresh(用户点击,连击窗口推进级别),60s 自动定时器(直接 L3 兜底)。
+  _executeRefresh = (level) => {
+    // 上次 refresh 的 rAF 还没跑完(收缩态未还原)就直接 return,避免:
+    //   ① 在途的 inline-style 让本次 host.clientHeight 读到的是 shrunk 值,baseH 复读引入"叠加收缩";
+    //   ② 用户连点 + 自动定时器抢 16ms 窗口的罕见 race。
+    // 跳过本次就好,反正在途的 rAF 自己会收尾。
+    if (this._refreshRaf) return;
     const host = this.containerRef.current;
     const term = this.terminal;
     if (!host || !term) return;
@@ -936,18 +956,24 @@ class TerminalPanel extends React.Component {
     };
     fullRedraw(term);
 
-    // 按钮已 gate 在动态 fit 路径，理论上 fitAddon 必在；缺失则仅做全量 refresh
+    // 动态 fit 路径才有意义;mobile(非 iPad)用固定尺寸,fit/收缩没用
     if (!this.fitAddon) return;
 
-    // 保存 scroll 位置（与 setupResizeObserver 中一致，fit 会重置 viewport）
+    // 保存 scroll 位置(与 setupResizeObserver 中一致,fit 会重置 viewport)
     const vp = host.querySelector('.xterm-viewport');
     const prevScrollTop = vp?.scrollTop ?? 0;
     const prevScrollHeight = vp?.scrollHeight ?? 1;
     const wasAtBottom = vp ? (prevScrollTop + vp.clientHeight >= prevScrollHeight - 5) : true;
 
-    // 收缩量足以改变行数，fit() 才会真正 resize 并重建 canvas
+    // 按 level 选择收缩量;收缩量足以改变行数,fit() 才会真正 resize 并重建 canvas。
+    // L1 下限 32px(原 24)保证至少跨 2 行——24px 在默认 16-17px 行高下只 ~1.4 行,
+    // 偶发同行四舍五入会让 fit() no-op、抖动无效。
     const baseH = host.clientHeight;
-    const shrink = Math.min(24, Math.max(8, Math.floor(baseH * 0.25)));
+    const shrink = level === 3
+      ? Math.min(160, Math.max(64, Math.floor(baseH * 0.75)))
+      : level === 2
+        ? Math.min(80, Math.max(32, Math.floor(baseH * 0.50)))
+        : Math.min(32, Math.max(8, Math.floor(baseH * 0.25)));
     host.style.flex = 'none';
     host.style.height = Math.max(8, baseH - shrink) + 'px';
     void host.offsetHeight; // 强制 reflow
@@ -958,7 +984,7 @@ class TerminalPanel extends React.Component {
       this._refreshRaf = null;
       const h = this.containerRef.current;
       if (!h || !this.terminal) return;
-      // 还原高度（清空内联样式，回到 flex:1）
+      // 还原高度(清空内联样式,回到 flex:1)
       h.style.flex = '';
       h.style.height = '';
       void h.offsetHeight; // 强制 reflow
@@ -976,6 +1002,16 @@ class TerminalPanel extends React.Component {
       }
       this.sendResize();
     });
+  };
+
+  // 用户点击入口:抖动级别按连击窗口推进(3s 内 L1→L2→L3,超时回 L1)。
+  // 越高级闪得越明显,所以默认从轻到重渐次试,只有用户不满意再点才会升级。
+  handleForceRefresh = () => {
+    const now = Date.now();
+    const within = (now - (this._lastRefreshAt || 0)) < 3000;
+    this._refreshLevel = within ? Math.min(3, (this._refreshLevel || 1) + 1) : 1;
+    this._lastRefreshAt = now;
+    this._executeRefresh(this._refreshLevel);
   };
 
   setupResizeObserver() {
@@ -1356,23 +1392,20 @@ class TerminalPanel extends React.Component {
   };
 
   openCustomUltraplanEditor = (item) => {
-    // 打开专家编辑器时收起 UltraPlan Popover，避免 Popover/Modal 层级混淆。
-    // 快照原状态，close 时按实际值恢复——防御未来非 UltraPlan 路径调用。
-    this.setState(prev => ({
+    // UltraPlan 是 Antd Popover(自带"点击外部即关闭"),编辑器是 Antd Modal(portal 挂 body)。
+    // 打开编辑器时不主动收 Popover——保留 UltraPlan 在背景里(编辑器自带蒙层会压暗);
+    // 编辑器 mask 引起的"外部点击"由下面 Popover 的 onOpenChange 守卫拦下(customUltraplanEditOpen)。
+    this.setState({
       customUltraplanEditOpen: true,
       customUltraplanEditing: item || null,
-      _ultraplanWasOpenBeforeEdit: prev.ultraplanOpen,
-      ultraplanOpen: false,
-    }));
+    });
   };
 
   closeCustomUltraplanEditor = () => {
-    this.setState(prev => ({
+    this.setState({
       customUltraplanEditOpen: false,
       customUltraplanEditing: null,
-      ultraplanOpen: !!prev._ultraplanWasOpenBeforeEdit,
-      _ultraplanWasOpenBeforeEdit: false,
-    }));
+    });
   };
 
   // UltraPlan 文件 / 专家逻辑委托给共享控制器（见 ../utils/ultraplanController）。方法名保持不变，render 零改动。
@@ -1597,7 +1630,13 @@ class TerminalPanel extends React.Component {
                 placement="top"
                 open={this.state.ultraplanOpen}
                 onOpenChange={(v) => {
-                  if (!v && (this.state.lightbox || this.state.ultraplanLightbox || this.state.ultraplanConfirming)) return;
+                  // customUltraplanEditOpen 守卫:编辑器(Antd Modal)通过 portal 挂 body,它的 mask 对本
+                  // Popover 而言是"外部点击"。事件顺序保护住了我们:
+                  //   rc-trigger 注册 capture-phase mousedown(useWinClick.js)→ 早于 rc-dialog 的 bubble
+                  //   click → onOpenChange 触发时 mask click 还没冒泡到 editor.onCancel,
+                  //   customUltraplanEditOpen 仍为 true,直接拦掉本次 Popover 关闭。
+                  // (这个机制与 React 是否批量化 setState 无关,对 React 19 / concurrent 仍稳。)
+                  if (!v && (this.state.lightbox || this.state.ultraplanLightbox || this.state.ultraplanConfirming || this.state.customUltraplanEditOpen)) return;
                   if (!v) this.setState({ ultraplanOpen: false });
                 }}
                 overlayClassName="ccv-ultraplan-popover"
