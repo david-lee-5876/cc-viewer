@@ -59,6 +59,7 @@ function isMainAgent(req) {
 const MODEL_CONTEXT_SIZES = [
   { match: /\[1m\]/i, tokens: 1000000 },
   { match: /opus/i, tokens: 1000000 },
+  { match: /mythons/i, tokens: 1000000 },
   { match: /claude/i, tokens: 200000 },
   { match: /gpt-4o|o1|o3|o4/i, tokens: 128000 },
   { match: /gpt-4/i, tokens: 128000 },
@@ -86,7 +87,7 @@ const CALIBRATION_TOKEN_MAP = {
 
 function _classifyContextSize(modelName) {
   const m = modelName.toLowerCase();
-  if (m.includes('opus-4-7') || m.includes('opus-4.7') || m.includes('opus 4.7')) return 1000000;
+  if (/opus[ -]4[-.]\d/.test(m) || m.includes('mythons')) return 1000000;
   if (m.includes('1m')) return 1000000;
   return 200000;
 }
@@ -102,6 +103,11 @@ function resolveCalibrationTokens(calibrationModel, lastMainAgent, projectModelH
     return _classifyContextSize(projectModelHint);
   }
   return 1000000;
+}
+
+function adaptContextWindow(classifiedTokens, usedContextTokens) {
+  if (classifiedTokens === 200000 && usedContextTokens > 200000) return 1000000;
+  return classifiedTokens;
 }
 
 function getModelInfo(modelName) {
@@ -371,6 +377,10 @@ describe('helpers', () => {
     it('returns 1000000 for opus models (default 1M)', () => { assert.equal(getModelMaxTokens('claude-opus-4-6'), 1000000); });
     it('returns 1000000 for opus model with date suffix', () => { assert.equal(getModelMaxTokens('claude-opus-4-6-20250514'), 1000000); });
     it('returns 1000000 for opus model with [1m] suffix', () => { assert.equal(getModelMaxTokens('claude-opus-4-6[1m]'), 1000000); });
+    it('returns 1000000 for opus-4-8', () => { assert.equal(getModelMaxTokens('claude-opus-4-8'), 1000000); });
+    it('returns 1000000 for opus-4-9', () => { assert.equal(getModelMaxTokens('claude-opus-4-9'), 1000000); });
+    it('returns 1000000 for mythons', () => { assert.equal(getModelMaxTokens('mythons'), 1000000); });
+    it('returns 1000000 for mythons with surrounding chars', () => { assert.equal(getModelMaxTokens('claude-mythons-preview'), 1000000); });
     it('returns 200000 for non-opus claude models', () => { assert.equal(getModelMaxTokens('claude-sonnet-4-6'), 200000); });
     it('returns 128000 for gpt-4o', () => { assert.equal(getModelMaxTokens('gpt-4o'), 128000); });
     it('returns 128000 for deepseek', () => { assert.equal(getModelMaxTokens('deepseek-v3'), 128000); });
@@ -396,6 +406,18 @@ describe('helpers', () => {
     });
     it('auto + opus-4-7 model → 1M', () => {
       assert.equal(resolveCalibrationTokens('auto', reqWith('claude-opus-4-7-20250514')), 1000000);
+    });
+    it('auto + opus-4-8 model → 1M (无 [1m] 后缀也命中家族)', () => {
+      assert.equal(resolveCalibrationTokens('auto', reqWith('claude-opus-4-8-20251201')), 1000000);
+    });
+    it('auto + opus-4-9 model → 1M (前瞻版本)', () => {
+      assert.equal(resolveCalibrationTokens('auto', reqWith('claude-opus-4-9')), 1000000);
+    });
+    it('auto + mythons model → 1M', () => {
+      assert.equal(resolveCalibrationTokens('auto', reqWith('claude-mythons')), 1000000);
+    });
+    it('auto + claude-3-opus → 200K (裸 opus 不命中 opus-4-N 家族)', () => {
+      assert.equal(resolveCalibrationTokens('auto', reqWith('claude-3-opus-20240229')), 200000);
     });
     it('auto + uppercase opus-4.7 → 1M (case-insensitive)', () => {
       assert.equal(resolveCalibrationTokens('auto', reqWith('CLAUDE-OPUS-4.7')), 1000000);
@@ -440,6 +462,23 @@ describe('helpers', () => {
     it('显式 1m/200k 时 projectModelHint 不参与', () => {
       assert.equal(resolveCalibrationTokens('1m', null, 'claude-sonnet-4-6'), 1000000);
       assert.equal(resolveCalibrationTokens('200k', reqWith('claude-opus-4-7'), 'claude-opus-4-7[1m]'), 200000);
+    });
+  });
+
+  describe('adaptContextWindow', () => {
+    it('200K 判定 + 用量越过整窗(>200K) → 升 1M (纠误判)', () => {
+      assert.equal(adaptContextWindow(200000, 250000), 1000000);
+    });
+    it('200K 判定 + 用量恰好 200K(未越窗) → 保持 200K', () => {
+      assert.equal(adaptContextWindow(200000, 200000), 200000);
+    });
+    it('200K 判定 + 用量 0 / 远低于整窗 → 保持 200K', () => {
+      assert.equal(adaptContextWindow(200000, 0), 200000);
+      assert.equal(adaptContextWindow(200000, 150000), 200000);
+    });
+    it('已是 1M → 原样返回(单向纠偏,不降级)', () => {
+      assert.equal(adaptContextWindow(1000000, 50000), 1000000);
+      assert.equal(adaptContextWindow(1000000, 900000), 1000000);
     });
   });
 

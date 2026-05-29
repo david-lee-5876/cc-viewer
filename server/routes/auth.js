@@ -46,9 +46,10 @@ function buildState(deps, isLocal) {
 
 // ─── Login rate limiting (per source IP, in-memory) ───
 // Keyed on req.socket.remoteAddress (X-Forwarded-For is never parsed, so it can't
-// be spoofed over LAN). 20/60s is generous enough for NAT'd households yet trivial
-// against a 6-char A-Z0-9 space (36^6 ≈ 2.2e9; case-insensitive doesn't shrink it since
-// the charset is uppercase-only). The Map is bounded to avoid growth.
+// be spoofed over LAN). 20/60s is generous enough for NAT'd households yet far below
+// the default password space (2 letters + 4 digits = 26^2·10^4 ≈ 6.76e6; case-insensitive
+// doesn't shrink it since the letters are uppercase-only): ~months to brute-force from a
+// single IP. The Map is bounded to avoid growth.
 const RATE_WINDOW_MS = 60_000;
 const RATE_MAX = 20;
 const RATE_MAP_MAX = 1000;

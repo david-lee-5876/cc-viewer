@@ -361,22 +361,25 @@
   vertical-align: middle;
 }
 
+/* 弱化版工具标签:去掉边框、保留淡底(--bg-code:白底 #F5F5F5 / 暗底 #14141F),
+   文字用极淡 --text-disabled-faint(白底 rgba(0,0,0,.35) / 暗底 rgba(255,255,255,.45)),
+   两套主题自动适配。hover 仅把文字提亮一档给出可点击反馈。 */
 .simplifiedToolTag {
   display: inline-block;
-  padding: 1px 8px;
+  padding: 0 10px;
   margin: 2px 4px 2px 0;
   font-size: 12px;
   font-family: 'SF Mono', 'Fira Code', 'Fira Mono', 'Roboto Mono', monospace;
   color: var(--text-disabled-faint);
-  background: var(--bg-elevated);
-  border: 1px solid var(--border-hover);
-  border-radius: 4px;
+  background: var(--bg-code);
+  border-radius: 14px;
   line-height: 20px;
   cursor: pointer;
 }
 
 .simplifiedToolTag:hover {
-  border-color: var(--text-disabled);
+  background: var(--bg-code-hover);
+  color: var(--text-secondary);
 }
 
 .simplifiedToolPopoverContent {

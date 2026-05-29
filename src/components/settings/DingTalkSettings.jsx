@@ -25,7 +25,7 @@ export default function DingTalkSettings() {
   const [connection, setConnection] = useState(null);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
-  // 安全说明/提示默认折叠，点「查看详情」再展开 —— 降低首屏信息负担。
+  // 白名单 / 免审批 / 安全说明默认折叠在「更多设置」里，点开再展开 —— 降低首屏信息负担。
   const [showDetails, setShowDetails] = useState(false);
 
   // fetchStatus(full=true) populates the editable form (mount); full=false only refreshes
@@ -129,31 +129,30 @@ export default function DingTalkSettings() {
         />
       </div>
 
-      <div className={styles.field}>
-        <label className={styles.fieldLabel}>{_tr('ui.dingtalk.allowStaff', null, 'Sender allowlist (staffId)')}<span className={styles.optional}>{_tr('ui.dingtalk.optional', null, 'Optional')}</span></label>
-        <Select
-          mode="tags"
-          value={allowStaffIds}
-          onChange={setAllowStaffIds}
-          tokenSeparators={[',', ' ']}
-          placeholder={_tr('ui.dingtalk.allowStaffPlaceholder', null, 'staffId, press Enter to add')}
-          style={{ width: '100%' }}
-          open={false}
-        />
-      </div>
-
-      <div className={styles.row}>
-        <span className={styles.label}>{_tr('ui.dingtalk.blockSkipPerm', null, 'Block injection in skip-permissions sessions')}</span>
-        <span className={styles.control}>
-          <Switch checked={blockOnSkipPermissions} onChange={setBlockOnSkipPermissions} />
-        </span>
-      </div>
       <button type="button" className={styles.detailsToggle} onClick={() => setShowDetails((v) => !v)}>
         {showDetails ? <DownOutlined /> : <RightOutlined />}
-        <span>{_tr('ui.dingtalk.viewDetails', null, 'View details')}</span>
+        <span>{_tr('ui.dingtalk.moreSettings', null, 'More settings')}</span>
       </button>
       {showDetails && (
         <div className={styles.details}>
+          <div className={styles.field}>
+            <label className={styles.fieldLabel}>{_tr('ui.dingtalk.allowStaff', null, 'Sender allowlist (staffId)')}<span className={styles.optional}>{_tr('ui.dingtalk.optional', null, 'Optional')}</span></label>
+            <Select
+              mode="tags"
+              value={allowStaffIds}
+              onChange={setAllowStaffIds}
+              tokenSeparators={[',', ' ']}
+              placeholder={_tr('ui.dingtalk.allowStaffPlaceholder', null, 'staffId, press Enter to add')}
+              style={{ width: '100%' }}
+              open={false}
+            />
+          </div>
+          <div className={styles.row}>
+            <span className={styles.label}>{_tr('ui.dingtalk.blockSkipPerm', null, 'Block injection in skip-permissions sessions')}</span>
+            <span className={styles.control}>
+              <Switch checked={blockOnSkipPermissions} onChange={setBlockOnSkipPermissions} />
+            </span>
+          </div>
           <div className={styles.help}>{_tr('ui.dingtalk.blockSkipPermHelp', null, 'When the Claude session runs with --dangerously-skip-permissions, refuse remote injection (which would execute with no approval).')}</div>
           <div className={styles.warn}>{_tr('ui.dingtalk.securityWarn', null, '⚠️ DingTalk messages directly drive the local session.')}</div>
           <div className={styles.hint}>{_tr('ui.dingtalk.singleKeyHint', null, 'Do not connect the same AppKey from multiple programs — use a dedicated DingTalk app for cc-viewer.')}</div>

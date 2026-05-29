@@ -31,8 +31,8 @@ export function readModelContextSize() {
       if (sizeMatch) {
         const num = parseInt(sizeMatch[1], 10);
         contextSize = sizeMatch[2] === 'm' ? num * 1000000 : num * 1000;
-      } else if (/opus/i.test(lower)) {
-        // Opus models default to 1M context
+      } else if (/opus|mythons/i.test(lower)) {
+        // Opus / mythons models default to 1M context
         contextSize = 1000000;
       }
       // Cache the base name → size mapping
@@ -61,8 +61,8 @@ export function getContextSizeForModel(apiModelName) {
   if (_startupModelBase && base === _startupModelBase) {
     return _startupContextSize;
   }
-  // Opus always has 1M context; other unknown models default to 200K
-  if (/opus/i.test(lower)) return 1000000;
+  // Opus / mythons always have 1M context; other unknown models default to 200K
+  if (/opus|mythons/i.test(lower)) return 1000000;
   return 200000;
 }
 
@@ -113,11 +113,15 @@ export function buildContextWindowEvent(usage, contextSize) {
   const inputTokens = (usage.input_tokens || 0) + (usage.cache_creation_input_tokens || 0) + (usage.cache_read_input_tokens || 0);
   const outputTokens = usage.output_tokens || 0;
   const totalTokens = inputTokens + outputTokens;
-  const usedPct = Math.round((totalTokens / contextSize) * 100);
+  // 自适应纠偏:真正的 200K 模型输入上下文(input+cache)不可能 > 200K(超了 API 拒收),
+  // 一旦越过整窗还判成 200K,必是 model 名识别错 → 升 1M,使 used_percentage / size 不再失真。
+  // 与 src/utils/helpers.js 的 adaptContextWindow 同一规则(此处服务端无法 import 前端模块,内联)。
+  const effectiveSize = (contextSize === 200000 && inputTokens > 200000) ? 1000000 : contextSize;
+  const usedPct = Math.round((totalTokens / effectiveSize) * 100);
   return {
     total_input_tokens: inputTokens,
     total_output_tokens: outputTokens,
-    context_window_size: contextSize,
+    context_window_size: effectiveSize,
     current_usage: usage,
     used_percentage: usedPct,
     remaining_percentage: 100 - usedPct,

@@ -53,6 +53,17 @@ describe('generatePassword', () => {
     }
   });
 
+  it('default shape is 2 letters + 4 digits (e.g. AB1234)', () => {
+    for (let i = 0; i < 200; i++) {
+      assert.match(generatePassword(), /^[A-Z]{2}[0-9]{4}$/);
+    }
+  });
+
+  it('keeps the 2-letter prefix + digit tail at other lengths', () => {
+    assert.match(generatePassword(8), /^[A-Z]{2}[0-9]{6}$/); // 2 letters + 6 digits
+    assert.match(generatePassword(1), /^[A-Z]$/);            // len<2 → all letters
+  });
+
   it('is not constant across calls', () => {
     const set = new Set();
     for (let i = 0; i < 50; i++) set.add(generatePassword());

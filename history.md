@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.6.282 (2026-05-29)
+
+- feat(messaging): 通讯软件集成弹窗从左右两栏改为上下布局,IM 工具选择改 Chrome 浏览器头部 tab 风格(选中态顶圆角、底边 2px 同色融进下方内容面板盖住接缝、去掉面板顶边横线消除露线);modal body 取 --bg-elevated 与面板 --bg-container 拉出层次,暗色主题给面板内 antd 输入框补 --bg-elevated 底色避免与面板同色消失;移除"选择要连接的 IM 工具"副标题
+- feat(context): opus-4 家族(opus-4-7/4-8/4-9/4.x,连字符·点·空格分隔)与 mythons 统一判定 1M 上下文,前端(_classifyContextSize / getModelMaxTokens)与服务端(getContextSizeForModel / readModelContextSize)同步;裸 claude-3-opus 仍按 200K
+- feat(context): 上下文血条自适应纠偏——模型被判 200K 但真实输入用量(input+cache,不含 output)已越过 200K 整窗时自动升为 1M(200K 模型物理上容不下 >200K 输入,必是名称误判),修血条卡死 100% 的错显;贯通前端 adaptContextWindow(AppHeader / Mobile)与服务端 buildContextWindowEvent 及 events.js 无 MainAgent 兜底路径同规则
+- feat(auth): 默认登录密码规则简化为前 2 位大写字母 + 后 4 位数字(共 6 位,如 AB1234),保留按字符池分别做无偏 crypto 拒绝采样
+- feat(dingtalk): 钉钉设置把"发送人白名单(staffId)"与"免审批会话拒绝注入"折叠进"更多设置"(原"查看详情"改名),首屏只留启用开关与 AppKey/AppSecret,降低信息负担
+- feat(chat): 对话中工具标签弱化——去边框、底色取 --bg-code、文字用极淡 --text-disabled-faint,hover 提亮文字并加深底色(新增主题变量 --bg-code-hover,明暗各一档)
+
 ## 1.6.281 (2026-05-29)
 
 - feat(terminal): 刷新按钮改用 xterm 官方 escape hatch 取代 DOM 高度抖动 hack——L1=clearTextureAtlas+refresh / L2=+fit / L3=dispose+reload WebglAddon(onContextLoss 同款配方,保 cols/rows/scrollback,不动 DOM 高度);60s 后台自动从 L3 降到 L2 避免长期 GPU context churn,L3 留给用户手动判定画面坏掉时的兜底;fit 调用统一走 _fitPreservingScroll(wasAtBottom 贴底 / 否则比例换算),修旧版本中刷新后 viewport 跳到顶或错位 ≈shrink 像素的 bug

@@ -14,26 +14,37 @@ import { join, dirname } from 'node:path';
 import { LOG_DIR } from '../../findcc.js';
 import { tFor, localeFromAcceptLanguage } from '../i18n.js';
 
-// A-Z + 0-9 (36 chars). No lowercase / ambiguous-pair stripping: kept simple and
-// matches the user-facing "uppercase letters + digits" spec. Login compares
-// case-insensitively (see routes/auth.js), so lowercase input still works.
-const PASSWORD_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+// 默认密码形状 = 前 2 位字母 + 其余数字(默认 6 位 → 2 字母 + 4 数字),好读好记又不易撞。
+// 字母用大写 A-Z,数字 0-9;登录侧大小写不敏感(见 routes/auth.js),小写输入照样通过。
+const PASSWORD_LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'; // 26
+const PASSWORD_DIGITS = '0123456789';                  // 10
 
 /**
- * Cryptographically uniform password from A-Z0-9 (default 6 chars).
- * Rejection sampling discards bytes ≥ 252 (256 - 256%36) to avoid modulo bias.
+ * Cryptographically uniform pick of `count` chars from `chars`.
+ * Rejection sampling discards bytes ≥ (256 - 256%n) to avoid modulo bias.
  */
-export function generatePassword(len = 6) {
-  const n = PASSWORD_CHARS.length; // 36
-  const limit = 256 - (256 % n);   // 252
+function pickFrom(chars, count) {
+  const n = chars.length;
+  const limit = 256 - (256 % n);
   let out = '';
-  while (out.length < len) {
-    const buf = randomBytes(len * 2);
-    for (let i = 0; i < buf.length && out.length < len; i++) {
-      if (buf[i] < limit) out += PASSWORD_CHARS[buf[i] % n];
+  while (out.length < count) {
+    const buf = randomBytes(Math.max(1, count) * 2);
+    for (let i = 0; i < buf.length && out.length < count; i++) {
+      if (buf[i] < limit) out += chars[buf[i] % n];
     }
   }
   return out;
+}
+
+/**
+ * Default password: leading letters + trailing digits, `len` chars total.
+ * At len=6 (the default) this is 2 letters + 4 digits, e.g. "AB1234".
+ * The letter prefix is fixed at 2 (or `len` when len<2); the rest are digits.
+ */
+export function generatePassword(len = 6) {
+  const letters = Math.min(2, len);
+  const digits = Math.max(0, len - letters);
+  return pickFrom(PASSWORD_LETTERS, letters) + pickFrom(PASSWORD_DIGITS, digits);
 }
 
 const DEFAULT_CONFIG = { enabled: false, password: '' };

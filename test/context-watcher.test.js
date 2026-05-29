@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { readModelContextSize, buildContextWindowEvent, readClaudeProjectModel, CONTEXT_WINDOW_FILE } from '../server/lib/context-watcher.js';
+import { readModelContextSize, getContextSizeForModel, buildContextWindowEvent, readClaudeProjectModel, CONTEXT_WINDOW_FILE } from '../server/lib/context-watcher.js';
 import { getClaudeConfigDir } from '../findcc.js';
 
 const CLAUDE_DIR = getClaudeConfigDir();
@@ -102,6 +102,20 @@ describe('context-watcher: readModelContextSize', () => {
     }
   });
 
+  it('defaults mythons to 1M when no size tag in model.id', () => {
+    backupContextFile();
+    try {
+      mkdirSync(CLAUDE_DIR, { recursive: true });
+      writeFileSync(CONTEXT_WINDOW_FILE, JSON.stringify({
+        model: { id: 'claude-mythons' },
+      }) + '\n');
+      const result = readModelContextSize();
+      assert.equal(result.contextSize, 1000000);
+    } finally {
+      restoreContextFile();
+    }
+  });
+
   it('returns default 200k when model.id has no size tag and no context_window field', () => {
     backupContextFile();
     try {
@@ -115,6 +129,18 @@ describe('context-watcher: readModelContextSize', () => {
       restoreContextFile();
     }
   });
+});
+
+describe('context-watcher: getContextSizeForModel', () => {
+  // 这些 model base 都不会与前面 readModelContextSize 用例写进启动缓存的 base
+  // (opus-4-6 / sonnet-4-6 / mythons)相撞,因此直接走 /opus|mythons/ 兜底分支判定。
+  it('opus-4-8 → 1M', () => { assert.equal(getContextSizeForModel('claude-opus-4-8-20251201'), 1000000); });
+  it('opus-4-9 → 1M (前瞻版本)', () => { assert.equal(getContextSizeForModel('claude-opus-4-9'), 1000000); });
+  it('mythons → 1M', () => { assert.equal(getContextSizeForModel('claude-mythons'), 1000000); });
+  it('mythons with date suffix → 1M', () => { assert.equal(getContextSizeForModel('claude-mythons-20260101'), 1000000); });
+  // 用 haiku(base 'haiku-4-5')而非 sonnet-4-6:后者的 base 会撞上启动缓存命中分支、
+  // 绕过本用例要验的 /opus|mythons/ miss→200K 兜底,使断言失去意义。
+  it('non-opus/non-mythons → 200K', () => { assert.equal(getContextSizeForModel('claude-haiku-4-5'), 200000); });
 });
 
 describe('context-watcher: readClaudeProjectModel', () => {
@@ -244,5 +270,28 @@ describe('context-watcher: buildContextWindowEvent', () => {
     const usage = { input_tokens: 1000, output_tokens: 500 };
     const result = buildContextWindowEvent(usage, 200000);
     assert.deepEqual(result.current_usage, usage);
+  });
+
+  it('自适应纠偏:判 200K 但输入上下文 >200K → size 升 1M、百分比按 1M 重算', () => {
+    // 250K 输入(input+cache)对 200K 模型物理上不可能 → 必是误判,升 1M。
+    const usage = { input_tokens: 100000, cache_read_input_tokens: 150000, output_tokens: 5000 };
+    const result = buildContextWindowEvent(usage, 200000);
+    assert.equal(result.total_input_tokens, 250000);
+    assert.equal(result.context_window_size, 1000000); // 200000 → 1000000
+    assert.equal(result.used_percentage, 26); // (255000 / 1000000) * 100 ≈ 26（非卡死 100）
+  });
+
+  it('自适应纠偏:大 output 但输入侧未越窗 → 不触发(只看输入侧)', () => {
+    // output 拉高 totalTokens,但 input+cache 仅 120K < 200K,不该误升。
+    const usage = { input_tokens: 100000, cache_read_input_tokens: 20000, output_tokens: 150000 };
+    const result = buildContextWindowEvent(usage, 200000);
+    assert.equal(result.total_input_tokens, 120000);
+    assert.equal(result.context_window_size, 200000); // 保持 200K
+  });
+
+  it('自适应纠偏:1M 判定 + 高用量 → 原样 1M(单向,不降级)', () => {
+    const usage = { input_tokens: 300000, output_tokens: 10000 };
+    const result = buildContextWindowEvent(usage, 1000000);
+    assert.equal(result.context_window_size, 1000000);
   });
 });

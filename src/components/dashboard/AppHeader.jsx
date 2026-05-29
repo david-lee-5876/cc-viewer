@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { Space, Tag, Button, Dropdown, Popover, Modal, Collapse, Drawer, Switch, Radio, Tabs, Spin, Input, Select, Segmented, message } from 'antd';
 import { MessageOutlined, FileTextOutlined, ImportOutlined, DashboardOutlined, ExportOutlined, DownloadOutlined, SettingOutlined, BarChartOutlined, CodeOutlined, CopyOutlined, ApiOutlined, SwapOutlined } from '@ant-design/icons';
 import { QRCodeCanvas } from 'qrcode.react';
-import { formatTokenCount, computeTokenStats, computeCacheRebuildStats, computeToolUsageStats, computeSkillUsageStats, resolveCalibrationTokens, AUTO_COMPACT_USABLE_RATIO, AUTO_APPROVE_INSTANT } from '../../utils/helpers';
+import { formatTokenCount, computeTokenStats, computeCacheRebuildStats, computeToolUsageStats, computeSkillUsageStats, resolveCalibrationTokens, adaptContextWindow, AUTO_COMPACT_USABLE_RATIO, AUTO_APPROVE_INSTANT } from '../../utils/helpers';
 import { isSystemText, classifyUserContent, isMainAgent } from '../../utils/contentFilter';
 import { parseImOrigin } from '../../utils/imOrigin';
 import { classifyRequest } from '../../utils/requestType';
@@ -1260,7 +1260,14 @@ class AppHeader extends React.Component {
     // resolveCalibrationTokens 不变量保证返回 1000000 或 200000，永不为 0/null
     // 第三参数 claudeProjectModel 是 ~/.claude.json projects[cwd].lastModelUsage 推断,
     // 用作 'auto' 模式启动期回落(避 haiku init ping 让血条错显 200K)。
-    const calibrationTokens = resolveCalibrationTokens(this.state.calibrationModel, lastMainAgent, claudeProjectModel);
+    let calibrationTokens = resolveCalibrationTokens(this.state.calibrationModel, lastMainAgent, claudeProjectModel);
+    // 自适应纠偏:仅作用于"自动判定"路径(用户显式选 200k 时尊重其选择,不覆盖)。
+    // 真实输入上下文用量优先取 requests[] 直算的 lastTotalTokens,无则用 SSE 事件携带的
+    // total_input_tokens(同为 input+cache,不含 output);越过 200K 整窗即判误判 → 升 1M。
+    if (this.state.calibrationModel !== '200k') {
+      const usedContextTokens = lastTotalTokens > 0 ? lastTotalTokens : (contextWindow?.total_input_tokens || 0);
+      calibrationTokens = adaptContextWindow(calibrationTokens, usedContextTokens);
+    }
     if (!isLocalLog) {
       if (contextWindow?.used_percentage != null) {
         if (lastTotalTokens > 0) {

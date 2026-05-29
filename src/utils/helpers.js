@@ -16,6 +16,8 @@ const MODEL_CONTEXT_SIZES = [
   { match: /\[1m\]/i, tokens: 1000000 },
   // Opus defaults to 1M context (no 200K variant exists)
   { match: /opus/i, tokens: 1000000 },
+  // mythons 同样默认 1M(opus 之后、claude 之前,避免被 /claude/ 抢成 200K)
+  { match: /mythons/i, tokens: 1000000 },
   { match: /claude/i, tokens: 200000 },
   { match: /gpt-4o|o1|o3|o4/i, tokens: 128000 },
   { match: /gpt-4/i, tokens: 128000 },
@@ -58,7 +60,10 @@ const CALIBRATION_TOKEN_MAP = {
 // 名字 → 1M/200K 分类。集中此处避免 auto 路径多分支重复写规则。
 function _classifyContextSize(modelName) {
   const m = modelName.toLowerCase();
-  if (m.includes('opus-4-7') || m.includes('opus-4.7') || m.includes('opus 4.7')) return 1000000;
+  // Opus 4 家族(opus-4-7 / opus-4-8 / opus-4-9 / opus-4.x,连字符·点·空格分隔均可)
+  // 默认 1M;mythons 同样 1M。用正则覆盖整个 4.x 系列,版本号 bump 时无需再改这里。
+  // 注意只匹配 "opus-4-N",不匹配裸 opus(claude-3-opus 仍是 200K)。
+  if (/opus[ -]4[-.]\d/.test(m) || m.includes('mythons')) return 1000000;
   if (m.includes('1m')) return 1000000;
   return 200000;
 }
@@ -73,7 +78,8 @@ function _classifyContextSize(modelName) {
  *         claude 里实际偏好的 model）
  *      3) 冷启动兜底 → 1M（用户规约）
  *  分类规则（_classifyContextSize）：
- *      · model 包含 opus-4-7 / opus-4.7 / opus 4.7（大小写不敏感）→ 1M
+ *      · model 命中 opus-4-N 家族（opus-4-7/4-8/4-9/4.x，大小写不敏感）→ 1M
+ *      · model 含 mythons → 1M
  *      · model 含 1m 子串（如 deepseek-v3-1m）→ 1M
  *      · 否则 → 200K
  *  haiku 跳过的代价：纯 haiku 子任务期会落到 projectModelHint；该路径下 hint
@@ -95,6 +101,22 @@ export function resolveCalibrationTokens(calibrationModel, lastMainAgent, projec
   }
   // 回落 2：冷启动 1M
   return 1000000;
+}
+
+/**
+ * 血条自适应纠偏:把"分类器判出的上下文窗口"按真实用量修正。
+ * 一个真正的 200K 模型,其输入上下文(input + cache_creation + cache_read)物理上不可能
+ * 超过 200K —— 超了 API 直接拒收。所以一旦真实输入用量越过 200K 还被判成 200K,必然是
+ * model 名识别错了(误判),此时自动升到 1M,免得血条卡死在 100%、百分比与真实进度脱节。
+ * 仅做 200K→1M 这一个方向的纠偏;其余判定(1M、各家 200K 真值等)一律原样返回。
+ * 注意:usedContextTokens 必须是"输入侧"用量(不含 output_tokens),否则大输出会误触发。
+ * @param {number} classifiedTokens resolveCalibrationTokens / getModelMaxTokens 的结果
+ * @param {number} usedContextTokens 当前输入上下文实际用量(input + cache_creation + cache_read)
+ * @returns {number} 修正后的上下文窗口 token 数(1000000 或原值)
+ */
+export function adaptContextWindow(classifiedTokens, usedContextTokens) {
+  if (classifiedTokens === 200000 && usedContextTokens > 200000) return 1000000;
+  return classifiedTokens;
 }
 
 /**

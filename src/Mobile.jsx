@@ -5,7 +5,7 @@ import AppBase, { styles, OPTIMISTIC_CLEAR_PERCENT } from './AppBase';
 import { isIOS, isPad, setViewMode } from './env';
 import { isMainAgent, isSystemText, classifyUserContent } from './utils/contentFilter';
 import { parseImOrigin } from './utils/imOrigin';
-import { getModelMaxTokens, getEffectiveModel, AUTO_COMPACT_USABLE_RATIO, AUTO_APPROVE_INSTANT } from './utils/helpers';
+import { getModelMaxTokens, getEffectiveModel, adaptContextWindow, AUTO_COMPACT_USABLE_RATIO, AUTO_APPROVE_INSTANT } from './utils/helpers';
 import ChatView from './components/chat/ChatView';
 import TerminalPanel from './components/terminal/TerminalPanel';
 import { TerminalWsProvider } from './components/terminal/TerminalWsContext';
@@ -610,7 +610,11 @@ class Mobile extends AppBase {
       if (contextWindow?.used_percentage != null) {
         mobileContextPercent = Math.min(100, Math.max(0, Math.round(contextWindow.used_percentage / AUTO_COMPACT_USABLE_RATIO)));
       } else if (lastMainAgent) {
-        const maxTokens = contextWindow?.context_window_size || getModelMaxTokens(getEffectiveModel(lastMainAgent) || this.state.settingsModel);
+        // 自适应纠偏:判成 200K 但真实输入用量已越过整窗 → 升 1M(详见 helpers.adaptContextWindow)。
+        const maxTokens = adaptContextWindow(
+          contextWindow?.context_window_size || getModelMaxTokens(getEffectiveModel(lastMainAgent) || this.state.settingsModel),
+          mobileContextTokens,
+        );
         const usable = maxTokens * AUTO_COMPACT_USABLE_RATIO;
         if (usable > 0 && mobileContextTokens > 0) mobileContextPercent = Math.min(100, Math.max(0, Math.round(mobileContextTokens / usable * 100)));
       }

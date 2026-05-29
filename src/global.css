@@ -14,6 +14,7 @@
   --bg-surface: #2a2a2a;
   --bg-code: #14141F;
   --bg-code-dark: #0d1117;
+  --bg-code-hover: #0e0e17;
   --bg-code-system: #060f2a;
   /* Border */
   --border-primary: #2a2a2a;
@@ -166,6 +167,7 @@
   --bg-surface: #F0F0F0;
   --bg-code: #F5F5F5;
   --bg-code-dark: #F5F5F5;
+  --bg-code-hover: #EAEAEA;
   --bg-code-system: #EFF1F3;
   /* Border */
   --border-primary: #E0E0E0;

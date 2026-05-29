@@ -271,8 +271,11 @@ async function events(req, res, parsedUrl, isLocal, deps) {
         const inputTokens = cw.total_input_tokens || 0;
         const outputTokens = cw.total_output_tokens || 0;
         const totalTokens = inputTokens + outputTokens;
-        const usedPct = contextSize > 0 ? Math.round((totalTokens / contextSize) * 100) : 0;
-        const data = { ...cw, context_window_size: contextSize, used_percentage: usedPct, remaining_percentage: 100 - usedPct };
+        // 自适应纠偏:与 buildContextWindowEvent 同规则 —— 判 200K 但输入上下文用量已越窗,
+        // 必是 model 名误判 → 升 1M,避免这条 fallback 与已纠偏的主路径产出不一致的血条。
+        const effectiveSize = (contextSize === 200000 && inputTokens > 200000) ? 1000000 : contextSize;
+        const usedPct = effectiveSize > 0 ? Math.round((totalTokens / effectiveSize) * 100) : 0;
+        const data = { ...cw, context_window_size: effectiveSize, used_percentage: usedPct, remaining_percentage: 100 - usedPct };
         res.write(`event: context_window\ndata: ${JSON.stringify(data)}\n\n`);
       }
     } catch { }
