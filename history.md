@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- fix(proxy): 代理转发改为把 `EnvHttpProxyAgent` 显式作为 `fetch` 的 `dispatcher` 传入——Node 内置全局 `fetch` 用的是 Node 自带的那份 undici,与 userland undici 包的 `setGlobalDispatcher` 互不相通,旧实现只调 `setGlobalDispatcher` 导致转发请求绕过 `http_proxy`/`https_proxy` 直连 `api.anthropic.com`(配了网络代理却不生效);新增 `getProxyDispatcher()` 暴露已构造的 dispatcher 供转发处显式传入,`setGlobalDispatcher` 仍保留以覆盖直接 `import 'undici'` 的调用路径;补 `getProxyDispatcher` 单测
+- fix(proxy): 代理转发改为把 `EnvHttpProxyAgent` 显式作为 `fetch` 的 `dispatcher` 传入——**Node 26 起的回归**:转发用的内置全局 `fetch` 背后是 Node 自带的 undici,Node ≤25 时它与 userland undici 包共享 global dispatcher(故旧代码一直好用),实测 Node 26 起两者不再共享,单调 `setGlobalDispatcher` 失效,转发请求绕过 `http_proxy`/`https_proxy` 直连 `api.anthropic.com`(配了网络代理却不生效);新增 `getProxyDispatcher()` 暴露已构造的 dispatcher 供转发处显式传入(各 Node 版本通用),`setGlobalDispatcher` 仍保留以覆盖直接 `import 'undici'` 的调用路径;补 `getProxyDispatcher` 单测
 - fix(proxy): 上游请求强制 `accept-encoding: identity` 取代仅剥 zstd 的旧策略——链路中的网关/代理可能透传上游的压缩 body 却剥掉 `content-encoding` 响应头,undici 看不到该头就不解压,把压缩字节当明文透传给 Claude CLI,触发 "API returned an empty or malformed response (HTTP 200)";让上游直接不压缩即从根上消除这类错配;删除已被取代的死代码 `stripZstdAcceptEncoding`,新增 `forceIdentityAcceptEncoding` 单测
 
 ## 1.6.282 (2026-05-29)
