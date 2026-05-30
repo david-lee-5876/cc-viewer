@@ -1,0 +1,113 @@
+/* 套餐用量 pill —— 放在左下角 footer 状态栏(高 18px / 字 11px)里,
+ * 沿用血条的胶囊 + 左对齐填充条视觉语言,但尺寸压扁以贴合 footer。 */
+
+.usagePill {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  border-radius: 999px;
+  border: 1px solid;
+  border-color: var(--usage-color);
+  color: var(--usage-color);
+  padding: 0 7px;
+  height: 15px;
+  font-size: 11px;
+  line-height: 1;
+  overflow: hidden;
+  white-space: nowrap;
+  cursor: default;
+  transition: border-color 0.3s, color 0.3s;
+  background: var(--bg-base-pure);
+}
+
+.usageFill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: var(--usage-percent, 0);
+  background-color: var(--usage-color);
+  opacity: 0.35;
+  transition: width 0.5s ease, background-color 0.3s;
+  pointer-events: none;
+}
+
+.usageContent {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+}
+
+.usageText {
+  font-variant-numeric: tabular-nums;
+}
+
+/* 等待数据的静默态:中性灰描边。 */
+.muted {
+  border-color: var(--border-light);
+  color: var(--text-secondary);
+  background: var(--bg-surface);
+}
+
+/* ---- hover popover 内容 ---- */
+.pop {
+  min-width: 220px;
+  font-size: 12px;
+  color: var(--text-primary);
+}
+
+.popTitle {
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+}
+
+.rowLabel {
+  flex: 1 1 auto;
+  color: var(--text-secondary);
+}
+
+.rowVal {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.rowReset {
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.status {
+  font-size: 11px;
+  padding: 0 6px;
+  border-radius: 999px;
+  line-height: 15px;
+  border: 1px solid currentColor;
+}
+
+.statusAllowed {
+  color: var(--color-success);
+}
+
+.statusRejected {
+  color: var(--color-error-light);
+}
+
+.statusQueued {
+  color: var(--color-warning-light);
+}
+
+.footer {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border-light);
+  color: var(--color-error-light);
+}
