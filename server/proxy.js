@@ -6,26 +6,26 @@ import { homedir } from 'node:os';
 import * as interceptor from './interceptor.js';
 import { setupInterceptor } from './interceptor.js';
 import { extractApiErrorMessage, formatProxyRequestError } from './lib/proxy-errors.js';
+import { getProxyDispatcher } from './lib/proxy-env.js';
 import { getClaudeConfigDir } from '../findcc.js';
 
 // Setup interceptor to patch fetch
 setupInterceptor();
 
-// Node bundled undici 在 22.15 之前不识 zstd；上游若选 zstd 压缩，response.body 会被原样
-// 透传给 Claude CLI，触发 "Failed to parse JSON"。在转发前从 accept-encoding 摘掉 zstd，
-// 让上游回退到 gzip/deflate/br——所有 Node 版本都能正确解。
-export function stripZstdAcceptEncoding(headers) {
+// 强制上游返回未压缩响应，取代仅剥 zstd 的旧策略。
+// 原因：链路中的网关/代理（典型是本地 MITM 网络代理）可能把上游的压缩 body 原样透传，
+// 却把 content-encoding 响应头剥掉。undici 看不到 content-encoding 就不会解压，于是把一坨
+// gzip 字节当明文交回；本代理再把它当 SSE 透传给 Claude CLI →
+// "API returned an empty or malformed response (HTTP 200)"。
+// 让上游直接不压缩，整条链路就没有可被剥离/错配的 content-encoding，从根上消除这类问题。
+export function forceIdentityAcceptEncoding(headers) {
   if (!headers) return headers;
-  const key = Object.keys(headers).find(k => k.toLowerCase() === 'accept-encoding');
-  if (!key) return headers;
-  const val = headers[key];
-  if (typeof val !== 'string' || !/\bzstd\b/i.test(val)) return headers;
-  const filtered = val
-    .split(',')
-    .map(s => s.trim())
-    .filter(s => s && !/^zstd(\s*;.*)?$/i.test(s))
-    .join(', ');
-  return { ...headers, [key]: filtered || 'gzip, deflate, br' };
+  const out = {};
+  for (const k of Object.keys(headers)) {
+    if (k.toLowerCase() !== 'accept-encoding') out[k] = headers[k];
+  }
+  out['accept-encoding'] = 'identity';
+  return out;
 }
 
 // 代理会改写请求 body（interceptor 的模型替换 JSON.parse→改 model→JSON.stringify），
@@ -97,7 +97,7 @@ export function startProxy() {
         // Convert incoming headers
         let headers = { ...req.headers };
         delete headers.host; // Let fetch set the host
-        headers = stripZstdAcceptEncoding(headers);
+        headers = forceIdentityAcceptEncoding(headers); // 让上游不压缩，规避网关剥 content-encoding 头导致的 body 错配
         headers = stripContentLengthHeader(headers); // body 会被改写，旧 content-length 必须丢弃
 
         const buffers = [];
@@ -117,6 +117,14 @@ export function startProxy() {
 
         if (body.length > 0) {
           fetchOptions.body = body;
+        }
+
+        // 走用户的网络代理：Node 内置全局 fetch 既不读 http_proxy/https_proxy，也看不到
+        // userland undici 的 setGlobalDispatcher，必须把代理 dispatcher 显式传进来，否则
+        // 上游请求会绕过代理直连 api.anthropic.com（详见 lib/proxy-env.js 注释）。
+        const proxyDispatcher = getProxyDispatcher();
+        if (proxyDispatcher) {
+          fetchOptions.dispatcher = proxyDispatcher;
         }
 
         // 拼接完整 URL，保留 originalBaseUrl 中的路径前缀
