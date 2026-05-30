@@ -1,6 +1,6 @@
 // 抽离自 TerminalPanel.jsx，供 TerminalPanel + ScratchTerminal 共用，破除循环 import。
 export const darkTerminalTheme = {
-  background: '#0a0a0a', foreground: '#d4d4d4', cursor: '#0a0a0a',
+  background: '#0a0a0a', foreground: '#d4d4d4', cursor: '#d4d4d4',
   selectionBackground: '#264f78',
   black: '#000000', red: '#ef4444', green: '#73c991', yellow: '#fbbf24',
   blue: '#3b82f6', magenta: '#d946ef', cyan: '#06b6d4', white: '#e5e5e5',
