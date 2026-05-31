@@ -18,6 +18,14 @@
                  : null;
       if (pick) document.documentElement.setAttribute('data-theme', pick);
     } catch {}
+    // 整体显示大小：React 渲染前同步抢占 zoom，避免首屏以 100% 渲染后再跳变。
+    // localStorage 仅作首屏镜像；真相源是 preferences.json，hydrate 时会以服务端值覆盖。
+    try {
+      const n = Number(localStorage.getItem('ccv_displayScale'));
+      if (Number.isFinite(n) && n >= 50 && n <= 200 && n !== 100) {
+        document.documentElement.style.zoom = String(n / 100);
+      }
+    } catch {}
   </script>
 </head>
 <body>

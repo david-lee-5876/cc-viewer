@@ -1,6 +1,7 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
-import { Space, Tag, Button, Dropdown, Popover, Modal, Collapse, Drawer, Switch, Radio, Tabs, Spin, Input, Select, Segmented, message } from 'antd';
+import { Space, Tag, Button, Dropdown, Popover, Modal, Collapse, Drawer, Switch, Radio, Tabs, Spin, Input, Select, Segmented, Tooltip, message } from 'antd';
+import { DISPLAY_SCALE_PRESETS } from '../../utils/displayScaleHelper';
 import { MessageOutlined, FileTextOutlined, ImportOutlined, DashboardOutlined, ExportOutlined, DownloadOutlined, SettingOutlined, BarChartOutlined, CodeOutlined, CopyOutlined, ApiOutlined, SwapOutlined } from '@ant-design/icons';
 import { QRCodeCanvas } from 'qrcode.react';
 import { formatTokenCount, computeTokenStats, computeCacheRebuildStats, computeToolUsageStats, computeSkillUsageStats, resolveCalibrationTokens, adaptContextWindow, AUTO_COMPACT_USABLE_RATIO, AUTO_APPROVE_INSTANT } from '../../utils/helpers';
@@ -471,6 +472,7 @@ class AppHeader extends React.Component {
       nextProps.serverCachedContent !== this.props.serverCachedContent ||
       nextProps.resumeAutoChoice !== this.props.resumeAutoChoice ||
       nextProps.themeColor !== this.props.themeColor ||
+      nextProps.displayScale !== this.props.displayScale ||
       nextProps.autoApproveSeconds !== this.props.autoApproveSeconds ||
       nextProps.proxyProfiles !== this.props.proxyProfiles ||
       nextProps.activeProxyId !== this.props.activeProxyId ||
@@ -1328,7 +1330,7 @@ class AppHeader extends React.Component {
   }
 
   render() {
-    const { requestCount, requests = [], viewMode, cacheType, onToggleViewMode, onImportLocalLogs, onLangChange, isLocalLog, localLogFile, projectName, filterIrrelevant, onFilterIrrelevantChange, logDir, onLogDirChange, cliMode, terminalVisible, onToggleTerminal, onReturnToWorkspaces, contextWindow, contextBarOptimistic, serverCachedContent, resumeAutoChoice, onResumeAutoChoiceToggle, onResumeAutoChoiceChange, themeColor, onThemeColorChange, autoApproveSeconds, onAutoApproveChange } = this.props;
+    const { requestCount, requests = [], viewMode, cacheType, onToggleViewMode, onImportLocalLogs, onLangChange, isLocalLog, localLogFile, projectName, filterIrrelevant, onFilterIrrelevantChange, logDir, onLogDirChange, cliMode, terminalVisible, onToggleTerminal, onReturnToWorkspaces, contextWindow, contextBarOptimistic, serverCachedContent, resumeAutoChoice, onResumeAutoChoiceToggle, onResumeAutoChoiceChange, themeColor, onThemeColorChange, displayScale, onDisplayScaleChange, autoApproveSeconds, onAutoApproveChange } = this.props;
     const { countdownText } = this.state;
     // 这 4 个偏好的唯一真相源是 SettingsContext（P0③）。AppHeader 已绑 SettingsContext，
     // 直接派生消费 + 调 updatePreferences，不再经 App 的 prop drilling。默认值与 AppBase._prefValues() 一致。
@@ -1743,6 +1745,18 @@ class AppHeader extends React.Component {
                   { label: t('ui.themeColor.dark'), value: 'dark' },
                   { label: t('ui.themeColor.light'), value: 'light' },
                 ]}
+                style={{ width: 140 }}
+              />
+            </div>
+            <div className={styles.settingsItem}>
+              <Tooltip title={t('ui.displayScale.hint')}>
+                <span className={styles.settingsLabel}>{t('ui.displayScale')}</span>
+              </Tooltip>
+              <Select
+                size="small"
+                value={displayScale || 100}
+                onChange={(value) => onDisplayScaleChange && onDisplayScaleChange(value)}
+                options={DISPLAY_SCALE_PRESETS.map(p => ({ label: `${p}%`, value: p }))}
                 style={{ width: 140 }}
               />
             </div>

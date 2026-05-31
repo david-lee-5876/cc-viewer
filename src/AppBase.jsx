@@ -9,6 +9,7 @@ import LogTable from './components/viewers/LogTable';
 import { t, getLang, setLang } from './i18n';
 import { SettingsContext } from './contexts/SettingsContext';
 import { formatTokenCount, filterRelevantRequests, isRelevantRequest, appendCacheLossMap, extractCachedContent } from './utils/helpers';
+import { snapToPreset, stepPreset } from './utils/displayScaleHelper';
 import { getProjectAlias, subscribeToAlias } from './utils/projectAlias';
 import { isMainAgent, isPostClearCheckpoint } from './utils/contentFilter';
 import { apiUrl } from './utils/apiUrl';
@@ -104,6 +105,8 @@ class AppBase extends React.Component {
       autoApproveSeconds: 0, // 自动审批倒计时秒数，0=关闭
       logDir: '',
       themeColor: 'light',
+      displayScale: 100, // 整体显示缩放百分比(100=原始大小),桌面端经 CSS zoom 作用于整个界面
+
       claudeMissing: false,
       updateModalVisible: false,
       fileLoading: false,
@@ -378,6 +381,8 @@ class AppBase extends React.Component {
   }
 
   componentDidMount() {
+    // 全局键盘缩放监听(Cmd/Ctrl +/-/0);unmount 时按同一 ref 卸载。
+    window.addEventListener('keydown', this._onScaleKeydown);
     // claude-settings / preferences fetch 由 SettingsProvider 集中触发;
     // 这里仅订阅其 Promise,把字段同步到本地 state(沿用现有 13+ 个 setState 消费链路)。
     this.context._claudeSettingsReady.then(data => {
@@ -478,6 +483,9 @@ class AppBase extends React.Component {
         ? data.themeColor
         : this.state.themeColor;
       this._applyTheme(effective);
+      // 整体显示大小：prefs 为准（跨设备），没存过则回退当前 state(默认 100)。
+      // 不写回 prefs(这一路从 prefs 读出),但同步 localStorage 让 inline boot script 抢占。
+      this._applyDisplayScale(data.displayScale ?? this.state.displayScale);
       // filterIrrelevant 默认 true，showAll = !filterIrrelevant
       const filterIrrelevant = data.filterIrrelevant !== undefined ? !!data.filterIrrelevant : true;
       this.setState({ showAll: !filterIrrelevant });
@@ -609,6 +617,7 @@ class AppBase extends React.Component {
   }
 
   componentWillUnmount() {
+    window.removeEventListener('keydown', this._onScaleKeydown);
     if (Array.isArray(this._tabBridgeDisposers)) {
       for (const off of this._tabBridgeDisposers) {
         try { off(); } catch {}
@@ -1782,6 +1791,47 @@ class AppBase extends React.Component {
     this._applyTheme(value, { persistPref: true, remountMermaid: true });
     // 切换主题后让终端获得焦点，便于用户看到 /theme 切换效果
     window.dispatchEvent(new CustomEvent('ccv-focus-terminal'));
+  };
+
+  /**
+   * 整体显示缩放收口：state / <html style.zoom> / localStorage 三处镜像同步。
+   * 用 CSS zoom(而非 transform: scale)——zoom 能正确缩放 fixed 元素与 antd portal,
+   * 行为等同 Chrome 浏览器缩放。移动端已对容器单独施加 zoom:0.6,这里跳过以免叠乘。
+   * @param {number} pct 目标百分比
+   * @param {{persistPref?: boolean}} opts persistPref=true 时写回 preferences.json
+   */
+  _applyDisplayScale = (pct, opts = {}) => {
+    if (isMobile && !isPad) return; // 桌面端专用,移动端保持其自有缩放
+    const { persistPref = false } = opts;
+    const scale = snapToPreset(pct);
+    if (this.state.displayScale !== scale) this.setState({ displayScale: scale });
+    try { document.documentElement.style.zoom = String(scale / 100); } catch {}
+    try { localStorage.setItem('ccv_displayScale', String(scale)); } catch {}
+    if (persistPref) this.context.updatePreferences({ displayScale: scale });
+  };
+
+  handleDisplayScaleChange = (pct) => {
+    this._applyDisplayScale(pct, { persistPref: true });
+  };
+
+  // 全局键盘缩放:Cmd/Ctrl + "+"/"-" 步进,Cmd/Ctrl + 0 复位 100%。
+  // 行为对齐 Chrome —— 即便焦点在输入框内也生效。stored ref 以便 unmount 卸载。
+  _onScaleKeydown = (e) => {
+    if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
+    if (isMobile && !isPad) return;
+    const key = e.key;
+    const code = e.code;
+    let next = null;
+    if (key === '=' || key === '+' || code === 'NumpadAdd') {
+      next = stepPreset(this.state.displayScale, +1);
+    } else if (key === '-' || key === '_' || code === 'NumpadSubtract') {
+      next = stepPreset(this.state.displayScale, -1);
+    } else if (key === '0' || code === 'Numpad0') {
+      next = 100;
+    }
+    if (next === null) return;
+    e.preventDefault();
+    this.handleDisplayScaleChange(next);
   };
 
   handleLogDirChange = (value) => {

@@ -324,6 +324,8 @@ class App extends AppBase {
               onResumeAutoChoiceChange={this.handleResumeAutoChoiceChange}
               themeColor={this.state.themeColor}
               onThemeColorChange={this.handleThemeColorChange}
+              displayScale={this.state.displayScale}
+              onDisplayScaleChange={this.handleDisplayScaleChange}
               autoApproveSeconds={this.state.autoApproveSeconds}
               onAutoApproveChange={this.handleAutoApproveChange}
               approvalPrefs={this.state.approvalPrefs}

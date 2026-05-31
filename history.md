@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.6.285 (2026-05-31)
+
+- feat(ui): 偏好设置「主题风格」新增「显示大小」预设选择器(50%-200%),经 CSS zoom 缩放整个界面(含侧边栏/顶栏/弹窗/portal),并支持 Cmd/Ctrl +/- 步进、Cmd/Ctrl 0 复位快捷键;落服务端 preferences(`displayScale`,无需改服务端)+ localStorage 首屏抢占防闪屏;移动端不受影响;桌面端 Electron 移除原生缩放菜单角色避免双重缩放;档位计算抽到纯函数 `src/utils/displayScaleHelper.js` + 配套单测
+
 ## 1.6.284 (2026-05-31)
 
 - fix(chat): 同一请求内的多个 thinking 块(交错思考)在[对话]中合并为单个「思考过程」折叠框,各段之间用 `---` 水平线分隔

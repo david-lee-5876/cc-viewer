@@ -800,8 +800,8 @@ function buildMenu() {
       submenu: [
         { role: 'reload' }, { role: 'forceReload' }, { role: 'toggleDevTools' },
         { type: 'separator' },
-        { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' },
-        { type: 'separator' },
+        // 缩放(Cmd/Ctrl +/-/0)由 renderer 的「显示大小」CSS zoom 接管,移除原生菜单角色,
+        // 否则 setZoomFactor 会与 renderer 处理叠加导致双重缩放。
         { role: 'togglefullscreen' },
       ],
     },
