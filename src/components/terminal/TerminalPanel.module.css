@@ -887,6 +887,27 @@
   color: var(--text-primary);
 }
 
+/* 标题栏「管理专家」图标按钮:紧跟 ? 帮助图标之后。 */
+.ultraplanManageBtn {
+  width: 20px;
+  height: 20px;
+  margin-left: 4px;
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  padding: 0;
+}
+
+.ultraplanManageBtn:hover {
+  background: var(--bg-surface);
+  color: var(--text-primary);
+}
+
 /* flex-shrink: 0 保证横向滚动场景下自定义专家 tab 不被压缩。 */
 .ultraplanCustomWrap {
   position: relative;

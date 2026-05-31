@@ -21,6 +21,7 @@ import { pluginsRoutes } from './routes/plugins.js';
 import { logsRoutes } from './routes/logs.js';
 import { voicePackRoutes } from './routes/voice-pack.js';
 import { skillsRoutes } from './routes/skills.js';
+import { ultraAgentsRoutes } from './routes/ultra-agents.js';
 import { filesContentRoutes } from './routes/files-content.js';
 import { filesFsRoutes } from './routes/files-fs.js';
 import { workspacesRoutes } from './routes/workspaces.js';
@@ -510,6 +511,7 @@ const _routes = [
   ...logsRoutes,
   ...voicePackRoutes,
   ...skillsRoutes,
+  ...ultraAgentsRoutes,
   ...filesContentRoutes,
   ...filesFsRoutes,
   ...workspacesRoutes,

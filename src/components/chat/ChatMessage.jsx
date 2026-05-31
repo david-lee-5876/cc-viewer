@@ -12,6 +12,7 @@ import { parseImOrigin } from '../../utils/imOrigin';
 import { getTeammateAvatar } from '../../utils/teammateAvatars';
 import { renderAssistantText } from '../../utils/systemTags';
 import { apiUrl } from '../../utils/apiUrl';
+import { findUserImageRefs } from '../../utils/userImageRefs';
 import { isMobile, isIOS, isPad } from '../../env';
 import AskQuestionForm from './AskQuestionForm';
 import { hasOptionDescription } from '../../utils/askOptionDesc';
@@ -1040,33 +1041,26 @@ class ChatMessage extends React.Component {
 
   renderUserTextWithImages(text) {
     if (!text) return text || '';
-    // 匹配图片路径格式：
-    // 1. [Image: source: /path/to/file.ext] 或 [Image #N]
-    // 2. "引号包裹的 /tmp/cc-viewer-uploads/ 图片路径"（仅限上传目录，避免误伤正常文本）
-    const IMAGE_EXTS = /\.(png|jpe?g|gif|webp|avif|svg|bmp|ico|icns)$/i;
-    const combinedPattern = /\[Image(?:\s*#\d+)?(?::?\s*source)?:\s*([^\]]+)\]|"(\/tmp\/cc-viewer-uploads\/[^"]+?)"/g;
+    // 图片引用识别(含 [Image …]、引号路径、终端粘贴的裸上传路径)抽到 findUserImageRefs,
+    // 便于单测覆盖三种写法。此处只负责把命中区间替换成 <ChatImage>、其余原样保留为文本。
+    const refs = findUserImageRefs(text);
+    if (refs.length === 0) return text;
     const parts = [];
     let lastIndex = 0;
-    let match;
-    while ((match = combinedPattern.exec(text)) !== null) {
-      // match[1] = [Image...] 中的路径, match[2] = "引号路径"
-      const filePath = (match[1] || match[2] || '').trim();
-      if (!filePath || !IMAGE_EXTS.test(filePath)) continue;
-      if (match.index > lastIndex) {
-        parts.push(<span key={`t-${lastIndex}`}>{text.slice(lastIndex, match.index)}</span>);
+    for (const ref of refs) {
+      if (ref.index > lastIndex) {
+        parts.push(<span key={`t-${lastIndex}`}>{text.slice(lastIndex, ref.index)}</span>);
       }
-      const originalText = match[0];
       parts.push(
         <ChatImage
-          key={`img-${match.index}`}
-          src={apiUrl(`/api/file-raw?path=${encodeURIComponent(filePath)}`)}
-          alt={filePath.split('/').pop()}
-          fallbackText={originalText}
+          key={`img-${ref.index}`}
+          src={apiUrl(`/api/file-raw?path=${encodeURIComponent(ref.path)}`)}
+          alt={ref.path.split('/').pop()}
+          fallbackText={ref.raw}
         />
       );
-      lastIndex = match.index + match[0].length;
+      lastIndex = ref.index + ref.raw.length;
     }
-    if (parts.length === 0) return text;
     if (lastIndex < text.length) {
       parts.push(<span key={`t-${lastIndex}`}>{text.slice(lastIndex)}</span>);
     }

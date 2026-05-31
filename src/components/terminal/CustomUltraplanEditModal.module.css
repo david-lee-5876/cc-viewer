@@ -114,8 +114,19 @@
   min-height: 200px;
 }
 
+/* 标题行:输入框 + 右侧「载入模版」按钮并排。align-items:stretch 让按钮纵向撑满,
+   与左侧 input 等高(input 高度由其 padding/font 决定,按钮 height:auto 后随行高拉伸)。 */
 .field {
   margin-bottom: 12px;
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+/* 按钮高度跟随 input:清掉 antd 固定 control-height 改为 auto,交给 .field 的 stretch 拉伸。
+   选择器 .field .presetBtn(双类)特异性高于 antd 的 .ant-btn(单类),无需 !important。 */
+.field .presetBtn {
+  height: auto;
 }
 
 /* 包 textarea 的 field 撑满右栏剩余高度 */
@@ -126,6 +137,9 @@
 }
 
 .titleInput {
+  /* flex 行内:占满剩余宽度,可收缩(min-width:0)给按钮让位。 */
+  flex: 1;
+  min-width: 0;
   width: 100%;
   padding: 8px 12px;
   border: 1px solid var(--border-primary);

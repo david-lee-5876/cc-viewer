@@ -23,6 +23,8 @@ import { UltraplanController } from '../../utils/ultraplanController';
 import { buildBracketPasteSubmitChunks, BRACKET_PASTE_SUBMIT_SETTLE_MS } from '../../utils/ptyChunkBuilder';
 import ConceptHelp from '../common/ConceptHelp';
 import CustomUltraplanEditModal from './CustomUltraplanEditModal';
+import UltraplanExpertManagerModal from './UltraplanExpertManagerModal';
+import { buildExpertList, visibleExpertKeys } from '../../utils/ultraplanExperts';
 import { TerminalWriteQueue } from '../../utils/terminalWriteQueue';
 import { downscaleForRetina } from '../../utils/imageDownscale';
 import { buildPresetShortcutsPayload } from '../../utils/presetShortcuts';
@@ -281,6 +283,11 @@ class TerminalPanel extends React.Component {
       // (那边用 UltraPlanModal),所以无 gate,但 popover 入口本身 isMobile 不显示终端工具栏。
       ultraplanPopoverSize: _readUltraplanPopoverSize(),
       customUltraplanExperts: [],
+      // 专家显隐 / 排序(管理弹窗)。键 = 'codeExpert' / 'researchExpert' / 'custom:'+id;
+      // 落服务端 preferences(ultraplanExpertOrder / ultraplanExpertHidden),缺省=自然序、全可见。
+      ultraplanExpertOrder: [],
+      ultraplanExpertHidden: [],
+      ultraplanManagerOpen: false,
       customUltraplanEditOpen: false,
       customUltraplanEditing: null,
       presetModalVisible: false,
@@ -555,12 +562,14 @@ class TerminalPanel extends React.Component {
       items.unshift({ id: Date.now() + Math.random(), builtinId: bp.builtinId, teamName: bp.teamName, description: bp.description });
     }
     const customExperts = Array.isArray(data.customUltraplanExperts) ? data.customUltraplanExperts : [];
-    // 若当前选中的自定义专家已不存在（被另一端删除），回退到 codeExpert
+    const expertOrder = Array.isArray(data.ultraplanExpertOrder) ? data.ultraplanExpertOrder : [];
+    const expertHidden = Array.isArray(data.ultraplanExpertHidden) ? data.ultraplanExpertHidden : [];
+    const next = { presetItems: items, customUltraplanExperts: customExperts, ultraplanExpertOrder: expertOrder, ultraplanExpertHidden: expertHidden };
+    // 若当前选中的变体已不可见（被另一端删除 / 隐藏），回退到首个可见专家（无可见则 codeExpert）。
     const current = this.state.ultraplanVariant;
-    const next = { presetItems: items, customUltraplanExperts: customExperts };
-    if (typeof current === 'string' && current.startsWith('custom:')) {
-      const id = current.slice('custom:'.length);
-      if (!customExperts.some(e => e.id === id)) next.ultraplanVariant = 'codeExpert';
+    const visible = visibleExpertKeys(customExperts, expertOrder, expertHidden);
+    if (typeof current === 'string' && !visible.includes(current)) {
+      next.ultraplanVariant = visible[0] || 'codeExpert';
     }
     this.setState(next);
   }
@@ -1392,6 +1401,17 @@ class TerminalPanel extends React.Component {
 
   deleteCustomUltraplanExpert = (...a) => this._ultraplan.deleteExpert(...a);
 
+  // tab 条上每个专家的图标：内置 code=<> / research=放大镜，自定义=星形。
+  _ultraplanExpertIcon = (d) => {
+    if (d.kind === 'custom') {
+      return <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2l2.4 7.2L22 12l-7.6 2.8L12 22l-2.4-7.2L2 12l7.6-2.8z"/></svg>;
+    }
+    if (d.key === 'codeExpert') {
+      return <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>;
+    }
+    return <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>;
+  };
+
   handleUltraplanUpload = (...a) => this._ultraplan.handleUpload(...a);
 
   handleUltraplanPaste = (...a) => this._ultraplan.handlePaste(...a);
@@ -1615,7 +1635,8 @@ class TerminalPanel extends React.Component {
                   //   click → onOpenChange 触发时 mask click 还没冒泡到 editor.onCancel,
                   //   customUltraplanEditOpen 仍为 true,直接拦掉本次 Popover 关闭。
                   // (这个机制与 React 是否批量化 setState 无关,对 React 19 / concurrent 仍稳。)
-                  if (!v && (this.state.lightbox || this.state.ultraplanLightbox || this.state.ultraplanConfirming || this.state.customUltraplanEditOpen)) return;
+                  // ultraplanManagerOpen(管理专家弹窗)同理:它也是 portal Modal,关闭它不应连带收起本 Popover。
+                  if (!v && (this.state.lightbox || this.state.ultraplanLightbox || this.state.ultraplanConfirming || this.state.customUltraplanEditOpen || this.state.ultraplanManagerOpen)) return;
                   if (!v) this.setState({ ultraplanOpen: false });
                 }}
                 overlayClassName="ccv-ultraplan-popover"
@@ -1647,7 +1668,19 @@ class TerminalPanel extends React.Component {
                     </div>
                     <div className={styles.ultraplanContent}>
                     <div className={styles.ultraplanHeader}>
-                      <span className={styles.ultraplanHeaderTitle}>{t('ui.ultraplan.title')}<ConceptHelp doc="UltraPlan" zIndex={1100} /></span>
+                      <span className={styles.ultraplanHeaderTitle}>
+                        {t('ui.ultraplan.title')}
+                        <ConceptHelp doc="UltraPlan" zIndex={1100} />
+                        <button
+                          type="button"
+                          className={styles.ultraplanManageBtn}
+                          title={t('ui.ultraplan.manageExperts')}
+                          aria-label={t('ui.ultraplan.manageExperts')}
+                          onClick={() => this.setState({ ultraplanManagerOpen: true })}
+                        >
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>
+                        </button>
+                      </span>
                       <button
                         type="button"
                         className={styles.ultraplanCloseBtn}
@@ -1659,36 +1692,40 @@ class TerminalPanel extends React.Component {
                       </button>
                     </div>
                     <div className={styles.ultraplanVariantRow}>
-                      <button
-                        className={`${styles.ultraplanRoleBtn} ${this.state.ultraplanVariant === 'codeExpert' ? styles.ultraplanRoleBtnActive : ''}`}
-                        onClick={() => this.setState({ ultraplanVariant: 'codeExpert' })}
-                      ><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>{t('ui.ultraplan.roleCodeExpert')}</button>
-                      <button
-                        className={`${styles.ultraplanRoleBtn} ${this.state.ultraplanVariant === 'researchExpert' ? styles.ultraplanRoleBtnActive : ''}`}
-                        onClick={() => this.setState({ ultraplanVariant: 'researchExpert' })}
-                      ><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>{t('ui.ultraplan.roleResearchExpert')}</button>
-                      {this.state.customUltraplanExperts.map(item => {
-                        const vkey = 'custom:' + item.id;
-                        return (
-                          <span key={item.id} className={styles.ultraplanCustomWrap}>
-                            <button
-                              className={`${styles.ultraplanRoleBtn} ${this.state.ultraplanVariant === vkey ? styles.ultraplanRoleBtnActive : ''}`}
-                              onClick={() => this.setState({ ultraplanVariant: vkey })}
-                              title={item.title}
-                            >
-                              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2l2.4 7.2L22 12l-7.6 2.8L12 22l-2.4-7.2L2 12l7.6-2.8z"/></svg>
-                              <span className={styles.ultraplanCustomTitle}>{item.title}</span>
-                            </button>
-                            <span
-                              className={styles.ultraplanEditPencil}
-                              onClick={(e) => { e.stopPropagation(); this.openCustomUltraplanEditor(item); }}
-                              title={t('ui.ultraplan.customEditTitle')}
-                            >
-                              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>
+                      {buildExpertList(this.state.customUltraplanExperts, this.state.ultraplanExpertOrder, this.state.ultraplanExpertHidden)
+                        .filter(d => !d.hidden)
+                        .map(d => {
+                          const active = this.state.ultraplanVariant === d.key;
+                          if (d.kind === 'builtin') {
+                            return (
+                              <button
+                                key={d.key}
+                                className={`${styles.ultraplanRoleBtn} ${active ? styles.ultraplanRoleBtnActive : ''}`}
+                                onClick={() => this.setState({ ultraplanVariant: d.key })}
+                              >{this._ultraplanExpertIcon(d)}{t(d.key === 'codeExpert' ? 'ui.ultraplan.roleCodeExpert' : 'ui.ultraplan.roleResearchExpert')}</button>
+                            );
+                          }
+                          const item = d.item;
+                          return (
+                            <span key={d.key} className={styles.ultraplanCustomWrap}>
+                              <button
+                                className={`${styles.ultraplanRoleBtn} ${active ? styles.ultraplanRoleBtnActive : ''}`}
+                                onClick={() => this.setState({ ultraplanVariant: d.key })}
+                                title={item.title}
+                              >
+                                {this._ultraplanExpertIcon(d)}
+                                <span className={styles.ultraplanCustomTitle}>{item.title}</span>
+                              </button>
+                              <span
+                                className={styles.ultraplanEditPencil}
+                                onClick={(e) => { e.stopPropagation(); this.openCustomUltraplanEditor(item); }}
+                                title={t('ui.ultraplan.customEditTitle')}
+                              >
+                                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>
+                              </span>
                             </span>
-                          </span>
-                        );
-                      })}
+                          );
+                        })}
                       <button
                         type="button"
                         className={styles.ultraplanAddExpertBtn}
@@ -2071,6 +2108,14 @@ class TerminalPanel extends React.Component {
           onSave={this.saveCustomUltraplanExpert}
           onDelete={this.deleteCustomUltraplanExpert}
           onClose={this.closeCustomUltraplanEditor}
+        />
+        <UltraplanExpertManagerModal
+          open={this.state.ultraplanManagerOpen}
+          customExperts={this.state.customUltraplanExperts}
+          order={this.state.ultraplanExpertOrder}
+          hidden={this.state.ultraplanExpertHidden}
+          onPersist={({ order, hidden }) => this._ultraplan.persistExpertLayout({ order, hidden })}
+          onClose={() => this.setState({ ultraplanManagerOpen: false })}
         />
         {this.state.lightbox && (
           <ImageLightbox

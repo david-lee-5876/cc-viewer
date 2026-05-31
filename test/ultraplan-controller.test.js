@@ -112,6 +112,41 @@ describe('UltraplanController — deleteExpert', () => {
   });
 });
 
+describe('UltraplanController — persistExpertLayout', () => {
+  it('写 order/hidden 到 state + 同步 onUpdatePreferences', () => {
+    const host = makeHost({ initialExperts: [{ id: 'a' }], variant: 'codeExpert' });
+    const c = new UltraplanController(host);
+    const order = ['researchExpert', 'codeExpert', 'custom:a'];
+    c.persistExpertLayout({ order, hidden: [] });
+    assert.deepEqual(host._state.ultraplanExpertOrder, order);
+    assert.deepEqual(host._state.ultraplanExpertHidden, []);
+    assert.equal(host._prefUpdates.length, 1);
+    assert.deepEqual(host._prefUpdates[0], { ultraplanExpertOrder: order, ultraplanExpertHidden: [] });
+  });
+
+  it('当前选中变体被隐藏 → 回落首个可见键', () => {
+    const host = makeHost({ initialExperts: [{ id: 'a' }], variant: 'codeExpert' });
+    const c = new UltraplanController(host);
+    c.persistExpertLayout({ order: [], hidden: ['codeExpert'] });
+    // 可见序 = [researchExpert, custom:a] → 回落 researchExpert
+    assert.equal(host._state.ultraplanVariant, 'researchExpert');
+  });
+
+  it('当前选中变体仍可见 → variant 不动', () => {
+    const host = makeHost({ initialExperts: [{ id: 'a' }], variant: 'custom:a' });
+    const c = new UltraplanController(host);
+    c.persistExpertLayout({ order: [], hidden: ['codeExpert'] });
+    assert.equal(host._state.ultraplanVariant, 'custom:a');
+  });
+
+  it('全部隐藏 → 兜底回落 codeExpert', () => {
+    const host = makeHost({ initialExperts: [], variant: 'codeExpert' });
+    const c = new UltraplanController(host);
+    c.persistExpertLayout({ order: [], hidden: ['codeExpert', 'researchExpert'] });
+    assert.equal(host._state.ultraplanVariant, 'codeExpert');
+  });
+});
+
 describe('UltraplanController — handlePaste', () => {
   function makeImageEvent() {
     const calls = { preventDefault: 0 };

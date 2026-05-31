@@ -12,6 +12,8 @@
 //   messageError(msg)     → 包 antd message.error(msg)（注入以保持本模块 antd-free）
 //   closeEditor()         → 包宿主各自的 closeCustomUltraplanEditor()（两边写不同 state 字段，故留宿主）
 
+import { visibleExpertKeys } from './ultraplanExperts.js';
+
 export class UltraplanController {
   constructor(host) {
     this.host = host;
@@ -81,12 +83,27 @@ export class UltraplanController {
   };
 
   deleteExpert = (id) => {
-    const next = this.host.getState().customUltraplanExperts.filter(e => e.id !== id);
+    const st = this.host.getState();
+    const next = st.customUltraplanExperts.filter(e => e.id !== id);
     this.persistExperts(next);
-    // 如果当前选中的就是被删的，回退到 codeExpert
-    if (this.host.getState().ultraplanVariant === 'custom:' + id) {
-      this.host.setState({ ultraplanVariant: 'codeExpert' });
+    // 如果当前选中的就是被删的，回退到首个可见专家（无可见则 codeExpert）
+    if (st.ultraplanVariant === 'custom:' + id) {
+      const visible = visibleExpertKeys(next, st.ultraplanExpertOrder, st.ultraplanExpertHidden);
+      this.host.setState({ ultraplanVariant: visible[0] || 'codeExpert' });
     }
     this.host.closeEditor();
+  };
+
+  // 「管理专家」弹窗的显隐 / 排序落盘：写 state + 同步 preferences（多端/刷新一致）。
+  // 若当前选中变体因隐藏而不再可见，回退到首个可见键（无可见则 codeExpert）。
+  persistExpertLayout = ({ order, hidden }) => {
+    const st = this.host.getState();
+    const patch = { ultraplanExpertOrder: order, ultraplanExpertHidden: hidden };
+    const visible = visibleExpertKeys(st.customUltraplanExperts, order, hidden);
+    if (!visible.includes(st.ultraplanVariant)) {
+      patch.ultraplanVariant = visible[0] || 'codeExpert';
+    }
+    this.host.setState(patch);
+    this.host.onUpdatePreferences({ ultraplanExpertOrder: order, ultraplanExpertHidden: hidden });
   };
 }

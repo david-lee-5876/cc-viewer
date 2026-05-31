@@ -30,6 +30,7 @@ class App extends AppBase {
       currentTab: 'context',
       pendingCacheHighlight: null,
       contextBarSlot: null, // TerminalPanel 工具栏 / ChatInputBar 底部按钮区注册的 DOM slot；AppHeader 通过 createPortal 把血条渲染过去
+      planUsage: null, // 套餐用量快照(仅 OAuth):自动跟随最新响应，仅在 requests 引用变化且解析值改变时更新(见 componentDidUpdate)
     });
     this.appHeaderRef = React.createRef();
     this._getTokenStatsContent = () => this.appHeaderRef.current?.renderTokenStats?.() ?? null;
@@ -43,6 +44,25 @@ class App extends AppBase {
     if (el === this.state.contextBarSlot) return;
     this.setState({ contextBarSlot: el });
   };
+
+  // 套餐用量:额度搭车在常规 Claude 响应头(anthropic-ratelimit-unified-*)上，SSE 已把最新响应
+  // 喂进 requests，故无需独立请求/手动刷新——pill 自动跟随最新响应。仅在「有新响应」(requests 引用变化)
+  // 时重算，且仅订阅(OAuth)用户才扫描;解析值未变则不 setState，避免流式期间多余重渲染。
+  componentDidUpdate(prevProps, prevState) {
+    if (super.componentDidUpdate) super.componentDidUpdate(prevProps, prevState);
+    if (this._isLocalLog) return;
+    if (this.state.defaultConfig?.authType !== 'OAuth') return;
+    const reqs = this.state.requests;
+    if (!reqs || reqs.length === 0) return;
+    // 无新响应且已有快照 → 跳过(extractLatestPlanUsage 从尾部命中，通常 O(1))。
+    if (prevState && prevState.requests === reqs && this.state.planUsage) return;
+    const pu = extractLatestPlanUsage(reqs);
+    if (!pu) return;
+    const sig = JSON.stringify(pu);
+    if (sig === this._planUsageSig) return; // 值未变，避免重复 setState/重渲染
+    this._planUsageSig = sig;
+    this.setState({ planUsage: pu });
+  }
 
   componentDidMount() {
     super.componentDidMount();
@@ -410,11 +430,13 @@ class App extends AppBase {
           </Layout.Content>
           <div className={styles.footer}>
             <CountryFlag />
-            {/* 套餐用量(coding plan / OAuth):放在左下角状态栏,数据取自最近一条响应的 anthropic-ratelimit-unified-* 头 */}
-            <UsageWindowPill
-              planUsage={this._isLocalLog ? null : extractLatestPlanUsage(filteredRequests)}
-              authType={this.state.defaultConfig?.authType}
-            />
+            {/* 套餐用量(仅订阅 OAuth):额度搭车在常规响应头上，自动跟随最新响应更新(仅有新响应时重算)。 */}
+            {!this._isLocalLog && this.state.defaultConfig?.authType === 'OAuth' && (
+              <UsageWindowPill
+                planUsage={this.state.planUsage}
+                authType={this.state.defaultConfig?.authType}
+              />
+            )}
             <div className={styles.footerRight}>
               <a href="https://github.com/weiesky/cc-viewer" target="_blank" rel="noopener noreferrer" className={styles.footerLink}>
                 <svg className={styles.footerIcon} viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" /></svg>
@@ -506,7 +528,7 @@ class App extends AppBase {
           styles={{ body: { overflow: 'hidden' } }}
         >
           <div className={styles.modalActions}>
-            <Button icon={<UploadOutlined />} onClick={this.handleLoadLocalJsonlFile}>
+            <Button size="small" icon={<UploadOutlined />} onClick={this.handleLoadLocalJsonlFile}>
               {t('ui.loadLocalJsonl')}
             </Button>
             <Button

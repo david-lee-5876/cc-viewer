@@ -1,6 +1,6 @@
 {
   "name": "cc-viewer",
-  "version": "1.6.282",
+  "version": "1.6.283",
   "description": "Claude Code Logger visualization management tool",
   "license": "MIT",
   "main": "server.js",
@@ -56,7 +56,8 @@
     "interceptor.js",
     "server/",
     "plugins/",
-    "concepts/"
+    "concepts/",
+    "ultraAgents/"
   ],
   "devDependencies": {
     "@codemirror/lang-cpp": "^6.0.3",

@@ -3,6 +3,7 @@ import { Modal, Button, Popconfirm, Spin, message } from 'antd';
 import { t, getLang } from '../../i18n';
 import { apiUrl } from '../../utils/apiUrl';
 import { renderMarkdown } from '../../utils/markdown';
+import PresetExpertPickerModal from './PresetExpertPickerModal';
 import styles from './CustomUltraplanEditModal.module.css';
 
 export default function CustomUltraplanEditModal({ open, initial, onSave, onDelete, onClose }) {
@@ -18,6 +19,8 @@ export default function CustomUltraplanEditModal({ open, initial, onSave, onDele
     catch { return false; }
   });
   const docRef = useRef(null);
+  // 「载入模版」弹窗开关。
+  const [presetPickerOpen, setPresetPickerOpen] = useState(false);
 
   useEffect(() => {
     if (open) {
@@ -110,6 +113,26 @@ export default function CustomUltraplanEditModal({ open, initial, onSave, onDele
     onDelete(initial.id);
   };
 
+  // 从预设专家弹窗「载入」:覆盖名称+内容。仅当编辑器处于「全新且未改动」(标题空 + 内容仍是
+  // 预填样板壳)时直接覆盖;否则(已编辑既有专家 / 已手输内容)先弹确认,防止误删用户成果。
+  const handlePresetLoad = ({ title: presetTitle, content: presetContent }) => {
+    const apply = () => {
+      setTitle(presetTitle);
+      setContent(presetContent);
+      setPresetPickerOpen(false);
+    };
+    const pristine = title.trim() === ''
+      && content.trim() === t('ui.ultraplan.customContentTemplate').trim();
+    if (pristine) { apply(); return; }
+    Modal.confirm({
+      title: t('ui.ultraplan.presetOverwriteConfirm'),
+      okText: t('ui.ultraplan.presetLoad'),
+      cancelText: t('ui.ultraplan.customCancel'),
+      zIndex: 1400, // 高于预设弹窗(1300)与编辑器(1200)
+      onOk: apply,
+    });
+  };
+
   const footer = (
     <div className={styles.footer}>
       <div className={styles.footerLeft}>
@@ -180,6 +203,9 @@ export default function CustomUltraplanEditModal({ open, initial, onSave, onDele
               onChange={e => setTitle(e.target.value)}
               autoFocus
             />
+            <Button className={styles.presetBtn} onClick={() => setPresetPickerOpen(true)}>
+              {t('ui.ultraplan.presetAdd')}
+            </Button>
           </div>
           <div className={styles.fieldGrow}>
             <textarea
@@ -191,6 +217,11 @@ export default function CustomUltraplanEditModal({ open, initial, onSave, onDele
           </div>
         </div>
       </div>
+      <PresetExpertPickerModal
+        open={presetPickerOpen}
+        onLoad={handlePresetLoad}
+        onClose={() => setPresetPickerOpen(false)}
+      />
     </Modal>
   );
 }

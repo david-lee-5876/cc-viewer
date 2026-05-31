@@ -8,8 +8,10 @@
   justify-content: flex-start;
   border-radius: 999px;
   border: 1px solid;
-  border-color: var(--usage-color);
-  color: var(--usage-color);
+  /* 文字 / 边框 / 填充条都取 footer 右侧文字同色(--text-disabled),低调不抢眼,
+     不再按阈值红/黄/绿配色。 */
+  border-color: var(--text-disabled);
+  color: var(--text-disabled);
   padding: 0 7px;
   height: 15px;
   font-size: 11px;
@@ -17,7 +19,6 @@
   overflow: hidden;
   white-space: nowrap;
   cursor: default;
-  transition: border-color 0.3s, color 0.3s;
   background: var(--bg-base-pure);
 }
 
@@ -27,9 +28,9 @@
   top: 0;
   bottom: 0;
   width: var(--usage-percent, 0);
-  background-color: var(--usage-color);
-  opacity: 0.35;
-  transition: width 0.5s ease, background-color 0.3s;
+  background-color: var(--text-disabled);
+  opacity: 0.25;
+  transition: width 0.5s ease;
   pointer-events: none;
 }
 
@@ -47,7 +48,7 @@
 /* 等待数据的静默态:中性灰描边。 */
 .muted {
   border-color: var(--border-light);
-  color: var(--text-secondary);
+  color: var(--text-disabled);
   background: var(--bg-surface);
 }
 
@@ -63,51 +64,66 @@
   margin-bottom: 6px;
 }
 
-.row {
-  display: flex;
+/* 无边框 table:三列(窗口名 / 血条 / 重置时间)按列对齐。 */
+.popTable {
+  border-collapse: collapse;
+}
+
+/* 只设纵向内边距:横向留给各列自己的 padding-right(5px 列间距)。
+   注意不要用 `padding: 3px 0` —— 它会以更高优先级(class+元素)盖掉 .tdName/.tdBar 的 padding-right，把列间距清零。 */
+.popTable td {
+  padding-top: 3px;
+  padding-bottom: 3px;
+  vertical-align: middle;
+}
+
+.tdName {
+  color: var(--text-secondary);
+  padding-right: 5px;
+  white-space: nowrap;
+}
+
+.tdBar {
+  padding-right: 5px;
+  white-space: nowrap;
+}
+
+.tdReset {
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* 100px 血条:沿用 footer pill 的低调灰(边框/填充取 --text-disabled)，数字叠在条上。 */
+.bar {
+  position: relative;
+  display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 2px 0;
-}
-
-.rowLabel {
-  flex: 1 1 auto;
-  color: var(--text-secondary);
-}
-
-.rowVal {
-  font-variant-numeric: tabular-nums;
-  font-weight: 600;
-}
-
-.rowReset {
-  color: var(--text-secondary);
-  font-variant-numeric: tabular-nums;
-}
-
-.status {
-  font-size: 11px;
-  padding: 0 6px;
+  justify-content: center;
+  width: 100px;
+  height: 14px;
   border-radius: 999px;
-  line-height: 15px;
-  border: 1px solid currentColor;
+  border: 1px solid var(--text-disabled);
+  overflow: hidden;
+  background: var(--bg-base-pure);
+  vertical-align: middle;
 }
 
-.statusAllowed {
-  color: var(--color-success);
+.barFill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  background-color: var(--text-disabled);
+  opacity: 0.25;
+  pointer-events: none;
 }
 
-.statusRejected {
-  color: var(--color-error-light);
-}
-
-.statusQueued {
-  color: var(--color-warning-light);
-}
-
-.footer {
-  margin-top: 6px;
-  padding-top: 6px;
-  border-top: 1px solid var(--border-light);
-  color: var(--color-error-light);
+.barText {
+  position: relative;
+  z-index: 1;
+  font-size: 11px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
 }

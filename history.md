@@ -1,10 +1,16 @@
 # Changelog
 
-## Unreleased
+## 1.6.283 (2026-05-31)
 
+- perf(chat): 缓解移动端(Virtuoso 路径)流式输出卡顿——吸底 `followOutput` 由 `smooth` 改为 `auto`,消除流式期间每帧持续的平滑滚动动画(原本驱动浏览器每帧在超大 DOM 上重算 IntersectionObserver,主线程被打满);并把预渲染窗口 `increaseViewportBy` 顶部由 400 收紧到 200,减少视窗外挂载的重消息
+- feat(docs): 工具说明新增 LSP、Workflow 两个工具的概念帮助文档(`concepts/` 全 18 语言),并加入 `ConceptHelp` 的 `KNOWN_DOCS` 白名单——点击工具列表中的 LSP / Workflow chip 即可查看说明
+- feat(ultraplan): UltraPlan popover 标题栏(? 帮助图标旁)新增「管理专家」图标,点开管理弹窗统一管理全部专家(内置代码/调研 + 自定义):列表展示标题+描述(自定义只显标题)、每个专家显示/隐藏开关、拖拽排序;tab 条改为数据驱动(不再写死内置按钮),显隐/顺序落服务端 preferences(`ultraplanExpertOrder`/`ultraplanExpertHidden`,无需改服务端),当前选中专家被隐藏/删除时自动回落首个可见;护栏「至少保留一个可见专家」;合成逻辑抽到纯函数 `src/utils/ultraplanExperts.js`(陈旧键自动忽略)+配套单测
+- fix(chat): 对话里用户消息中的上传图片支持「裸路径」渲染——终端粘贴流程把 `/tmp/cc-viewer-uploads/xxx.png` 不加引号直接拼进提示词,旧正则只认引号包裹写法,导致这类图片只显示成纯文本路径;识别逻辑抽到纯函数 `src/utils/userImageRefs.js`(兼容 `[Image: …]`、单/双引号路径、裸上传路径,及 macOS `/private/tmp` 变体,仍以图片扩展名结尾为准;单/双引号会被整对吃掉、不残留成文本),配套单测
+- feat(usage): 套餐用量 pill 仅订阅(OAuth)下渲染,额度搭车在常规响应头上,自动跟随最新响应更新(改用 state 快照、仅在有新响应时重算且解析值未变不重渲染,规避每帧扫描整条 requests);pill 文字/边框/血条统一取 footer 右侧同款低调灰(--text-disabled),不再按阈值红/黄/绿配色;footer pill 上周窗口仅在用量超过 60% 时才显示(否则只显示 5h,周用量仍可在 hover 详情查看);hover 详情弹窗改无边框 table 三列对齐(列间距 5px)、去掉「正常」状态标签、百分比改血条(数字叠加);移除「超额已拒绝 / 原因」及状态标签整段文案与对应 i18n 键
 - feat(usage): 左下角状态栏(footer,国旗/版本旁)新增「套餐用量」pill——Claude 订阅(coding plan / OAuth)下展示 5 小时滚动窗口与周窗口的使用率(如 `5h 19% · 周 52%`),悬浮弹窗给出各窗口使用率/状态/重置倒计时及超额原因;数据取自最近一条带 `anthropic-ratelimit-unified-*` 限流头的响应(拦截器已原样记录,前端 `request.response.headers` 可读),纯前端实现,**未改动 cli.js / interceptor.js / 任何服务端代码,上下文血条区域零改动**;阈值配色 ≥80% 红 / ≥60% 黄;API key / 第三方模型的 token 用量请看左侧仪表盘的 Token 统计(本 pill 专注订阅 plan,API 模式不渲染),OAuth 暂无数据时显示静默占位「—」;新增纯函数 `src/utils/rateLimitParser.js`(`parseRateLimitHeaders` / `extractLatestPlanUsage` / `pickHeadlineWindow`)及单测;ui.usage.* 补齐 18 语言
 - fix(proxy): 代理转发改为把 `EnvHttpProxyAgent` 显式作为 `fetch` 的 `dispatcher` 传入——**Node 26 起的回归**:转发用的内置全局 `fetch` 背后是 Node 自带的 undici,Node ≤25 时它与 userland undici 包共享 global dispatcher(故旧代码一直好用),实测 Node 26 起两者不再共享,单调 `setGlobalDispatcher` 失效,转发请求绕过 `http_proxy`/`https_proxy` 直连 `api.anthropic.com`(配了网络代理却不生效);新增 `getProxyDispatcher()` 暴露已构造的 dispatcher 供转发处显式传入(各 Node 版本通用),`setGlobalDispatcher` 仍保留以覆盖直接 `import 'undici'` 的调用路径;补 `getProxyDispatcher` 单测
 - fix(proxy): 上游请求强制 `accept-encoding: identity` 取代仅剥 zstd 的旧策略——链路中的网关/代理可能透传上游的压缩 body 却剥掉 `content-encoding` 响应头,undici 看不到该头就不解压,把压缩字节当明文透传给 Claude CLI,触发 "API returned an empty or malformed response (HTTP 200)";让上游直接不压缩即从根上消除这类错配;删除已被取代的死代码 `stripZstdAcceptEncoding`,新增 `forceIdentityAcceptEncoding` 单测
+- feat(ultraplan): 新增「预设专家」——仓库根 `ultraAgents/*.json` 随包发布预设(内置代码专家/调研专家 demo);自定义专家编辑器「专家名称」右侧加「载入模版」按钮(高度与名称输入框对齐),弹窗左列表 + 右只读预览,选中「载入」覆盖名称+内容(编辑器已有改动时先弹覆盖确认);新增只读端点 `GET /api/ultra-agents`(仅扫包内置目录、无参数)。`title` / `description` 在 JSON 协议层内联本地化(纯字符串或 `{lang:str}` 对象,前端 `resolveLocalized` 按当前语言解析、区域回退);`content` 为单语言字符串,直接取自 `src/utils/ultraplanTemplates.js` 的 `ULTRAPLAN_VARIANTS`(由单测钉死逐字节一致)
 
 ## 1.6.282 (2026-05-29)
 

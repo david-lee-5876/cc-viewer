@@ -3,6 +3,7 @@ import { t } from '../../i18n';
 import { apiUrl } from '../../utils/apiUrl';
 import { isMobile, isPad } from '../../env';
 import { calcResizedSize } from '../../utils/resizeCalc';
+import { buildExpertList } from '../../utils/ultraplanExperts';
 import ImageLightbox from '../common/ImageLightbox';
 import ConfirmRemoveButton from '../common/ConfirmRemoveButton';
 import styles from './UltraPlanModal.module.css';
@@ -31,9 +32,20 @@ function _abortActiveDrag(dragRef) {
   };
 }
 
+// tab 条上每个专家的图标：内置 code=<> / research=放大镜，自定义=星形。
+function _expertIcon(d) {
+  if (d.kind === 'custom') {
+    return <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2l2.4 7.2L22 12l-7.6 2.8L12 22l-2.4-7.2L2 12l7.6-2.8z"/></svg>;
+  }
+  if (d.key === 'codeExpert') {
+    return <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>;
+  }
+  return <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>;
+}
+
 export default function UltraPlanModal({
-  open, variant, prompt, files, agentTeamEnabled, customExperts,
-  onClose, onVariantChange, onPromptChange, onSend, onUpload, onPaste, onRemoveFile, onOpenCustomEditor,
+  open, variant, prompt, files, agentTeamEnabled, customExperts, expertOrder, expertHidden,
+  onClose, onVariantChange, onPromptChange, onSend, onUpload, onPaste, onRemoveFile, onOpenCustomEditor, onOpenManager,
   modalSize, onModalSizeChange,
 }) {
   const [lightbox, setLightbox] = useState(null);
@@ -140,7 +152,6 @@ export default function UltraPlanModal({
   if (!open) return null;
 
   const hasContent = (prompt || '').trim() || files.length > 0;
-  const experts = Array.isArray(customExperts) ? customExperts : [];
 
   return (
     <div className={styles.backdrop} onClick={onClose}>
@@ -168,6 +179,11 @@ export default function UltraPlanModal({
         <div className={styles.header}>
           <span className={styles.title}>{t('ui.ultraplan.title')}</span>
           <div className={styles.headerActions}>
+            {onOpenManager && (
+              <button className={styles.closeBtn} onClick={onOpenManager} title={t('ui.ultraplan.manageExperts')} aria-label={t('ui.ultraplan.manageExperts')}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>
+              </button>
+            )}
             <button className={styles.closeBtn} onClick={onClose}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
                 <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
@@ -181,44 +197,45 @@ export default function UltraPlanModal({
         ) : (
           <>
             <div className={styles.variantRow}>
-              <button
-                className={`${styles.roleBtn} ${variant === 'codeExpert' ? styles.roleBtnActive : ''}`}
-                onClick={() => onVariantChange('codeExpert')}
-              >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
-                {t('ui.ultraplan.roleCodeExpert')}
-              </button>
-              <button
-                className={`${styles.roleBtn} ${variant === 'researchExpert' ? styles.roleBtnActive : ''}`}
-                onClick={() => onVariantChange('researchExpert')}
-              >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                {t('ui.ultraplan.roleResearchExpert')}
-              </button>
-              {experts.map(item => {
-                const vkey = 'custom:' + item.id;
-                return (
-                  <span key={item.id} className={styles.customWrap}>
-                    <button
-                      className={`${styles.roleBtn} ${variant === vkey ? styles.roleBtnActive : ''}`}
-                      onClick={() => onVariantChange(vkey)}
-                      title={item.title}
-                    >
-                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2l2.4 7.2L22 12l-7.6 2.8L12 22l-2.4-7.2L2 12l7.6-2.8z"/></svg>
-                      <span className={styles.customTitle}>{item.title}</span>
-                    </button>
-                    {onOpenCustomEditor && (
-                      <span
-                        className={styles.editPencil}
-                        onClick={(e) => { e.stopPropagation(); onOpenCustomEditor(item); }}
-                        title={t('ui.ultraplan.customEditTitle')}
+              {buildExpertList(customExperts, expertOrder, expertHidden)
+                .filter(d => !d.hidden)
+                .map(d => {
+                  const active = variant === d.key;
+                  if (d.kind === 'builtin') {
+                    return (
+                      <button
+                        key={d.key}
+                        className={`${styles.roleBtn} ${active ? styles.roleBtnActive : ''}`}
+                        onClick={() => onVariantChange(d.key)}
                       >
-                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>
-                      </span>
-                    )}
-                  </span>
-                );
-              })}
+                        {_expertIcon(d)}
+                        {t(d.key === 'codeExpert' ? 'ui.ultraplan.roleCodeExpert' : 'ui.ultraplan.roleResearchExpert')}
+                      </button>
+                    );
+                  }
+                  const item = d.item;
+                  return (
+                    <span key={d.key} className={styles.customWrap}>
+                      <button
+                        className={`${styles.roleBtn} ${active ? styles.roleBtnActive : ''}`}
+                        onClick={() => onVariantChange(d.key)}
+                        title={item.title}
+                      >
+                        {_expertIcon(d)}
+                        <span className={styles.customTitle}>{item.title}</span>
+                      </button>
+                      {onOpenCustomEditor && (
+                        <span
+                          className={styles.editPencil}
+                          onClick={(e) => { e.stopPropagation(); onOpenCustomEditor(item); }}
+                          title={t('ui.ultraplan.customEditTitle')}
+                        >
+                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>
+                        </span>
+                      )}
+                    </span>
+                  );
+                })}
               {onOpenCustomEditor && (
                 <button
                   type="button"

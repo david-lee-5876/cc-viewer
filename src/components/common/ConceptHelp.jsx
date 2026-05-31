@@ -16,6 +16,7 @@ const KNOWN_DOCS = new Set([
   'Tool-EnterPlanMode', 'Tool-ExitPlanMode',
   'Tool-AskUserQuestion', 'Tool-Skill',
   'Tool-getDiagnostics', 'Tool-executeCode', 'Tool-EnterWorktree', 'Tool-ExitWorktree',
+  'Tool-LSP', 'Tool-Workflow',
   'Tool-CronCreate', 'Tool-CronDelete', 'Tool-CronList',
   'Tool-Monitor', 'Tool-PushNotification', 'Tool-RemoteTrigger', 'Tool-ScheduleWakeup',
   'MainAgent', 'Teammate', 'BodyFields', 'ResponseFields', 'Tools', 'ToolsFirst', 'CacheRebuild', 'BodyDiffJSON', 'TranslateContextPollution', 'KVCacheContent', 'ProxySwitch', 'GlobalSettings', 'QRCode', 'UltraPlan', 'CustomUltraplanExpert',

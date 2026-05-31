@@ -31,5 +31,7 @@ export const PUBLIC_DIR    = join(PACKAGE_ROOT, 'public');
 export const CONCEPTS_DIR  = join(PACKAGE_ROOT, 'concepts');
 /** Bundled plugin 目录（plugin-loader 启动时扫这里） */
 export const PLUGINS_DIR   = join(PACKAGE_ROOT, 'plugins');
+/** 随包发布的 ultraplan 预设专家目录（ultraAgents/*.json，/api/ultra-agents 扫这里） */
+export const ULTRA_AGENTS_DIR = join(PACKAGE_ROOT, 'ultraAgents');
 /** cc-viewer 自己的 package.json（updater/server.js 读 version） */
 export const PACKAGE_JSON  = join(PACKAGE_ROOT, 'package.json');

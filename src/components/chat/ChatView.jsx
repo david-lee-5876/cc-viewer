@@ -3339,10 +3339,10 @@ class ChatView extends React.Component {
             className={styles.mobileVirtuoso}
             data={visible}
             initialTopMostItemIndex={Math.max(0, visible.length - 1)}
-            followOutput={this.state.stickyBottom ? 'smooth' : false}
+            followOutput={this.state.stickyBottom ? 'auto' : false}
             atBottomStateChange={(atBottom) => this._stickyController.notifyAtBottom(atBottom)}
             atBottomThreshold={60}
-            increaseViewportBy={{ top: 400, bottom: 200 }}
+            increaseViewportBy={{ top: 200, bottom: 200 }}
             computeItemKey={(index) => visible[index]?.key || `v-${index}`}
             itemContent={(index) => {
               const item = visible[index];
