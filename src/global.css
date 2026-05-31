@@ -319,6 +319,12 @@ html, body {
   overscroll-behavior: none;
 }
 
+/* 高度链：让根容器用 height:100% 而非 100vh，使「显示大小」CSS zoom 缩放下
+   主框架仍精确铺满视口（百分比随 zoom 计算，vh 不随）。缺任一层都会塌成内容高度。 */
+html, body, #root {
+  height: 100%;
+}
+
 ::selection {
   background-color: var(--color-selection-alt);
   color: inherit;

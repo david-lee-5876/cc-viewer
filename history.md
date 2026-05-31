@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.6.287 (2026-05-31)
+
+- fix(ui): 「显示大小」CSS zoom 缩放后主框架底部留缝 / 顶部被切——根容器 `.layout` 由 `height:100vh` 改为 `height:100%`,并在 `global.css` 补齐 `html,body,#root{height:100%}` 高度链(百分比高度随 zoom 计算,vh 始终等于未缩放整屏才是留缝根因);顺带 `.loadingOverlay`/`.dragOverlay` 由 `100vw/100vh` 改 `100%`;移动端 `.mobileCLIRoot` 不受影响(不缩放)
+
 ## 1.6.286 (2026-05-31)
 
 - fix(chat): SDK 模式「停止」改为真正 halt 在途待发——`interruptTurn` 额外清空服务端 `_messageQueue`(否则停止后 `sendUserMessage` drain 循环立刻续发下一条排队消息,多 client/连发场景可见),客户端 `handleInputStop` 同步清掉 typed-interrupt 武装的 `_pendingFlushQueue`(否则随后的 ask-hook-cancelled ack 会把它发出去);中断关弹窗的 kind→广播类型映射抽出纯函数 `sdkApprovalCloseType`(sdk-adapter.js)+ 全 kind/null 单测;`stopOptimistic` 清理收口为 `_clearStopOptimistic`(4 处去重);sdk-interrupt 在非 SDK 模式收到时打 warn 便于排查 client/server 配置漂移

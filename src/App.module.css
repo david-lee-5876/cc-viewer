@@ -1,5 +1,8 @@
 .layout {
-  height: 100vh;
+  /* 用 100% 而非 100vh：CSS zoom（显示大小缩放）会按比例计算百分比高度，
+     但 vh 始终等于"未缩放的整屏"，导致缩放后底部留缝/超出。
+     依赖 global.css 里 html,body,#root 的 height:100% 高度链。 */
+  height: 100%;
   overflow: hidden;
 }
 
@@ -132,8 +135,8 @@
   position: fixed;
   top: 0;
   left: 0;
-  width: 100vw;
-  height: 100vh;
+  width: 100%;
+  height: 100%;
   background: var(--overlay-dark);
   display: flex;
   align-items: center;
@@ -145,8 +148,8 @@
   position: fixed;
   top: 0;
   left: 0;
-  width: 100vw;
-  height: 100vh;
+  width: 100%;
+  height: 100%;
   background: var(--overlay-dark);
   display: flex;
   align-items: center;
