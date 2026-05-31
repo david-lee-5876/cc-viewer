@@ -5,6 +5,7 @@ import { SearchOutlined } from '@ant-design/icons';
 import { escapeHtml, truncateText, getSvgAvatar } from '../../utils/helpers';
 import { compactResultPreview } from '../../utils/toolResultCore.js';
 import { extractWebSearchGroups } from '../../utils/webSearchGrouping';
+import { mergeThinkingBlocks } from '../../utils/thinkingMerge';
 import WebSearchResultsView from '../viewers/WebSearchResultsView';
 import MarkdownBlock from '../viewers/MarkdownBlock';
 import DingTalkIcon from '../common/DingTalkIcon';
@@ -1219,16 +1220,12 @@ class ChatMessage extends React.Component {
   }
 
   _renderAssistantContentLegacy(content, toolResultMap = {}) {
-    const thinkingBlocks = content.filter(b => b.type === 'thinking');
     const textBlocks = content.filter(b => b.type === 'text');
     const toolUseBlocks = content.filter(b => b.type === 'tool_use');
 
-    // 流式光标分发：有 text 时贴在最后一段 text 的末尾；否则贴在最后一个非空 thinking 末尾
+    // 流式光标分发：有 text 时贴在最后一段 text 的末尾；否则贴在合并后的 thinking 末尾
     const showTC = !!this.props.showTrailingCursor;
     const hasTextWithContent = textBlocks.some(b => b.text && b.text.trim());
-    const lastThinkingIdxWithContent = showTC && !hasTextWithContent
-      ? thinkingBlocks.reduce((acc, b, i) => (b.thinking && b.thinking.trim() ? i : acc), -1)
-      : -1;
     const lastTextIdxWithContent = showTC && hasTextWithContent
       ? textBlocks.reduce((acc, b, i) => (b.text && b.text.trim() ? i : acc), -1)
       : -1;
@@ -1239,12 +1236,12 @@ class ChatMessage extends React.Component {
 
     let innerContent = [];
 
-    thinkingBlocks.forEach((tb, i) => {
-      const thinkingText = tb.thinking || '';
-      const isEmpty = !thinkingText.trim();
-      const isCursorTarget = i === lastThinkingIdxWithContent;
-      innerContent.push(this._renderThinkingEntry(thinkingText, isEmpty, isCursorTarget, i, streamThinkingExpanded));
-    });
+    // 同一请求内的多个 thinking 块（interleaved thinking）合并为单个「思考过程」，段间用 --- 分隔
+    const mergedThinking = mergeThinkingBlocks(content);
+    if (mergedThinking.count > 0) {
+      const isCursorTarget = showTC && !hasTextWithContent && !mergedThinking.isEmpty;
+      innerContent.push(this._renderThinkingEntry(mergedThinking.text, mergedThinking.isEmpty, isCursorTarget, 0, streamThinkingExpanded));
+    }
 
     textBlocks.forEach((tb, i) => {
       if (tb.text) {
@@ -1305,27 +1302,14 @@ class ChatMessage extends React.Component {
         if (showTC) lastTextGlobalIdx = i;
       }
     }
-    let lastThinkingGlobalIdx = -1;
-    if (showTC && !hasTextWithContent) {
-      for (let i = 0; i < content.length; i++) {
-        const b = content[i];
-        if (b && b.type === 'thinking' && typeof b.thinking === 'string' && b.thinking.trim()) {
-          lastThinkingGlobalIdx = i;
-        }
-      }
-    }
     const streamThinkingExpanded = !hasTextWithContent || !!this.props.expandThinking;
 
-    // 1. thinking 顶部独立渲染（与 legacy 一致；thinking 永远不在 consumedIndices 里）
-    let thinkingRenderIdx = 0;
-    for (let i = 0; i < content.length; i++) {
-      const tb = content[i];
-      if (!tb || tb.type !== 'thinking') continue;
-      const thinkingText = tb.thinking || '';
-      const isEmpty = !thinkingText.trim();
-      const isCursorTarget = i === lastThinkingGlobalIdx;
-      const tIdx = thinkingRenderIdx++;
-      innerContent.push(this._renderThinkingEntry(thinkingText, isEmpty, isCursorTarget, tIdx, streamThinkingExpanded));
+    // 1. thinking 顶部合并为单个「思考过程」（与 legacy 一致；thinking 永远不在 consumedIndices 里）
+    //    同一请求内的多个 thinking 块（interleaved thinking）合并，段间用 --- 分隔
+    const mergedThinking = mergeThinkingBlocks(content);
+    if (mergedThinking.count > 0) {
+      const isCursorTarget = showTC && !hasTextWithContent && !mergedThinking.isEmpty;
+      innerContent.push(this._renderThinkingEntry(mergedThinking.text, mergedThinking.isEmpty, isCursorTarget, 0, streamThinkingExpanded));
     }
 
     // 2. 工具调用辅助：维护非 consumed 的 tool_use 列表，用于 isFirstPendingTool 判断

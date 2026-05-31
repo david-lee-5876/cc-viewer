@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.6.284 (2026-05-31)
+
+- fix(chat): 同一请求内的多个 thinking 块(交错思考)在[对话]中合并为单个「思考过程」折叠框,各段之间用 `---` 水平线分隔
+
 ## 1.6.283 (2026-05-31)
 
 - perf(chat): 缓解移动端(Virtuoso 路径)流式输出卡顿——吸底 `followOutput` 由 `smooth` 改为 `auto`,消除流式期间每帧持续的平滑滚动动画(原本驱动浏览器每帧在超大 DOM 上重算 IntersectionObserver,主线程被打满);并把预渲染窗口 `increaseViewportBy` 顶部由 400 收紧到 200,减少视窗外挂载的重消息
