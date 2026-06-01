@@ -537,7 +537,15 @@ const dispatch = createDispatcher(_routes);
 
 async function handleRequest(req, res) {
   const parsedUrl = new URL(req.url, `${serverProtocol}://${req.headers.host}`);
-  const url = parsedUrl.pathname;
+  let url = parsedUrl.pathname;
+
+  // CCV_BASE_PATH reverse proxy: strip prefix at TOP so API/WS/static/SPA
+  // all work with original unprefixed paths. basePath normalized.
+  const bpRaw = process.env.CCV_BASE_PATH || '';
+  const bp = bpRaw && bpRaw !== '/' ? bpRaw.replace(/\/?$/, '/') : '';
+  if (bp && url.startsWith(bp)) {
+    url = url.slice(bp.length) || '/';
+  }
   const method = req.method;
 
   // WebSocket 路径不处理，交给 upgrade 事件
@@ -692,7 +700,7 @@ async function handleRequest(req, res) {
         const basePath = process.env.CCV_BASE_PATH || '';
         if (basePath && basePath !== '/') {
           const safeBase = basePath.replace(/\/?$/, '/');
-          html = html.replace(/<head[^>]*>/i, m => m + `<base href="${safeBase}">`);
+          html = html.replace(/<head[^>]*>/i, m => m + `<base href="${safeBase}"><script>window.__CCV_BASE_PATH__="${safeBase}"</scr" + "ipt>`);
         }
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' });
         res.end(html);
