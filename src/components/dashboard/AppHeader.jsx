@@ -2,7 +2,8 @@ import React from 'react';
 import { createPortal } from 'react-dom';
 import { Space, Tag, Button, Dropdown, Popover, Modal, Collapse, Drawer, Switch, Radio, Tabs, Spin, Input, Select, Segmented, Tooltip, message } from 'antd';
 import { DISPLAY_SCALE_PRESETS } from '../../utils/displayScaleHelper';
-import { MessageOutlined, FileTextOutlined, ImportOutlined, DashboardOutlined, ExportOutlined, DownloadOutlined, SettingOutlined, BarChartOutlined, CodeOutlined, CopyOutlined, ApiOutlined, SwapOutlined } from '@ant-design/icons';
+import { hasNativeZoom, isMac } from '../../env';
+import { MessageOutlined, FileTextOutlined, ImportOutlined, DashboardOutlined, ExportOutlined, DownloadOutlined, SettingOutlined, BarChartOutlined, CodeOutlined, CopyOutlined, ApiOutlined, SwapOutlined, QuestionCircleOutlined } from '@ant-design/icons';
 import { QRCodeCanvas } from 'qrcode.react';
 import { formatTokenCount, computeTokenStats, computeCacheRebuildStats, computeToolUsageStats, computeSkillUsageStats, resolveCalibrationTokens, adaptContextWindow, AUTO_COMPACT_USABLE_RATIO, AUTO_APPROVE_INSTANT } from '../../utils/helpers';
 import { isSystemText, classifyUserContent, isMainAgent } from '../../utils/contentFilter';
@@ -1749,16 +1750,30 @@ class AppHeader extends React.Component {
               />
             </div>
             <div className={styles.settingsItem}>
-              <Tooltip title={t('ui.displayScale.hint')}>
-                <span className={styles.settingsLabel}>{t('ui.displayScale')}</span>
-              </Tooltip>
-              <Select
-                size="small"
-                value={displayScale || 100}
-                onChange={(value) => onDisplayScaleChange && onDisplayScaleChange(value)}
-                options={DISPLAY_SCALE_PRESETS.map(p => ({ label: `${p}%`, value: p }))}
-                style={{ width: 140 }}
-              />
+              {hasNativeZoom ? (
+                // Electron 桌面:label 带「缩放整个界面」tooltip + 预设下拉 → webFrame.setZoomFactor 原生缩放。
+                <>
+                  <Tooltip title={t('ui.displayScale.hint')}>
+                    <span className={styles.settingsLabel}>{t('ui.displayScale')}</span>
+                  </Tooltip>
+                  <Select
+                    size="small"
+                    value={displayScale || 100}
+                    onChange={(value) => onDisplayScaleChange && onDisplayScaleChange(value)}
+                    options={DISPLAY_SCALE_PRESETS.map(p => ({ label: `${p}%`, value: p }))}
+                    style={{ width: 140 }}
+                  />
+                </>
+              ) : (
+                // 纯浏览器(仅桌面渲染本行):无法用 JS 设原生缩放,label 不再挂会误导的 hint,
+                // 改用 (?) 提示用户按浏览器自带快捷键缩放(按平台区分 ⌘ / Ctrl)。
+                <>
+                  <span className={styles.settingsLabel}>{t('ui.displayScale')}</span>
+                  <Tooltip title={t('ui.displayScale.browserHint', { mod: isMac ? '⌘' : 'Ctrl' })}>
+                    <QuestionCircleOutlined className={styles.settingsHelpIcon} />
+                  </Tooltip>
+                </>
+              )}
             </div>
             <div className={styles.settingsItem}>
               <span className={styles.settingsLabel}>{t('ui.languageSettings')}</span>

@@ -3953,6 +3953,26 @@ const i18nData = {
     "tr": "Tüm arayüzü ölçeklendir (ayarlamak için Cmd/Ctrl +/-, sıfırlamak için Cmd/Ctrl 0)",
     "uk": "Масштабувати весь інтерфейс (Cmd/Ctrl +/- для налаштування, Cmd/Ctrl 0 для скидання)"
   },
+  "ui.displayScale.browserHint": {
+    "zh": "浏览器缩放快捷键:按住键盘 {mod} 键,再按 + 放大、按 − 缩小、按 0 复位",
+    "en": "Browser zoom shortcut: hold the {mod} key, then press + to zoom in, − to zoom out, 0 to reset",
+    "zh-TW": "瀏覽器縮放快捷鍵:按住鍵盤 {mod} 鍵,再按 + 放大、按 − 縮小、按 0 復位",
+    "ko": "브라우저 확대/축소 단축키: 키보드 {mod} 키를 누른 채 + 확대, − 축소, 0 초기화",
+    "ja": "ブラウザのズームショートカット:キーボードの {mod} キーを押しながら + で拡大、− で縮小、0 でリセット",
+    "de": "Browser-Zoom-Tastenkürzel: {mod}-Taste gedrückt halten, dann + zum Vergrößern, − zum Verkleinern, 0 zum Zurücksetzen",
+    "es": "Atajo de teclado para el zoom del navegador: mantén pulsada la tecla {mod} y pulsa + para acercar, − para alejar, 0 para restablecer",
+    "fr": "Raccourci clavier de zoom du navigateur : maintenez la touche {mod}, puis appuyez sur + pour agrandir, − pour réduire, 0 pour réinitialiser",
+    "it": "Scorciatoia da tastiera per lo zoom del browser: tieni premuto il tasto {mod}, poi premi + per ingrandire, − per ridurre, 0 per reimpostare",
+    "da": "Tastaturgenvej til browser-zoom: hold {mod}-tasten nede, og tryk på + for at zoome ind, − for at zoome ud, 0 for at nulstille",
+    "pl": "Skrót klawiszowy powiększenia przeglądarki: przytrzymaj klawisz {mod}, a następnie naciśnij + aby powiększyć, − aby pomniejszyć, 0 aby zresetować",
+    "ru": "Сочетание клавиш масштаба браузера: удерживая клавишу {mod}, нажмите + для увеличения, − для уменьшения, 0 для сброса",
+    "ar": "اختصار لوحة المفاتيح لتكبير المتصفح: اضغط مع الاستمرار على مفتاح {mod} ثم اضغط + للتكبير، − للتصغير، 0 لإعادة التعيين",
+    "no": "Hurtigtast for nettleserzoom: hold inne {mod}-tasten, og trykk + for å zoome inn, − for å zoome ut, 0 for å tilbakestille",
+    "pt-BR": "Atalho de teclado para o zoom do navegador: segure a tecla {mod} e pressione + para ampliar, − para reduzir, 0 para redefinir",
+    "th": "คีย์ลัดซูมของเบราว์เซอร์: กดปุ่ม {mod} ค้างไว้ แล้วกด + เพื่อขยาย, − เพื่อย่อ, 0 เพื่อรีเซ็ต",
+    "tr": "Tarayıcı yakınlaştırma klavye kısayolu: {mod} tuşunu basılı tutun, ardından büyütmek için +, küçültmek için −, sıfırlamak için 0 tuşuna basın",
+    "uk": "Комбінація клавіш масштабування браузера: утримуючи клавішу {mod}, натисніть + для збільшення, − для зменшення, 0 для скидання"
+  },
   "ui.settings": {
     "zh": "偏好设置",
     "en": "Preferences",

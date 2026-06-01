@@ -1,4 +1,18 @@
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webFrame } = require('electron');
+
+// 整体显示缩放:Electron 用真·原生缩放(webFrame.setZoomFactor)而非 CSS zoom,
+// 避免 Chromium 128 标准化 CSS zoom 的「局部 vs 可视」坐标空间分裂(终端 fit / 拖拽分隔条
+// / 100vh 等一连串错位)。浏览器端无此 API,改由用户用浏览器原生快捷键缩放(renderer 据
+// window.tabBridge.setZoomFactor 是否存在区分平台)。
+//
+// 首屏抢占:页面脚本执行前同步从 localStorage 读上次档位并应用,避免 100% 渲染后再跳变
+// (等价于旧 index.html inline boot script,只是换成原生缩放)。
+try {
+  const n = Number(localStorage.getItem('ccv_displayScale'));
+  if (Number.isFinite(n) && n >= 50 && n <= 200 && n !== 100) {
+    webFrame.setZoomFactor(n / 100);
+  }
+} catch {}
 
 // Bridge for chat content WebContentsView (each tab's main UI).
 // Exposed under window.tabBridge so the renderer can react to global approval signals
@@ -28,4 +42,7 @@ contextBridge.exposeInMainWorld('tabBridge', {
   // 把审批偏好推给 main 进程(仅 notifyOnlyWhenHidden 影响 main 的 OS Notification 决策)。
   // hydrate 时和用户每次切换都调一次;非 electron 环境下 window.tabBridge 不存在,renderer 已用可选链兜底。
   setApprovalPref: (prefs) => ipcRenderer.send('set-approval-pref', prefs),
+  // 整体显示缩放(原生)。f ∈ [0.5, 2.0](见 displayScaleHelper 预设 50–200)。renderer 用本方法
+  // 是否存在(window.tabBridge.setZoomFactor)判定「Electron 桌面 → 显示下拉」vs「浏览器 → (?) 提示」。
+  setZoomFactor: (f) => { try { webFrame.setZoomFactor(f); } catch {} },
 });

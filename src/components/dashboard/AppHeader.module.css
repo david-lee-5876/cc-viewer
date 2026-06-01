@@ -216,6 +216,13 @@
   font-size: 14px;
 }
 
+/* 浏览器端「显示大小」行的 (?) 帮助图标——对齐右侧、低调灰、悬浮提示原生缩放快捷键 */
+.settingsHelpIcon {
+  font-size: 16px;
+  color: var(--text-disabled);
+  cursor: help;
+}
+
 .settingsDivider {
   border-top: 1px solid var(--border-primary);
   margin: 12px 0;

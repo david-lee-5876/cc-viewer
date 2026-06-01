@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.6.288 (2026-06-01)
+
+- refactor(ui): 「显示大小」弃用 CSS zoom——Electron 改用原生 `webFrame.setZoomFactor`(preload 暴露 + 首屏从 localStorage 抢占),纯浏览器不再提供下拉、改在该行显示 (?) 提示用户用浏览器自带快捷键缩放(按 Mac ⌘ / Windows Ctrl 区分);Cmd/Ctrl +/- 键盘缩放仅 Electron 拦截,浏览器交还原生。规避 Chromium 128 标准化 CSS zoom 的坐标空间分裂(终端 cols/rows 不跟随、左右拖拽分隔条错位等),`ui.displayScale.browserHint` 补 18 语言
+
 ## 1.6.287 (2026-05-31)
 
 - fix(ui): 「显示大小」CSS zoom 缩放后主框架底部留缝 / 顶部被切——根容器 `.layout` 由 `height:100vh` 改为 `height:100%`,并在 `global.css` 补齐 `html,body,#root{height:100%}` 高度链(百分比高度随 zoom 计算,vh 始终等于未缩放整屏才是留缝根因);顺带 `.loadingOverlay`/`.dragOverlay` 由 `100vw/100vh` 改 `100%`;移动端 `.mobileCLIRoot` 不受影响(不缩放)

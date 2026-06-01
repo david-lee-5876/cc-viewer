@@ -19,6 +19,17 @@ export const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent) || _isIPadOS;
 // Electron preload 在页面加载前注入 window.electronAPI，模块初始化时计算即可。
 export const isElectron = typeof window !== 'undefined' && !!window.electronAPI;
 
+// 是否具备「原生整体缩放」能力 = 运行在 Electron 的 tab-content WebContentsView 内。
+// 注意:tab content 注入的是 window.tabBridge(非 window.electronAPI，后者只在 workspace 视图)，
+// 故这里以 tabBridge.setZoomFactor 是否存在为准。为 true → 显示「显示大小」预设下拉(走 webFrame
+// .setZoomFactor 原生缩放);为 false(纯浏览器)→ 改显 (?) 提示用户用浏览器自带快捷键缩放。
+export const hasNativeZoom = typeof window !== 'undefined'
+  && typeof window.tabBridge?.setZoomFactor === 'function';
+
+// Mac(⌘)vs 其它(Ctrl)——仅用于浏览器缩放提示文案选对修饰键。
+export const isMac = typeof navigator !== 'undefined'
+  && /Mac/i.test(navigator.platform || navigator.userAgent || '');
+
 if (isPad) {
   document.documentElement.classList.add('pad-mode');
 }

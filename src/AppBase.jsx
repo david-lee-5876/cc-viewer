@@ -2,7 +2,7 @@ import React from 'react';
 import { ConfigProvider, theme, Modal, Spin, Button, message } from 'antd';
 import { uploadFileAndGetPath } from './components/terminal/TerminalPanel';
 import { DeleteOutlined, ReloadOutlined } from '@ant-design/icons';
-import { isMobile, isPad } from './env';
+import { isMobile, isPad, hasNativeZoom } from './env';
 import WorkspaceList from './components/dashboard/WorkspaceList';
 import OpenFolderIcon from './components/common/OpenFolderIcon';
 import LogTable from './components/viewers/LogTable';
@@ -105,7 +105,7 @@ class AppBase extends React.Component {
       autoApproveSeconds: 0, // 自动审批倒计时秒数，0=关闭
       logDir: '',
       themeColor: 'light',
-      displayScale: 100, // 整体显示缩放百分比(100=原始大小),桌面端经 CSS zoom 作用于整个界面
+      displayScale: 100, // 整体显示缩放百分比(100=原始大小),仅 Electron 桌面经 webFrame.setZoomFactor 原生缩放;浏览器交由原生快捷键
 
       claudeMissing: false,
       updateModalVisible: false,
@@ -381,8 +381,9 @@ class AppBase extends React.Component {
   }
 
   componentDidMount() {
-    // 全局键盘缩放监听(Cmd/Ctrl +/-/0);unmount 时按同一 ref 卸载。
-    window.addEventListener('keydown', this._onScaleKeydown);
+    // 全局键盘缩放监听(Cmd/Ctrl +/-/0)仅 Electron 注册——驱动原生 setZoomFactor 并与下拉同步。
+    // 纯浏览器**不**注册,把 Cmd/Ctrl +/- 交还浏览器原生缩放(不拦截)。unmount 时按同一 ref 卸载。
+    if (hasNativeZoom) window.addEventListener('keydown', this._onScaleKeydown);
     // claude-settings / preferences fetch 由 SettingsProvider 集中触发;
     // 这里仅订阅其 Promise,把字段同步到本地 state(沿用现有 13+ 个 setState 消费链路)。
     this.context._claudeSettingsReady.then(data => {
@@ -1794,18 +1795,21 @@ class AppBase extends React.Component {
   };
 
   /**
-   * 整体显示缩放收口：state / <html style.zoom> / localStorage 三处镜像同步。
-   * 用 CSS zoom(而非 transform: scale)——zoom 能正确缩放 fixed 元素与 antd portal,
-   * 行为等同 Chrome 浏览器缩放。移动端已对容器单独施加 zoom:0.6,这里跳过以免叠乘。
+   * 整体显示缩放收口：state / 原生缩放(webFrame.setZoomFactor)/ localStorage 三处同步。
+   * 仅 Electron 桌面生效——用真·原生缩放(等同浏览器 Cmd/Ctrl +/-),避开 CSS zoom 的坐标空间分裂。
+   * 纯浏览器无 JS API 设原生缩放,该档位不渲染下拉而提示用户用浏览器快捷键,故 hasNativeZoom=false 时早返回。
    * @param {number} pct 目标百分比
    * @param {{persistPref?: boolean}} opts persistPref=true 时写回 preferences.json
    */
   _applyDisplayScale = (pct, opts = {}) => {
-    if (isMobile && !isPad) return; // 桌面端专用,移动端保持其自有缩放
+    // 「显示大小」仅 Electron 桌面有效——经 webFrame.setZoomFactor 做真·原生缩放(不再用 CSS zoom,
+    // 后者会引发 Chromium 128 标准化 zoom 的坐标空间分裂)。纯浏览器无法用 JS 设原生缩放,该档位
+    // 不渲染下拉、改提示用户用浏览器快捷键,故这里直接早返回。
+    if (!hasNativeZoom) return;
     const { persistPref = false } = opts;
     const scale = snapToPreset(pct);
     if (this.state.displayScale !== scale) this.setState({ displayScale: scale });
-    try { document.documentElement.style.zoom = String(scale / 100); } catch {}
+    try { window.tabBridge.setZoomFactor(scale / 100); } catch {}
     try { localStorage.setItem('ccv_displayScale', String(scale)); } catch {}
     if (persistPref) this.context.updatePreferences({ displayScale: scale });
   };
