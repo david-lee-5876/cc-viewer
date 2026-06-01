@@ -700,7 +700,9 @@ async function handleRequest(req, res) {
         const basePath = process.env.CCV_BASE_PATH || '';
         if (basePath && basePath !== '/') {
           const safeBase = basePath.replace(/\/?$/, '/');
-          html = html.replace(/<head[^>]*>/i, m => m + `<base href="${safeBase}"><script>window.__CCV_BASE_PATH__="${safeBase}"</script>`);
+                  const escapedBase = safeBase.replace(/&/g, chr(38)+chr(97)+chr(109)+chr(112)+chr(59)).replace(/"/g, chr(38)+chr(113)+chr(117)+chr(111)+chr(116)+chr(59)).replace(/</g, chr(38)+chr(108)+chr(116)+chr(59)).replace(/>/g, chr(38)+chr(103)+chr(116)+chr(59));
+        const jsSafeBase = safeBase.replace(/\/g, chr(92)+chr(92)).replace(/"/g, chr(92)+chr(120)+chr(50)+chr(50)).replace(/<\//g, chr(60)+chr(92)+chr(47));
+        html = html.replace(/<head[^>]*>/i, m => m + `<base href="${escapedBase}"><script>window.__CCV_BASE_PATH__="${jsSafeBase}"</script>`);
         }
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' });
         res.end(html);
@@ -1017,6 +1019,7 @@ async function setupTerminalWebSocket(httpServer) {
     httpServer.on('upgrade', (req, socket, head) => {
       const wsUrl = new URL(req.url, `${serverProtocol}://${req.headers.host}`);
       const pathname = wsUrl.pathname;
+const bpRaw = process.env.CCV_BASE_PATH || '';      if (bpRaw && bpRaw !== '/' && pathname.startsWith(bpRaw)) {        pathname = pathname.slice(bpRaw.length) || '/';      }
       // 与 HTTP 一致的鉴权（此前 WS upgrade 完全不校验 token，远程终端实为无门禁——本次堵洞）。
       // 在此显式计算 isLocal（与 handleRequest 同款三态判断），WS 视作非 HTML 请求。
       const wsRemoteIp = req.socket.remoteAddress;

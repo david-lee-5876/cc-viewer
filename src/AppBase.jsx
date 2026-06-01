@@ -12,7 +12,7 @@ import { formatTokenCount, filterRelevantRequests, isRelevantRequest, appendCach
 import { snapToPreset, stepPreset } from './utils/displayScaleHelper';
 import { getProjectAlias, subscribeToAlias } from './utils/projectAlias';
 import { isMainAgent, isPostClearCheckpoint } from './utils/contentFilter';
-import { apiUrl } from './utils/apiUrl';
+import { apiUrl, getBasePath } from './utils/apiUrl';
 import { playEvent as playVoiceEvent, unlockAudio, setTurnEndCooldownMs } from './utils/voicePackPlayer';
 import { getDefaultBindingsForLocale as vpDefaultBindingsForLocale } from '../server/lib/voice-pack-events';
 import { mergeVoicePackInto } from '../server/lib/approval-modal-prefs';
@@ -2054,7 +2054,7 @@ class AppBase extends React.Component {
 
   handleOpenLogFile = async (file) => {
     // 优先使用当前 URL 的 token（远程访问时已有）；本地访问时从 /api/local-url 获取带 token 的基础 URL
-    let base = `${window.location.protocol}//${window.location.host}`;
+    let base = `${window.location.protocol}//${window.location.host}${getBasePath()}`;
     let token = new URLSearchParams(window.location.search).get('token');
     if (!token) {
       try {
