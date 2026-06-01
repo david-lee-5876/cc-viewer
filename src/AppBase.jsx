@@ -279,6 +279,7 @@ class AppBase extends React.Component {
       expandThinking: !!prefs.expandThinking,
       expandDiff: !!prefs.expandDiff,
       showFullToolContent: !!prefs.showFullToolContent,
+      onlyCurrentSession: !!prefs.onlyCurrentSession,
       showThinkingSummaries: !!cs.showThinkingSummaries,
     };
   }
@@ -1851,6 +1852,10 @@ class AppBase extends React.Component {
 
   handleShowFullToolContentChange = (checked) => {
     this.context.updatePreferences({ showFullToolContent: checked });
+  };
+
+  handleOnlyCurrentSessionChange = (checked) => {
+    this.context.updatePreferences({ onlyCurrentSession: checked });
   };
 
   handleFilterIrrelevantChange = (checked) => {

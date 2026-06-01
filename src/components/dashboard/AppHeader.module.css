@@ -221,6 +221,7 @@
   font-size: 16px;
   color: var(--text-disabled);
   cursor: help;
+  margin-left: 4px;
 }
 
 .settingsDivider {

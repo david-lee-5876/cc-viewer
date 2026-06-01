@@ -948,6 +948,13 @@
   min-width: 0;
 }
 
+/* 设置项标签后的 (?) 帮助图标（移动端 click 触发 Tooltip） */
+.mobileSettingsHelpIcon {
+  margin-left: 6px;
+  font-size: 15px;
+  color: var(--text-disabled);
+}
+
 /* Mobile prompt panel */
 .mobilePromptEmpty {
   text-align: center;

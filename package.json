@@ -1,6 +1,6 @@
 {
   "name": "cc-viewer",
-  "version": "1.6.289",
+  "version": "1.6.290",
   "description": "Claude Code Logger visualization management tool",
   "license": "MIT",
   "main": "server.js",
@@ -18,6 +18,10 @@
     "build": "node build.js",
     "build:sourcemap": "CCV_SOURCEMAP=1 node build.js",
     "start": "node server.js",
+    "lint:control-bytes": "node scripts/check-no-control-bytes.js",
+    "pretest": "npm run lint:control-bytes",
+    "pretest:coverage": "npm run lint:control-bytes",
+    "pretest:coverage:html": "npm run lint:control-bytes",
     "test": "CCV_LOG_DIR=tmp node --test --test-force-exit",
     "test:coverage": "CCV_LOG_DIR=tmp node --test --test-force-exit --experimental-test-coverage --test-coverage-include='server/**/*.js' --test-coverage-include='src/utils/**/*.js' --test-coverage-include='*.js'",
     "test:coverage:html": "CCV_LOG_DIR=tmp c8 --reporter=text-summary --reporter=html node --test",

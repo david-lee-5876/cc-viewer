@@ -10,6 +10,7 @@ import GitChanges from '../git/GitChanges';
 import GitDiffView from '../git/GitDiffView';
 import ToolApprovalPanel from '../approval/ToolApprovalPanel';
 import { getModelInfo, getEffectiveModel, resolveProducerModelInfo, AUTO_APPROVE_INSTANT } from '../../utils/helpers';
+import { formatPromptNavTime } from '../../utils/formatters';
 import { getTeammateAvatar } from '../../utils/teammateAvatars';
 import { isSystemText, classifyUserContent, isMainAgent, isTeammate, resolveTeammateNames } from '../../utils/contentFilter';
 import { classifyRequest, formatRequestTag, formatTeammateLabel } from '../../utils/requestType';
@@ -443,6 +444,7 @@ class ChatView extends React.Component {
       nextProps.collapseToolResults !== this.props.collapseToolResults ||
       nextProps.expandThinking !== this.props.expandThinking ||
       nextProps.showFullToolContent !== this.props.showFullToolContent ||
+      nextProps.onlyCurrentSession !== this.props.onlyCurrentSession ||
       nextProps.scrollToTimestamp !== this.props.scrollToTimestamp ||
       nextProps.cliMode !== this.props.cliMode ||
       nextProps.terminalVisible !== this.props.terminalVisible ||
@@ -727,7 +729,14 @@ class ChatView extends React.Component {
       // subAgent / teammate 的 tool_result 只走 requests 路径（不进 mainAgentSessions），
       // 必须在这里也调一次刷新检查，否则它们的文件修改完全感知不到
       this._toolFileMonitor.check();
-    } else if (prevProps.collapseToolResults !== this.props.collapseToolResults || prevProps.expandThinking !== this.props.expandThinking) {
+    } else if (prevProps.collapseToolResults !== this.props.collapseToolResults
+            || prevProps.expandThinking !== this.props.expandThinking
+            || prevProps.showFullToolContent !== this.props.showFullToolContent
+            || prevProps.showThinkingSummaries !== this.props.showThinkingSummaries
+            || prevProps.onlyCurrentSession !== this.props.onlyCurrentSession) {
+      // 这些显示开关只改 buildAllItems 的输出，不改 mainAgentSessions/requests 引用，故上面两条增量
+      // 分支不会触发。allItems 缓存在 state（render 读 state.allItems），必须在此显式重建，否则切换开关
+      // 后 SCU 虽放行 re-render，画面仍是旧 allItems（[对话] 与派生它的 [用户 Prompt 导航] 都不刷新）。
       const rawItems = this.buildAllItems();
       const allItems = this._applyMobileSlice(rawItems);
       this.setState({ allItems, lastResponseItems: this._lastResponseItems, visibleCount: allItems.length });
@@ -871,6 +880,13 @@ class ChatView extends React.Component {
   // 保留方法名（queueNext L759 仍在调）；常规吸底与跳转分流，常规吸底走 controller.writeUnderLock
   scrollToBottom() {
     const shouldStick = this.state.stickyBottom;
+    // scrollToTimestamp 的目标不在当前渲染集合内（典型：被「仅展示当前会话」隐藏到更早 session —
+    // tsItemMap 不含该 ts → _scrollTargetIdx 为 null、目标 ref 也未绑定）：下面两个平台跳转分支都不会
+    // 命中，父层 chatScrollToTs 便永远清不掉，后续对任意 ts 的跳转全部失效。这里兜底清除该请求
+    // （不跳转，继续按常规吸底渲染当前会话）。
+    if (this.props.scrollToTimestamp && this._scrollTargetIdx == null && !this._scrollTargetRef.current) {
+      if (this.props.onScrollTsDone) this.props.onScrollTsDone();
+    }
     // 移动端 Virtuoso：跳转分支
     if (useVirtuoso && this.virtuosoRef.current) {
       if (this._scrollTargetIdx != null) {
@@ -1347,7 +1363,7 @@ class ChatView extends React.Component {
   }
 
   buildAllItems() {
-    const { mainAgentSessions, requests, collapseToolResults, expandThinking, showFullToolContent, onViewRequest } = this.props;
+    const { mainAgentSessions, requests, collapseToolResults, expandThinking, showFullToolContent, onlyCurrentSession, onViewRequest } = this.props;
     const isHistoryLog = this._getIsHistoryLog();
     this._lastResponseItems = null;
     this._lastResponseAskQuestions = null;
@@ -1493,7 +1509,8 @@ class ChatView extends React.Component {
     }
 
     // Server-side pagination: "load earlier conversations" button
-    if (this.props.hasMoreHistory || this.props.loadingMore) {
+    // 仅展示当前会话时隐藏跨会话的「加载更早」按钮（更早内容本就不展示）。
+    if (!onlyCurrentSession && (this.props.hasMoreHistory || this.props.loadingMore)) {
       allItems.push(
         <div key="load-more-history" className={styles.loadMoreWrap}>
           {this.props.loadingMore ? (
@@ -1511,15 +1528,27 @@ class ChatView extends React.Component {
     }
 
     let subIdx = 0;
+    // 仅展示当前会话：跳过更早 session 的 SubAgent entries，避免它们 bleed 进当前 session 顶部
+    //（下方 forEach 对更早 session 直接 return，不会推进 subIdx，故这里先把游标快进到当前 session 起点）。
+    if (onlyCurrentSession && mainAgentSessions.length > 1) {
+      const shown = mainAgentSessions[mainAgentSessions.length - 1];
+      const shownStart = shown && shown.messages && shown.messages[0] && shown.messages[0]._timestamp;
+      if (shownStart) {
+        while (subIdx < subAgentEntries.length && subAgentEntries[subIdx].timestamp < shownStart) subIdx++;
+      }
+    }
     // 跨 session + LR 跟踪当前活跃的 ExitPlanMode tool_use id（最末非 null 即为当前 pending）。
     // 写入 this._currentLastPendingPlanId 供 componentDidUpdate 派生 pendingPtyPlan 用。
     let buildLpid = null;
 
+    const startSi = onlyCurrentSession ? mainAgentSessions.length - 1 : 0;
     mainAgentSessions.forEach((session, si) => {
-      if (si > 0) {
+      // 仅展示当前会话：跳过当前(最末)session 之前的全部 session（含其冷占位「加载」按钮，见下方 _cold 分支）。
+      if (si < startSi) return;
+      if (si > startSi) {
         allItems.push(
           <Divider key={`session-div-${si}`} className={styles.sessionDivider}>
-            <Text className={styles.sessionDividerText}>Session</Text>
+            <Text className={styles.sessionDividerText}>{t('ui.session')}</Text>
           </Divider>
         );
       }
@@ -2287,7 +2316,7 @@ class ChatView extends React.Component {
         // handlePromptOptionClick 的 _promptSubmitting(500ms) 不足以挡住「PTY 慢回显/重绘期间
         // 同一 prompt 被反复检测」——用 prompt 签名 + 短时窗去重，避免二次 ↓↵ 打进已变化的焦点。
         if (this.props.autoApproveSeconds === AUTO_APPROVE_INSTANT) {
-          const sig = `${prompt.question} ${(prompt.options || []).map(o => o.text).join('')}`;
+          const sig = `${prompt.question}\x00${(prompt.options || []).map(o => o.text).join('\x01')}`;
           const now = Date.now();
           const dup = this._autoAllowedPtySig === sig && (now - (this._autoAllowedPtyAt || 0)) < AUTO_ALLOW_PTY_DEDUPE_MS;
           if (!dup) {
@@ -3098,6 +3127,19 @@ class ChatView extends React.Component {
     const prompts = [];
     const seen = new Set();
 
+    // 会话分界：用权威的 mainAgentSessions 把每条 prompt 的 _timestamp 映射到所属 session 序号。
+    // 不依赖主视图的 <Divider>（其在角色过滤时会被滤掉），保证导航里始终能标出会话边界。
+    const sessions = this.props.mainAgentSessions || [];
+    const tsToSession = new Map();
+    for (let si = 0; si < sessions.length; si++) {
+      const msgs = sessions[si].messages;
+      if (!Array.isArray(msgs)) continue;
+      for (const m of msgs) {
+        const ts = m && m._timestamp;
+        if (ts != null && !tsToSession.has(ts)) tsToSession.set(ts, si);
+      }
+    }
+
     for (let i = 0; i < visible.length; i++) {
       const props = visible[i].props;
       if (!props || props.role !== 'user') continue;
@@ -3117,21 +3159,40 @@ class ChatView extends React.Component {
       seen.add(key);
       const display = text.length > 80 ? text.substring(0, 80) + '...' : text;
       // 使用 visible 索引作为定位标识（兼容无 timestamp 的遗留消息）
-      prompts.push({ display, visibleIdx: i, timestamp: props.timestamp || null });
+      const sessionIdx = (props.timestamp != null && tsToSession.has(props.timestamp))
+        ? tsToSession.get(props.timestamp) : null;
+      prompts.push({ display, visibleIdx: i, timestamp: props.timestamp || null, sessionIdx });
     }
 
     if (prompts.length === 0) { this._navCacheVisible = visible; this._navCacheResult = null; return null; }
+
+    // 标记跨 session 的 prompt（其前插入会话分隔线）。session 未知（无 ts）的 prompt 不打断链路。
+    let lastSessionIdx = null;
+    for (const p of prompts) {
+      if (p.sessionIdx == null) continue;
+      if (lastSessionIdx != null && p.sessionIdx !== lastSessionIdx) p.newSession = true;
+      lastSessionIdx = p.sessionIdx;
+    }
 
     const result = (
       <div className={styles.userPromptNavWrap}>
         <div className={styles.userPromptNavTitle}>{t('ui.userPromptNav')} ({prompts.length})</div>
         <div className={styles.userPromptNavList}>
-          {prompts.map((p, i) => (
-            <div key={p.visibleIdx} className={styles.userPromptNavItem}
-              onClick={() => this._scrollToUserPrompt(p.visibleIdx, p.timestamp)}>
-              {p.display}
-            </div>
-          ))}
+          {prompts.map((p) => {
+            const timeStr = formatPromptNavTime(p.timestamp);
+            return (
+              <React.Fragment key={p.visibleIdx}>
+                {p.newSession && (
+                  <div className={styles.userPromptNavSessionSep}><span>{t('ui.session')}</span></div>
+                )}
+                <div className={styles.userPromptNavItem}
+                  onClick={() => this._scrollToUserPrompt(p.visibleIdx, p.timestamp)}>
+                  {timeStr && <span className={styles.userPromptNavTime}>{timeStr}</span>}
+                  <span className={styles.userPromptNavText}>{p.display}</span>
+                </div>
+              </React.Fragment>
+            );
+          })}
         </div>
       </div>
     );
@@ -3187,7 +3248,9 @@ class ChatView extends React.Component {
     }
 
     const noMainAgent = !mainAgentSessions || mainAgentSessions.length === 0;
-    const noData = noMainAgent && (!allItems || allItems.length === 0);
+    // 仅展示当前会话开启、且当前 session 暂无可渲染项（如 /clear 后新 session 首条消息尚未到达）时，
+    // 复用既有空/加载占位，避免空白面板（下方 fileLoading 守卫已在初始加载期抑制 Empty→内容 闪烁）。
+    const noData = (!allItems || allItems.length === 0) && (noMainAgent || this.props.onlyCurrentSession);
 
     if (noData && !cliMode) {
       // 初始 SSE 加载期间不显示"暂无对话"，避免 Empty→内容 的两阶段闪烁

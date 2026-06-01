@@ -223,6 +223,8 @@ class ChatMessage extends React.Component {
       const compact = !showFullToolContent && !isHistoryLog;
       const hms = `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
       if (compact) return hms;
+      // 完整模式格式须与 utils/formatters.js 的 formatPromptNavTime 保持一致
+      //（用户 Prompt 导航复用同一 "MM-DD HH:MM:SS" 格式）；改此处须同步那边。
       return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${hms}`;
     } catch { return null; }
   }

@@ -9,6 +9,15 @@
 - feat(im): 通用配置 API `/api/im/:platform/status|config|test`，`/api/preferences` 剥离所有 IM 平台密钥
 - feat(ui): 消息设置改为描述符驱动（`imPlatforms.js` 注册表），新增飞书/企业微信/Discord 设置面板、状态徽标与品牌图标；未选中 tab 仅图标置灰、选中态显品牌色边框
 - fix(deps): 升级 ws 至 8.21、override axios 1.16.1 / qs 6.15.2，修复飞书 SDK 传递依赖的安全告警
+- feat(ui): 用户 Prompt 导航每条前增加时间列（MM-DD HH:MM:SS）
+- feat(ui): 用户 Prompt 导航在跨会话处插入「Session」分隔线标定不同会话；「Session」文案抽成 i18n（`ui.session`，18 语言），主聊天区会话分隔线同步改用该 key
+- fix(src): 源码裸控制字节改为转义（`ChatView.jsx` 的 NUL/0x01、`TerminalPanel.jsx` 注释里的 ESC、`projectAlias.js` 注释），运行时字节不变，避免文件被 grep/ripgrep/编辑器判定为二进制而搜不到
+- chore(ci): 新增 `scripts/check-no-control-bytes.js` 守卫（`pretest` / `pretest:coverage` 钩子），拒绝源码出现裸 C0 控制字节（TAB/LF/CR 除外）；非 git 环境优雅跳过，含单测
+- feat(ui): 偏好「对话展示」新增「仅展示当前会话」(默认关)，开启后[对话]仅渲染当前(最末)mainAgent 会话，隐藏更早会话、分隔线与「加载更早」按钮（`ui.onlyCurrentSession`，18 语言）
+- fix(ui): 切换「仅展示当前会话」开关即时刷新[对话]与[用户 Prompt 导航]；顺带修复同源的 showFullToolContent / showThinkingSummaries 切换不刷新
+- feat(ui):「仅展示当前会话」标签加 (?) 帮助提示，说明切换会话(新开 / `/clear` / `/resume`)时的展示行为（桌面悬浮 / 移动端点按；`ui.onlyCurrentSession.help`，18 语言）
+- fix(ui):「仅展示当前会话」下跳转到被隐藏会话的消息时兜底清除 `chatScrollToTs`，避免其卡死导致后续跳转失效
+- chore(ci): 控制字节守卫改扫「已跟踪 + 未忽略的未跟踪」文件，新文件 `git add` 前也纳入检查
 
 ## 1.6.288 (2026-06-01)
 

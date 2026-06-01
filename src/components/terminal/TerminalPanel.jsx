@@ -678,7 +678,7 @@ class TerminalPanel extends React.Component {
     }
 
     // Shift+Enter: 发 ESC+CR（Alt+Enter 的 escape 码），和 Claude Code `/terminal-setup`
-    // 写进 VS Code/Cursor keybindings 的 `\r` 等价。Claude Code CLI 识别这个序列为
+    // 写进 VS Code/Cursor keybindings 的 `\x1b\r` 等价。Claude Code CLI 识别这个序列为
     // "插入换行而非提交"。之前用 bracketed-paste-LF 对老版可能有效，2.x 版已不兼容。
     this.terminal.attachCustomKeyEventHandler((e) => {
       if (e.type === 'keydown' && e.key === 'Enter' && e.shiftKey) {

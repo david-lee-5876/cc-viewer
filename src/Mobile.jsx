@@ -1,6 +1,6 @@
 import React from 'react';
-import { ConfigProvider, Spin, Button, Badge, Switch, Select, Modal, message, Radio } from 'antd';
-import { BranchesOutlined, DownloadOutlined, DeleteOutlined, RollbackOutlined, ReloadOutlined, UploadOutlined, FileZipOutlined } from '@ant-design/icons';
+import { ConfigProvider, Spin, Button, Badge, Switch, Select, Modal, message, Radio, Tooltip } from 'antd';
+import { BranchesOutlined, DownloadOutlined, DeleteOutlined, RollbackOutlined, ReloadOutlined, UploadOutlined, FileZipOutlined, QuestionCircleOutlined } from '@ant-design/icons';
 import AppBase, { styles, OPTIMISTIC_CLEAR_PERCENT } from './AppBase';
 import { isIOS, isPad, setViewMode } from './env';
 import { isMainAgent, isSystemText, classifyUserContent } from './utils/contentFilter';
@@ -888,6 +888,7 @@ class Mobile extends AppBase {
                     collapseToolResults={prefs.collapseToolResults}
                     expandThinking={prefs.expandThinking}
                     showFullToolContent={prefs.showFullToolContent}
+                    onlyCurrentSession={prefs.onlyCurrentSession}
                     showThinkingSummaries={prefs.showThinkingSummaries}
                     onViewRequest={null}
                     scrollToTimestamp={null}
@@ -1189,6 +1190,18 @@ class Mobile extends AppBase {
                     />
                   </div>
                 )}
+                <div className={styles.mobileSettingsRow}>
+                  <span className={styles.mobileSettingsLabel}>
+                    {t('ui.onlyCurrentSession')}
+                    <Tooltip title={t('ui.onlyCurrentSession.help')} trigger="click">
+                      <QuestionCircleOutlined className={styles.mobileSettingsHelpIcon} />
+                    </Tooltip>
+                  </span>
+                  <Switch
+                    checked={prefs.onlyCurrentSession}
+                    onChange={this.handleOnlyCurrentSessionChange}
+                  />
+                </div>
               </div>
               <div className={styles.mobileSettingsGroup}>
                 <div className={styles.mobileSettingsSectionTitle}>{t('ui.logSettings')}</div>

@@ -271,11 +271,28 @@
 }
 
 .userPromptNavItem {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
   padding: 6px 10px;
   font-size: 12px;
   color: var(--text-secondary);
   cursor: pointer;
   border-bottom: 1px solid var(--border-primary);
+}
+
+/* 时间列：定宽不收缩、等宽数字对齐；颜色继承行（hover 时随行变白），用 opacity 弱化。 */
+.userPromptNavTime {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  opacity: 0.7;
+}
+
+.userPromptNavText {
+  flex: 1 1 auto;
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -287,6 +304,29 @@
 }
 
 .userPromptNavItem:last-child {
+  border-bottom: none;
+}
+
+/* 会话分隔线：居中的「Session」标签，两侧细线，与主聊天区 .sessionDividerText 同色同字号。 */
+.userPromptNavSessionSep {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  font-size: 11px;
+  color: var(--text-disabled);
+  user-select: none;
+}
+
+.userPromptNavSessionSep::before,
+.userPromptNavSessionSep::after {
+  content: "";
+  flex: 1 1 auto;
+  border-top: 1px solid var(--border-secondary);
+}
+
+/* 紧贴会话分隔线上方那条 item 底边线去掉，避免与分隔线叠在一起显得别扭。 */
+.userPromptNavItem:has(+ .userPromptNavSessionSep) {
   border-bottom: none;
 }
 
