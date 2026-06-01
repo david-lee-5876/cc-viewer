@@ -18,6 +18,8 @@
 - feat(ui):「仅展示当前会话」标签加 (?) 帮助提示，说明切换会话(新开 / `/clear` / `/resume`)时的展示行为（桌面悬浮 / 移动端点按；`ui.onlyCurrentSession.help`，18 语言）
 - fix(ui):「仅展示当前会话」下跳转到被隐藏会话的消息时兜底清除 `chatScrollToTs`，避免其卡死导致后续跳转失效
 - chore(ci): 控制字节守卫改扫「已跟踪 + 未忽略的未跟踪」文件，新文件 `git add` 前也纳入检查
+- refactor(ui): 用户 Prompt 导航纯逻辑抽至 `utils/promptNav.js`；`formatPromptNavTime` 与 `ChatMessage.formatTime` 共用 `formatHms`/`formatMonthDayTime` 原语，去掉「改一处须同步另一处」的手工耦合
+- test: 补 `scanFile`、`buildPromptNavItems` 与时间格式化原语单测
 
 ## 1.6.288 (2026-06-01)
 

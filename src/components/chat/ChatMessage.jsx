@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom';
 import { Collapse, Typography, Radio, Checkbox, Input, Button, Tooltip, Popover, message } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
 import { escapeHtml, truncateText, getSvgAvatar } from '../../utils/helpers';
+import { formatHms, formatMonthDayTime } from '../../utils/formatters';
 import { compactResultPreview } from '../../utils/toolResultCore.js';
 import { extractWebSearchGroups } from '../../utils/webSearchGrouping';
 import { mergeThinkingBlocks } from '../../utils/thinkingMerge';
@@ -218,14 +219,11 @@ class ChatMessage extends React.Component {
     if (!effectiveTs) return null;
     try {
       const d = new Date(effectiveTs);
-      const pad = n => String(n).padStart(2, '0');
       const { showFullToolContent, isHistoryLog } = this.props;
+      // 紧凑模式只显示 HH:MM:SS；完整模式显示 MM-DD HH:MM:SS。两种格式与 utils/formatters 的
+      // formatHms / formatMonthDayTime 同源（formatPromptNavTime 也用后者），无需再手工同步。
       const compact = !showFullToolContent && !isHistoryLog;
-      const hms = `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-      if (compact) return hms;
-      // 完整模式格式须与 utils/formatters.js 的 formatPromptNavTime 保持一致
-      //（用户 Prompt 导航复用同一 "MM-DD HH:MM:SS" 格式）；改此处须同步那边。
-      return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${hms}`;
+      return compact ? formatHms(d) : formatMonthDayTime(d);
     } catch { return null; }
   }
 

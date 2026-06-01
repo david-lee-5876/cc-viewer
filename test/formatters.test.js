@@ -2,7 +2,7 @@
 // so we import the real module directly.
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { formatPromptNavTime } from '../src/utils/formatters.js';
+import { formatPromptNavTime, formatHms, formatMonthDayTime } from '../src/utils/formatters.js';
 
 describe('formatPromptNavTime', () => {
   it('formats a timestamp as "MM-DD HH:MM:SS" in local time', () => {
@@ -35,5 +35,24 @@ describe('formatPromptNavTime', () => {
   it('treats falsy numeric 0 as missing (returns "")', () => {
     // `if (!ts)` short-circuits before `new Date(0)`; 0 is "no timestamp", not the epoch.
     assert.equal(formatPromptNavTime(0), '');
+  });
+});
+
+describe('formatHms / formatMonthDayTime (shared clock primitives)', () => {
+  it('formatHms: zero-padded HH:MM:SS in local time', () => {
+    assert.equal(formatHms(new Date(2026, 0, 3, 4, 5, 9)), '04:05:09');
+    assert.equal(formatHms(new Date(2026, 4, 1, 23, 59, 0)), '23:59:00');
+  });
+
+  it('formatMonthDayTime: zero-padded MM-DD HH:MM:SS in local time', () => {
+    assert.equal(formatMonthDayTime(new Date(2026, 0, 3, 4, 5, 9)), '01-03 04:05:09');
+    assert.equal(formatMonthDayTime(new Date(2026, 11, 25, 8, 7, 6)), '12-25 08:07:06');
+  });
+
+  it('formatPromptNavTime composes formatMonthDayTime (pins the nav↔bubble format invariant)', () => {
+    // The two formatters used to be hand-synced via comments; now both derive from formatMonthDayTime
+    // (ChatMessage.formatTime full-mode also calls it), so this equality guarantees they can't diverge.
+    const d = new Date(2026, 4, 1, 8, 7, 6);
+    assert.equal(formatPromptNavTime(d.toISOString()), formatMonthDayTime(d));
   });
 });

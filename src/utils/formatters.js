@@ -16,16 +16,24 @@ export function formatTimestamp(ts, mobile) {
   return `${ts.slice(0, 4)}-${ts.slice(4, 6)}-${ts.slice(6, 8)} ${ts.slice(9, 11)}:${ts.slice(11, 13)}:${ts.slice(13, 15)}`;
 }
 
+// 共享时钟格式化原语（本地时区，零填充）。formatPromptNavTime（Prompt 导航）与
+// ChatMessage.formatTime（气泡时间）复用同一实现，使「HH:MM:SS」/「MM-DD HH:MM:SS」格式
+// 单一来源、无需再手工同步两处。入参为已构造的 Date。
+const _pad2 = (n) => String(n).padStart(2, '0');
+export function formatHms(d) {
+  return `${_pad2(d.getHours())}:${_pad2(d.getMinutes())}:${_pad2(d.getSeconds())}`;
+}
+export function formatMonthDayTime(d) {
+  return `${_pad2(d.getMonth() + 1)}-${_pad2(d.getDate())} ${formatHms(d)}`;
+}
+
 // formatPromptNavTime 接 ISO 8601 / Date-可解析字符串（消息的 _timestamp，如 ChatView 用户 Prompt
 // 导航传入的 props.timestamp），输出本地时区的 "MM-DD HH:MM:SS"。缺失/非法 → ''。
-// ⚠ 格式须与 ChatMessage.formatTime 的「完整模式」分支保持一致（导航时间要和气泡时间相同）；
-//   改其一须同步另一处。见 src/components/chat/ChatMessage.jsx formatTime。
 export function formatPromptNavTime(ts) {
   if (!ts) return '';
   try {
     const d = new Date(ts);
     if (isNaN(d.getTime())) return '';
-    const p = n => String(n).padStart(2, '0');
-    return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+    return formatMonthDayTime(d);
   } catch { return ''; }
 }
