@@ -325,25 +325,37 @@ class Mobile extends AppBase {
       window.visualViewport.addEventListener('scroll', this._onVisualViewportChange);
       this._onVisualViewportChange();
     }
-    // iPad/侧边栏模式：窗口宽度 > 1400px 时提示切换到全览模式
+    // iPad/侧边栏模式 → 全览(pc) 的切换。
+    // Electron：只跟随右上角开关（device mode 状态），不随窗口宽度变化；挂载时按当前状态对齐。
+    // 浏览器：窗口 ≥ 1400px 时弹框提示切换到全览模式（原行为不变）。
     if (isPad) {
-      this._mqlWide = window.matchMedia('(min-width: 1400px)');
+      const inElectronTab = typeof window !== 'undefined' && !!window.tabBridge;
       this._modeSwitchDialog = null;
-      this._onWideChange = (e) => {
-        if (e.matches) {
-          this._modeSwitchDialog = Modal.confirm({
-            title: t('ui.modeSwitchTitle'),
-            content: t('ui.modeSwitchToFullView'),
-            okText: t('ui.ok'),
-            onOk: () => { this._modeSwitchDialog = null; setViewMode('pc'); },
-            onCancel: () => { this._modeSwitchDialog = null; },
-          });
-        } else if (this._modeSwitchDialog) {
-          this._modeSwitchDialog.destroy();
-          this._modeSwitchDialog = null;
-        }
-      };
-      this._mqlWide.addEventListener('change', this._onWideChange);
+      if (inElectronTab) {
+        this._onDeviceMode = (on) => {
+          const target = on ? 'pad' : 'pc';
+          if (localStorage.getItem('ccv_viewMode') !== target) setViewMode(target);
+        };
+        this._disposeDeviceMode = window.tabBridge.onDeviceModeChange?.(this._onDeviceMode);
+        window.tabBridge.requestDeviceMode?.();
+      } else {
+        this._mqlWide = window.matchMedia('(min-width: 1400px)');
+        this._onWideChange = (e) => {
+          if (e.matches) {
+            this._modeSwitchDialog = Modal.confirm({
+              title: t('ui.modeSwitchTitle'),
+              content: t('ui.modeSwitchToFullView'),
+              okText: t('ui.ok'),
+              onOk: () => { this._modeSwitchDialog = null; setViewMode('pc'); },
+              onCancel: () => { this._modeSwitchDialog = null; },
+            });
+          } else if (this._modeSwitchDialog) {
+            this._modeSwitchDialog.destroy();
+            this._modeSwitchDialog = null;
+          }
+        };
+        this._mqlWide.addEventListener('change', this._onWideChange);
+      }
     }
   }
 
@@ -352,6 +364,7 @@ class Mobile extends AppBase {
       window.visualViewport.removeEventListener('resize', this._onVisualViewportChange);
       window.visualViewport.removeEventListener('scroll', this._onVisualViewportChange);
     }
+    if (this._disposeDeviceMode) { this._disposeDeviceMode(); this._disposeDeviceMode = null; }
     if (this._mqlWide) {
       this._mqlWide.removeEventListener('change', this._onWideChange);
     }

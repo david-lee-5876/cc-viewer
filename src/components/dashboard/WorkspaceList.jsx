@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { List, Button, Input, Empty, Typography, Space, Card, Popconfirm, message, Spin, Modal, Tag } from 'antd';
-import { FolderOpenOutlined, FolderOutlined, DeleteOutlined, PlusOutlined, RocketOutlined, ClockCircleOutlined, DatabaseOutlined, ArrowUpOutlined, BranchesOutlined } from '@ant-design/icons';
+import { Button, Input, Empty, Typography, Space, Card, Popconfirm, message, Spin, Modal, Tag } from 'antd';
+import { FolderOpenOutlined, FolderOutlined, DeleteOutlined, PlusOutlined, RocketOutlined, ClockCircleOutlined, DatabaseOutlined, BranchesOutlined, CloseOutlined } from '@ant-design/icons';
 import { t } from '../../i18n';
 import { apiUrl } from '../../utils/apiUrl';
 import { formatSize } from '../../utils/formatters';
@@ -23,10 +23,10 @@ function timeAgo(isoString) {
 // 目录浏览器 Modal
 function DirBrowser({ open, onClose, onSelect }) {
   const [currentPath, setCurrentPath] = useState('');
-  const [parentPath, setParentPath] = useState(null);
   const [dirs, setDirs] = useState([]);
   const [loading, setLoading] = useState(false);
   const [pathInput, setPathInput] = useState('');
+  const [homePath, setHomePath] = useState('');
 
   const browse = useCallback((path) => {
     setLoading(true);
@@ -38,9 +38,10 @@ function DirBrowser({ open, onClose, onSelect }) {
           message.error(data.error);
         } else {
           setCurrentPath(data.current);
-          setParentPath(data.parent);
           setDirs(data.dirs || []);
           setPathInput(data.current);
+          // 无 path 参数时服务端返回的是 home 目录，记录下来用于面包屑显示 "~"
+          if (!path) setHomePath(data.current);
         }
         setLoading(false);
       })
@@ -59,6 +60,27 @@ function DirBrowser({ open, onClose, onSelect }) {
     if (p) browse(p);
   };
 
+  // 把当前路径拆成可逐级点击的面包屑；home 目录用 "~" 表示
+  const buildCrumbs = () => {
+    const cur = currentPath;
+    if (!cur) return [];
+    const underHome = homePath && (cur === homePath || cur.startsWith(homePath + '/'));
+    const leadLabel = underHome ? '~' : '/';
+    const leadPath = underHome ? homePath : '/';
+    const restStr = underHome
+      ? (cur === homePath ? '' : cur.slice(homePath.length + 1))
+      : cur;
+    const rest = restStr.split('/').filter(Boolean);
+    const tokens = [{ type: 'crumb', label: leadLabel, path: leadPath }];
+    let acc = leadPath;
+    rest.forEach((name, i) => {
+      acc = (acc === '/' ? '' : acc) + '/' + name;
+      if (!(i === 0 && leadLabel === '/')) tokens.push({ type: 'sep' });
+      tokens.push({ type: 'crumb', label: name, path: acc });
+    });
+    return tokens;
+  };
+
   return (
     <Modal
       title={t('ui.workspaces.selectDir')}
@@ -68,19 +90,24 @@ function DirBrowser({ open, onClose, onSelect }) {
       width={600}
       styles={{ body: { padding: '12px 0' } }}
     >
-      {/* 当前路径 + 上级按钮 */}
+      {/* 当前路径（逐级可点击的面包屑）；逐级回退用面包屑即可，不再放「上一级」箭头按钮 */}
       <div className={styles.dirPathHeader}>
-        <Button
-          type="text"
-          icon={<ArrowUpOutlined />}
-          disabled={!parentPath}
-          onClick={() => parentPath && browse(parentPath)}
-          size="small"
-        />
-        <Text className={styles.dirCurrentPath}>
-          <FolderOpenOutlined className={styles.dirFolderIcon} />
-          {currentPath}
-        </Text>
+        <div className={styles.dirCurrentPath}>
+          {buildCrumbs().map((tk, i) =>
+            tk.type === 'sep' ? (
+              <span key={i} className={styles.dirCrumbSep}>/</span>
+            ) : (
+              <span
+                key={i}
+                className={styles.dirCrumb}
+                title={tk.path}
+                onClick={() => browse(tk.path)}
+              >
+                {tk.label}
+              </span>
+            )
+          )}
+        </div>
       </div>
 
       {/* 目录列表 */}
@@ -118,14 +145,14 @@ function DirBrowser({ open, onClose, onSelect }) {
                 size="small"
                 onClick={(e) => { e.stopPropagation(); onSelect(dir.path); }}
               >
-                {t('ui.workspaces.select')}
+                {t('ui.workspaces.launch')}
               </Button>
             </div>
           ))
         )}
       </div>
 
-      {/* 也可以选择当前目录 */}
+      {/* 也可以直接启动当前目录 */}
       <div className={styles.dirFooter}>
         <Button
           type="primary"
@@ -134,7 +161,7 @@ function DirBrowser({ open, onClose, onSelect }) {
           icon={<FolderOpenOutlined />}
           onClick={() => onSelect(currentPath)}
         >
-          {t('ui.workspaces.selectCurrent')} — {currentPath.split('/').pop() || currentPath}
+          {t('ui.workspaces.launchCurrent')} — {currentPath.split('/').pop() || currentPath}
         </Button>
         <div className={styles.dirPathInputRow}>
           <Input
@@ -157,6 +184,9 @@ export default function WorkspaceList({ onLaunch }) {
   const [loading, setLoading] = useState(true);
   const [launching, setLaunching] = useState(null);
   const [browseOpen, setBrowseOpen] = useState(false);
+  // Electron 多 tab 模式下点「+」时，main 会把本页以浮层叠在当前 tab 之上并推 mode='popup'；
+  // 此时渲染半透明遮罩 + 居中卡片。非 Electron / Mobile 永远收不到该事件，保持整页。
+  const [popup, setPopup] = useState(false);
 
   const fetchWorkspaces = () => {
     fetch(apiUrl('/api/workspaces'))
@@ -171,6 +201,35 @@ export default function WorkspaceList({ onLaunch }) {
   useEffect(() => {
     fetchWorkspaces();
   }, []);
+
+  const closePopup = useCallback(() => {
+    window.electronAPI?.closeWorkspacePopup?.();
+  }, []);
+
+  // 订阅工作区选择器模式（浮层 / 整页）。仅 Electron workspaceView 会收到。
+  useEffect(() => {
+    const api = window.electronAPI;
+    if (!api?.onWorkspaceMode) return undefined;
+    const unsub = api.onWorkspaceMode((mode) => {
+      const on = mode === 'popup';
+      setPopup(on);
+      document.body.classList.toggle('ccv-ws-popup', on);
+      if (on) fetchWorkspaces(); // 每次开浮层刷新，纳入新增项目
+    });
+    api.requestWorkspaceMode?.(); // 挂载即同步当前模式，消除首帧竞态
+    return () => {
+      if (typeof unsub === 'function') unsub();
+      document.body.classList.remove('ccv-ws-popup');
+    };
+  }, []);
+
+  // 浮层模式下 Esc 关闭。
+  useEffect(() => {
+    if (!popup) return undefined;
+    const onKey = (e) => { if (e.key === 'Escape') closePopup(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [popup, closePopup]);
 
   const handleAddFromBrowser = (path) => {
     setBrowseOpen(false);
@@ -228,8 +287,22 @@ export default function WorkspaceList({ onLaunch }) {
       });
   };
 
-  return (
-    <div className={styles.root}>
+  const isElectron = !!window.electronAPI?.launchWorkspace;
+
+  const content = (
+    <div
+      className={popup ? `${styles.root} ${styles.popupCard}` : styles.root}
+      onClick={popup ? (e) => e.stopPropagation() : undefined}
+    >
+      {popup && (
+        <Button
+          type="text"
+          className={styles.popupClose}
+          icon={<CloseOutlined />}
+          aria-label={t('ui.workspaces.closePopup')}
+          onClick={closePopup}
+        />
+      )}
       <div className={styles.inner}>
         <div className={styles.header}>
           <Title level={3} className={styles.headerTitle}>
@@ -260,9 +333,8 @@ export default function WorkspaceList({ onLaunch }) {
             className={styles.emptyState}
           />
         ) : (
-          <List
-            dataSource={workspaces}
-            renderItem={item => (
+          <div className={styles.grid}>
+            {workspaces.map(item => (
               <Card
                 key={item.id}
                 size="small"
@@ -270,55 +342,57 @@ export default function WorkspaceList({ onLaunch }) {
                 hoverable
                 onClick={() => handleLaunch(item, false)}
               >
-                <div className={styles.cardRow}>
-                  <div className={styles.cardLeft}>
-                    <div className={styles.cardNameRow}>
-                      <Text strong className={styles.cardName}>{item.projectName}</Text>
-                    </div>
-                    <Text type="secondary" className={styles.cardPath}>{item.path}</Text>
-                    <div className={styles.cardMeta}>
-                      <span><ClockCircleOutlined style={{ marginRight: 4 }} />{timeAgo(item.lastUsed)}</span>
-                      {item.logCount > 0 && (
-                        <span><DatabaseOutlined style={{ marginRight: 4 }} />{item.logCount} logs ({formatSize(item.totalSize)})</span>
-                      )}
-                    </div>
+                <div className={styles.cardLeft}>
+                  <div className={styles.cardNameRow}>
+                    <Text strong className={styles.cardName}>{item.projectName}</Text>
                   </div>
-                  <Space>
+                  <Text type="secondary" className={styles.cardPath}>{item.path}</Text>
+                  <div className={styles.cardMeta}>
+                    <span><ClockCircleOutlined style={{ marginRight: 4 }} />{timeAgo(item.lastUsed)}</span>
+                    {item.logCount > 0 && (
+                      <span><DatabaseOutlined style={{ marginRight: 4 }} />{item.logCount} logs ({formatSize(item.totalSize)})</span>
+                    )}
+                  </div>
+                </div>
+                <div className={styles.cardActions}>
+                  <Space size={8}>
                     <Button
                       type="primary"
                       icon={<RocketOutlined />}
                       loading={launching === item.id}
                       onClick={(e) => { e.stopPropagation(); handleLaunch(item, false); }}
                     >
-                      {t('ui.workspaces.normalLaunch')}
+                      {t(isElectron ? 'ui.workspaces.launch' : 'ui.workspaces.normalLaunch')}
                     </Button>
-                    <Button
-                      icon={<RocketOutlined />}
-                      loading={launching === item.id}
-                      onClick={(e) => { e.stopPropagation(); handleLaunch(item, true); }}
-                      style={{ background: '#d97706', borderColor: '#d97706', color: '#fff' }}
-                    >
-                      {t('ui.workspaces.skipPermLaunch')}
-                    </Button>
-                    <Popconfirm
-                      title={t('ui.workspaces.confirmRemove')}
-                      onConfirm={(e) => { e?.stopPropagation(); handleRemove(item.id); }}
-                      onCancel={(e) => e?.stopPropagation()}
-                      okText="Yes"
-                      cancelText="No"
-                    >
+                    {!isElectron && (
                       <Button
-                        type="text"
-                        danger
-                        icon={<DeleteOutlined />}
-                        onClick={(e) => e.stopPropagation()}
-                      />
-                    </Popconfirm>
+                        icon={<RocketOutlined />}
+                        loading={launching === item.id}
+                        onClick={(e) => { e.stopPropagation(); handleLaunch(item, true); }}
+                        style={{ background: '#d97706', borderColor: '#d97706', color: '#fff' }}
+                      >
+                        {t('ui.workspaces.skipPermLaunch')}
+                      </Button>
+                    )}
                   </Space>
+                  <Popconfirm
+                    title={t('ui.workspaces.confirmRemove')}
+                    onConfirm={(e) => { e?.stopPropagation(); handleRemove(item.id); }}
+                    onCancel={(e) => e?.stopPropagation()}
+                    okText="Yes"
+                    cancelText="No"
+                  >
+                    <Button
+                      type="text"
+                      danger
+                      icon={<DeleteOutlined />}
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                  </Popconfirm>
                 </div>
               </Card>
-            )}
-          />
+            ))}
+          </div>
         )}
       </div>
 
@@ -329,4 +403,8 @@ export default function WorkspaceList({ onLaunch }) {
       />
     </div>
   );
+
+  return popup ? (
+    <div className={styles.scrim} onClick={closePopup}>{content}</div>
+  ) : content;
 }

@@ -7,7 +7,7 @@
   body {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     font-size: 12px;
-    height: 60px;
+    height: 50px;
     display: flex;
     align-items: center;
     overflow: hidden;
@@ -28,9 +28,9 @@
     --border: #333;
     --accent: #1668dc;
     --close-hover: rgba(255,255,255,0.1);
-    /* 待审批小圆环：颜色用 tab-bar 底色（--bg），与工具栏融为一体，
-     * 仅靠 keyframes 的 opacity 脉动引导视觉，不抢眼。 */
-    --pending-ring: var(--bg);
+    /* tab 状态点 / 待审批小圆环：默认用 accent（与按钮边框同色），背景+边框统一此色，色彩更均衡；
+     * has-pending 非活动 tab 时仍由 keyframes 在 accent ↔ text 间脉动提示。 */
+    --pending-ring: var(--accent);
   }
   [data-theme="light"] {
     --bg: #f0f0f0;
@@ -42,7 +42,7 @@
     --border: #ddd;
     --accent: #0969DA;
     --close-hover: rgba(0,0,0,0.08);
-    --pending-ring: var(--bg);
+    --pending-ring: var(--accent);
   }
   /* macOS traffic lights padding + drag area */
   .traffic-light-spacer {
@@ -83,7 +83,7 @@
     align-items: center;
     gap: 6px;
     padding: 0 12px;
-    height: 44px;
+    height: 34px;
     max-width: 180px;
     min-width: 60px;
     cursor: pointer;
@@ -107,9 +107,8 @@
     flex: 1;
   }
   /* 左侧 16px 状态槽，与右侧 .tab-close 镜像。永远占位，避免 tab 名因状态变化抖动。
-   * 默认色 = tab-bar 底色（var(--bg)），与工具栏融为一体几乎不可见；
-   * 仅在 .has-pending:not(.active) 时让 border-color 在底色 ↔ var(--text) 之间脉动。
-   * 用 border-color 而非 opacity 是因为底色和 inactive tab 底色相差太小，纯 opacity 脉动肉眼不可感知。 */
+   * 槽内 8px 圆点默认填 var(--pending-ring)(= accent)，常驻作为每个 tab 的状态点；
+   * .has-pending:not(.active) 时由 keyframes 让 border-color 在 accent ↔ var(--text) 间脉动以强调待审批。 */
   .tab-pending {
     width: 16px;
     height: 16px;
@@ -125,6 +124,7 @@
     height: 8px;
     border-radius: 50%;
     border: 1.5px solid var(--pending-ring);
+    background: var(--pending-ring);
     box-sizing: border-box;
   }
   .tab.has-pending:not(.active) .tab-pending::before {
@@ -172,12 +172,73 @@
     transition: background 0.1s;
   }
   .new-tab-btn:hover { background: var(--close-hover); color: var(--text-active); }
+  /* iPad 模式开关：窗口级，常驻 tab bar 右侧 */
+  .mode-btn {
+    width: 30px;
+    height: 30px;
+    border-radius: 6px;
+    border: none;
+    background: none;
+    color: var(--text);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    margin: auto 10px auto 4px;
+    -webkit-app-region: no-drag;
+    transition: background 0.1s, color 0.1s;
+  }
+  .mode-btn:hover { background: var(--close-hover); color: var(--text-active); }
+  .mode-btn svg { display: block; }
+  /* 从 React header 迁移过来的控件簇（左：菜单+代理；右：bell/主题/终端/视图） */
+  .hdr-cluster {
+    display: flex; align-items: center; gap: 4px;
+    flex-shrink: 0; -webkit-app-region: no-drag;
+  }
+  #leftCluster { margin: 0 4px 0 10px; }
+  #rightCluster { margin: 0 2px; }
+  .hdr-btn {
+    height: 28px; min-width: 28px; padding: 0 7px;
+    border-radius: 6px; border: none; background: none;
+    color: var(--text); cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+    font-size: 12px; white-space: nowrap;
+    -webkit-app-region: no-drag;
+    transition: background 0.1s, color 0.1s;
+  }
+  .hdr-btn:hover { background: var(--close-hover); color: var(--text-active); }
+  .hdr-btn.active { background: var(--bg-tab-active); color: var(--text-active); box-shadow: inset 0 0 0 1px var(--accent); }
+  .hdr-btn svg { display: block; }
+  .hdr-btn .badge {
+    min-width: 15px; height: 15px; padding: 0 4px; border-radius: 8px;
+    background: var(--accent); color: #fff; font-size: 10px; line-height: 15px; text-align: center;
+  }
+  .hdr-btn.proxy-btn { color: var(--accent); }
+  .hdr-countdown { font-size: 11px; color: var(--text); white-space: nowrap; padding: 0 4px; align-self: center; -webkit-app-region: no-drag; }
+  /* 键盘可达性：tab bar 内按钮聚焦时给出可见描边（窗口级 chrome 默认无聚焦样式）。 */
+  .hdr-btn:focus-visible, .mode-btn:focus-visible, .new-tab-btn:focus-visible, .tab-close:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 1px;
+  }
+  /* 全屏下无法 resize → iPad 开关无意义：禁用并弱化，避免「点了没反应」。 */
+  body.fullscreen .mode-btn { opacity: 0.4; pointer-events: none; }
+  /* iPad/移动模式：顶部工具栏只保留当前项目 tab + 模式开关，其余隐藏。
+     镜像 body.fullscreen 的做法，纯 CSS，不动 render()。 */
+  body.device-mode #leftCluster,
+  body.device-mode #rightCluster,
+  body.device-mode .tab:not(.active),
+  body.device-mode .new-tab-btn {
+    display: none;
+  }
 </style>
 </head>
 <body>
   <div class="traffic-light-spacer"></div>
+  <div class="hdr-cluster" id="leftCluster"></div>
   <div class="tab-container" id="tabs"><!-- tabs + newBtn rendered here --></div>
   <div class="tab-drag-fill"></div>
+  <div class="hdr-cluster" id="rightCluster"></div>
+  <button class="mode-btn" id="modeBtn" title="Switch to iPad mode" aria-pressed="false"></button>
 
 <script>
   let tabs = [];
@@ -227,13 +288,15 @@
       });
       tabsEl.appendChild(el);
     });
-    // "+" button always follows the last tab
-    const btn = document.createElement('button');
-    btn.className = 'new-tab-btn';
-    btn.title = 'New project tab';
-    btn.textContent = '+';
-    btn.addEventListener('click', () => window.tabAPI.newTab());
-    tabsEl.appendChild(btn);
+    // "+" 仅在已有 tab 时显示：零 tab（初始化界面）本身就是项目选择器，再放「+」属交互重叠。
+    if (tabs.length > 0) {
+      const btn = document.createElement('button');
+      btn.className = 'new-tab-btn';
+      btn.title = 'New project tab';
+      btn.textContent = '+';
+      btn.addEventListener('click', () => window.tabAPI.newTab());
+      tabsEl.appendChild(btn);
+    }
   }
 
   window.tabAPI.onTabsUpdated((newTabs) => {
@@ -253,6 +316,114 @@
   window.tabAPI.onFullscreenChanged?.((isFullscreen) => {
     document.body.classList.toggle('fullscreen', !!isFullscreen);
   });
+
+  // iPad 模式开关（窗口级）：点击切换 PC ⇄ iPad，图标显示当前模式（显示器 / 手机样式）。
+  const modeBtn = document.getElementById('modeBtn');
+  const ICON_MONITOR = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/></svg>';
+  const ICON_PHONE = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="2" width="12" height="20" rx="2.5"/><path d="M11 18h2"/></svg>';
+  let deviceOn = false;
+  // tab bar 无 i18n：iPad/PC 开关的 tooltip 由活动 tab 的 header 模型（有 t()）下发；首帧无模型时英文兜底。
+  let modeTitles = { toIpad: 'Switch to iPad mode', toPc: 'Switch to PC mode' };
+  function renderModeBtn() {
+    modeBtn.innerHTML = deviceOn ? ICON_PHONE : ICON_MONITOR;
+    modeBtn.setAttribute('aria-pressed', String(deviceOn));
+    modeBtn.title = deviceOn ? modeTitles.toPc : modeTitles.toIpad;
+    modeBtn.setAttribute('aria-label', modeBtn.title);
+  }
+  modeBtn.addEventListener('click', () => window.tabAPI.toggleDeviceMode());
+  window.tabAPI.onDeviceModeChange?.((on) => {
+    deviceOn = !!on;
+    renderModeBtn();
+    document.body.classList.toggle('device-mode', deviceOn);
+  });
+  renderModeBtn();
+  window.tabAPI.requestDeviceMode?.();
+
+  // ---- 从 React header 迁移过来的控件（active tab 推模型，这里渲染；点击回传 main → active tab）----
+  const leftCluster = document.getElementById('leftCluster');
+  const rightCluster = document.getElementById('rightCluster');
+  let headerModel = null;
+  let headerModelTabId = null; // 模型所属 tab；随点击回传，main 据此精确投递，规避切 tab 竞态
+  const HSVG = {
+    menu: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>',
+    proxy: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>',
+    bell: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a6 6 0 0 0-6 6v3.5L4.5 14a1 1 0 0 0 .8 1.6h13.4a1 1 0 0 0 .8-1.6L18 11.5V8a6 6 0 0 0-6-6z"/><path d="M10 18a2 2 0 0 0 4 0"/></svg>',
+    sun: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><line x1="12" y1="2" x2="12" y2="4"/><line x1="12" y1="20" x2="12" y2="22"/><line x1="4.2" y1="4.2" x2="5.6" y2="5.6"/><line x1="18.4" y1="18.4" x2="19.8" y2="19.8"/><line x1="2" y1="12" x2="4" y2="12"/><line x1="20" y1="12" x2="22" y2="12"/><line x1="4.2" y1="19.8" x2="5.6" y2="18.4"/><line x1="18.4" y1="5.6" x2="19.8" y2="4.2"/></svg>',
+    moon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8Z"/></svg>',
+    terminal: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>',
+    chat: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-8.5 8.5 8.5 8.5 0 0 1-3.6-.8L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8A8.5 8.5 0 0 1 12.5 3 8.38 8.38 0 0 1 21 11.5z"/></svg>',
+    raw: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>',
+    qr: '<svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M0 0h10v10H0zM2 2v6h6V2zM3 3h4v4H3zM14 0h10v10H14zM16 2v6h6V2zM17 3h4v4H17zM0 14h10v10H0zM2 16v6h6v-6zM3 17h4v4H3zM14 14h3v3h-3zM20 14h3v3h-3zM17 17h3v3h-3zM14 20h3v3h-3zM20 20h3v3h-3z"/></svg>',
+  };
+  const IM_ICON = {
+    dingtalk: { vb: '0 0 1024 1024', color: '#1677ff', path: 'M903.282484 382.828702c-2.999866 10.899512-6.899691 21.499038-11.699476 31.698581h0.099995l-0.599973 1.299942c-34.098474 76.596571-123.194485 226.989839-123.194485 226.989839l-0.399982-0.999955-25.998836 47.597869h125.394386L627.294839 1024l54.397565-227.589812h-98.795578l34.298465-150.493263c-27.798756 6.999687-60.497292 16.699252-99.395551 29.798666 0 0-52.49765 32.298554-151.393222-62.197216 0 0-66.697014-61.597243-27.998747-77.096548 16.399266-6.499709 79.796428-14.799337 129.694194-21.999015 67.296987-9.59957 108.79513-14.699342 108.79513-14.699342s-207.690703 3.299852-256.988496-4.899781c-49.297793-8.099637-111.695-94.49577-125.0944-170.392372 0 0-20.599078-41.698133 44.198021-21.999016 64.897095 19.699118 333.385076 76.796563 333.385076 76.796563S223.312923 266.933891 200.113962 239.535117 131.717024 89.741823 137.616759 14.645184c0 0 2.599884-18.799158 20.899065-13.799382 0 0 258.188442 123.994449 434.680541 191.691419C769.688464 260.434182 923.081598 295.032633 903.282484 382.828702z' },
+    feishu: { vb: '0 0 24 24', color: '#00d6b9', path: 'M2.01 21L23 12 2.01 3 2 10l15 2-15 2z' },
+    wecom: { vb: '0 0 24 24', color: '#2f90e8', path: 'M9.5 3C5.36 3 2 5.91 2 9.5c0 2.08 1.13 3.93 2.9 5.13L4 17.5l2.74-1.4c.86.26 1.79.4 2.76.4.27 0 .53-.01.79-.03A5.6 5.6 0 0 1 10 14.5C10 11.46 12.91 9 16.5 9c.35 0 .69.02 1.03.07C16.9 5.6 13.55 3 9.5 3zm-2.6 4.4a1 1 0 1 1 0 2 1 1 0 0 1 0-2zm5.2 0a1 1 0 1 1 0 2 1 1 0 0 1 0-2zM16.5 10.5c-3.04 0-5.5 2.02-5.5 4.5s2.46 4.5 5.5 4.5c.7 0 1.37-.1 1.99-.29L20.5 20.5l-.62-1.78A4.9 4.9 0 0 0 22 15c0-2.48-2.46-4.5-5.5-4.5zm-1.85 3a.85.85 0 1 1 0 1.7.85.85 0 0 1 0-1.7zm3.7 0a.85.85 0 1 1 0 1.7.85.85 0 0 1 0-1.7z' },
+    discord: { vb: '0 0 24 24', color: '#5865F2', path: 'M20.317 4.369a19.79 19.79 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.249a18.27 18.27 0 0 0-5.487 0 12.6 12.6 0 0 0-.617-1.25.077.077 0 0 0-.079-.036A19.74 19.74 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028c.462-.63.874-1.295 1.226-1.994a.076.076 0 0 0-.041-.106 13.1 13.1 0 0 1-1.872-.892.077.077 0 0 1-.008-.128c.126-.094.252-.192.372-.291a.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.061 0a.074.074 0 0 1 .078.009c.12.099.246.198.373.292a.077.077 0 0 1-.006.127 12.3 12.3 0 0 1-1.873.891.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.84 19.84 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03zM8.02 15.331c-1.182 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z' },
+  };
+  function hEsc(s){ return String(s==null?'':s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+  function hBtn(html, title, type, opts){
+    const b = document.createElement('button');
+    b.className = 'hdr-btn' + (opts&&opts.cls ? (' '+opts.cls) : '') + (opts&&opts.active ? ' active' : '');
+    if (title) { b.title = title; b.setAttribute('aria-label', title); } // icon-only 按钮：title 对 AT 不可达，补 aria-label
+    if (opts && opts.active) b.setAttribute('aria-pressed', 'true');
+    if (opts && opts.color) b.style.color = opts.color;
+    b.innerHTML = html;
+    const svgEl = b.querySelector('svg');
+    if (svgEl && !svgEl.hasAttribute('aria-hidden')) svgEl.setAttribute('aria-hidden', 'true'); // 装饰性图标对 AT 隐藏
+    const payload = Object.assign({ tabId: headerModelTabId }, opts && opts.payload, { type });
+    b.addEventListener('click', (e) => { e.stopPropagation(); window.tabAPI.headerAction(payload); });
+    return b;
+  }
+  function renderClusters(){
+    leftCluster.replaceChildren();
+    rightCluster.replaceChildren();
+    const m = headerModel;
+    if (!m) return; // 无活动 tab（工作区选择器）→ 不显示任何迁移控件
+    // 左侧：菜单（在 React 内打开下拉，避免被 50px 高的 tab bar 裁切）+ 代理 + IM 状态
+    leftCluster.appendChild(hBtn(HSVG.menu, (m.menu && m.menu.title) || 'Menu', 'menuOpen'));
+    if (m.proxy && m.proxy.label) {
+      leftCluster.appendChild(hBtn(HSVG.proxy + '<span>' + hEsc(m.proxy.label) + '</span>', m.proxy.label, 'proxy', { cls: 'proxy-btn' }));
+    }
+    if (Array.isArray(m.im)) {
+      m.im.forEach((chip) => {
+        if (!chip || !chip.id) return; // 容错：非法 model 条目不应中断整簇渲染
+        const def = IM_ICON[chip.id];
+        if (!def) return;
+        const svg = '<svg width="16" height="16" viewBox="' + def.vb + '" fill="currentColor" aria-hidden="true"><path d="' + def.path + '"/></svg>';
+        leftCluster.appendChild(hBtn(svg, chip.name || chip.id, 'im', { payload: { id: chip.id }, color: chip.connected ? def.color : 'var(--text)' }));
+      });
+    }
+    // 右侧：审批 bell、倒计时、二维码、主题、终端、视图模式
+    if (m.approval && m.approval.count > 0) {
+      rightCluster.appendChild(hBtn(HSVG.bell + '<span class="badge">' + hEsc(m.approval.count) + '</span>', m.approval.title || '', 'approval'));
+    }
+    if (m.countdown && m.countdown.text) {
+      const c = document.createElement('span');
+      c.className = 'hdr-countdown';
+      c.textContent = m.countdown.text;
+      rightCluster.appendChild(c);
+    }
+    if (m.qr) {
+      rightCluster.appendChild(hBtn(HSVG.qr, (m.qr && m.qr.title) || 'QR', 'qrOpen'));
+    }
+    if (m.theme) {
+      rightCluster.appendChild(hBtn(m.theme.mode === 'light' ? HSVG.sun : HSVG.moon, m.theme.title || '', 'theme'));
+    }
+    if (m.terminal) {
+      rightCluster.appendChild(hBtn(HSVG.terminal, m.terminal.label || '', 'terminal', { active: !!m.terminal.active }));
+    }
+    if (m.viewMode) {
+      rightCluster.appendChild(hBtn(m.viewMode.mode === 'raw' ? HSVG.chat : HSVG.raw, m.viewMode.label || '', 'viewMode'));
+    }
+  }
+  window.tabAPI.onHeaderModel?.((model, tabId) => {
+    headerModel = model;
+    if (tabId != null) headerModelTabId = tabId;
+    if (model && model.deviceMode) { modeTitles = model.deviceMode; renderModeBtn(); } // 习得本地化的开关 tooltip
+    renderClusters();
+  });
+  window.tabAPI.requestHeaderModel?.(); // 首帧拉取活动 tab 已缓存模型，规避 did-finish-load 竞态后空白
 </script>
 </body>
 </html>

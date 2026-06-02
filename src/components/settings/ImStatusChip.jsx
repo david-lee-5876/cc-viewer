@@ -11,7 +11,7 @@ import styles from './ImStatusChip.module.css';
  * still spells out the error). Clicking it opens the messaging panel on this platform's tab.
  * Self-contained: polls the platform's status endpoint every 5s.
  */
-export default function ImStatusChip({ descriptor, onClick }) {
+export default function ImStatusChip({ descriptor, onClick, onStatus }) {
   const [enabled, setEnabled] = useState(false);
   const [connection, setConnection] = useState(null);
   const Icon = descriptor.icon;
@@ -31,6 +31,12 @@ export default function ImStatusChip({ descriptor, onClick }) {
     const id = setInterval(fetchStatus, 5000);
     return () => clearInterval(id);
   }, [fetchStatus]);
+
+  // 向上汇报状态（供 Electron tab bar 渲染迁移过去的 IM 图标；web 下不传 onStatus，无副作用）。
+  useEffect(() => {
+    if (!onStatus) return;
+    onStatus(descriptor.id, { enabled, connected: !!(connection && connection.connected && !connection.lastError) });
+  }, [enabled, connection, onStatus, descriptor.id]);
 
   if (!enabled) return null;
 

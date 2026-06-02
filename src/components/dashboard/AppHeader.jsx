@@ -87,7 +87,7 @@ class AppHeader extends React.Component {
 
   constructor(props) {
     super(props);
-    this.state = { countdownText: '', promptModalVisible: false, promptData: [], promptViewMode: 'original', settingsDrawerVisible: false, globalSettingsVisible: false, projectStatsVisible: false, projectStats: null, projectStatsLoading: false, localUrl: '', pluginModalVisible: false, processModalVisible: false, logoDropdownOpen: false, cacheHighlightIdx: null, cacheHighlightFading: false, calibrationModel: readCalibrationModel(), proxyModalVisible: false, messagingModalVisible: false, messagingInitialTool: null, logDirDraft: null, qrPopoverOpen: false, _skillsModal: { open: false, loading: false, skills: [], error: null, toggling: new Set() },
+    this.state = { countdownText: '', promptModalVisible: false, promptData: [], promptViewMode: 'original', settingsDrawerVisible: false, globalSettingsVisible: false, projectStatsVisible: false, projectStats: null, projectStatsLoading: false, localUrl: '', pluginModalVisible: false, processModalVisible: false, logoDropdownOpen: false, electronMenuOpen: false, cacheHighlightIdx: null, cacheHighlightFading: false, calibrationModel: readCalibrationModel(), proxyModalVisible: false, messagingModalVisible: false, messagingInitialTool: null, logDirDraft: null, qrPopoverOpen: false, electronQrOpen: false, _skillsModal: { open: false, loading: false, skills: [], error: null, toggling: new Set() },
       // 文件系统权威的 skill 列表（/api/skills 返回）；live-tail 下作为 popover chip 和管理弹窗的共享数据源。
       // null=未加载 / false=失败 / [] 或 Array=加载结果。workspace 切换由 componentDidUpdate + seq 控制。
       _fsSkills: null,
@@ -127,6 +127,125 @@ class AppHeader extends React.Component {
     this.updateCountdown = this.updateCountdown.bind(this);
   }
 
+  // ===== Electron 原生 tab bar header 桥接（把部分控件迁移到最顶部 tab bar）=====
+  _isElectronTab() {
+    return typeof window !== 'undefined' && !!(window.tabBridge && window.tabBridge.setHeaderModel);
+  }
+
+  // 汉堡菜单项：render 内的下拉与 _handleHeaderAction 共用同一份定义。
+  getMenuItems() {
+    const { viewMode, onImportLocalLogs } = this.props;
+    return [
+      { key: 'import-local', icon: <ImportOutlined />, label: t('ui.importLocalLogs'), onClick: onImportLocalLogs },
+      { key: 'export-prompts', icon: <ExportOutlined />, label: t('ui.exportPrompts'), onClick: this.handleShowPrompts },
+      { key: 'plugin-management', icon: <ApiOutlined />, label: t('ui.pluginManagement'), onClick: this.handleShowPlugins },
+      { key: 'process-management', icon: <DashboardOutlined />, label: t('ui.processManagement'), onClick: this.handleShowProcesses },
+      { key: 'proxy-switch', icon: <SwapOutlined />, label: t('ui.proxySwitch'), onClick: () => this.setState({ proxyModalVisible: true }) },
+      { type: 'divider' },
+      { key: 'project-stats', icon: <BarChartOutlined />, label: t('ui.projectStats'), onClick: this.handleShowProjectStats },
+      { key: 'messaging', icon: <MessageOutlined />, label: t('ui.messaging.menu'), onClick: () => this.setState({ messagingModalVisible: true, messagingInitialTool: null }) },
+      ...(viewMode === 'raw' ? [{ key: 'global-settings', icon: <SettingOutlined />, label: t('ui.globalSettings'), onClick: () => this.setState({ globalSettingsVisible: true }) }] : []),
+      ...(viewMode === 'chat' ? [{ key: 'display-settings', icon: <SettingOutlined />, label: t('ui.settings'), onClick: () => this.setState({ settingsDrawerVisible: true }) }] : []),
+    ];
+  }
+
+  // 审批 bell 的数量/标题：header 右侧 render 与 tab bar 模型共用，避免重复计算。
+  _buildApprovalInfo() {
+    const ag = this.props.approvalGlobal;
+    const adi = this.props.approvalDismissedIds;
+    const own = this.props.approvalOwnPending || { ask: 0, ptyPlan: 0 };
+    if (!ag || !this.props.onApprovalReopen) return null;
+    let dismissedActive = 0;
+    if (ag.ask?.ask?.id != null && adi instanceof Set && adi.has(`ask:${ag.ask.ask.id}`)) dismissedActive++;
+    if (ag.ptyPlan?.ptyPlan?.id != null && adi instanceof Set && adi.has(`ptyPlan:${ag.ptyPlan.ptyPlan.id}`)) dismissedActive++;
+    const localEmpty = !ag.ask?.ask && !ag.ptyPlan?.ptyPlan;
+    const orphanCount = localEmpty ? ((own.ask || 0) + (own.ptyPlan || 0)) : 0;
+    const total = dismissedActive + orphanCount;
+    if (total === 0) return null;
+    const titleKey = dismissedActive > 0 ? 'ui.approval.bell.reopen' : 'ui.approval.bell.orphan';
+    const titleFallback = dismissedActive > 0 ? 'Reopen approval modal' : 'Server has pending approvals';
+    const _tr = (k, p, f) => { try { const r = t(k, p); return (r && r !== k) ? r : f; } catch { return f; } };
+    return { count: total, title: _tr(titleKey, null, titleFallback) };
+  }
+
+  // 迁移到 tab bar 的控件模型（label 已本地化；不含汉堡菜单项——菜单在 React 内弹出，避免被 50px tab bar 裁切）。
+  _imStatus = {};
+  _onImStatus = (id, info) => {
+    const prev = this._imStatus[id];
+    if (prev && prev.enabled === info.enabled && prev.connected === info.connected) return;
+    this._imStatus[id] = info;
+    this._pushHeaderModel();
+  };
+
+  _buildHeaderModel() {
+    const { viewMode, themeColor, terminalVisible, cliMode, isLocalLog, activeProxyId, proxyProfiles } = this.props;
+    let proxy = null;
+    if (activeProxyId && activeProxyId !== 'max') {
+      const p = (proxyProfiles || []).find(x => x.id === activeProxyId);
+      if (p) proxy = { label: `${p.name}${p.activeModel ? ` · ${p.activeModel}` : ''}` };
+    }
+    const showThemeBlock = viewMode === 'chat' && cliMode && !isLocalLog && !!this.state.localUrl;
+    const im = IM_PLATFORMS
+      .filter(p => this._imStatus[p.id] && this._imStatus[p.id].enabled)
+      .map(p => {
+        const nm = t(p.labelKey);
+        return { id: p.id, connected: !!this._imStatus[p.id].connected, name: (nm && nm !== p.labelKey) ? nm : (p.fallback || p.id) };
+      });
+    const cd = this.state.countdownText;
+    const countdown = (viewMode === 'raw' && cd)
+      ? { text: `${t('ui.cacheCountdown', { type: this.props.cacheType ? `(${this.props.cacheType})` : '' })} ${cd}` }
+      : null;
+    return {
+      // menu / iPad 开关的 tooltip 在 tab bar 渲染，但 tab bar 无 i18n，故标题从这里（有 t()）下发本地化文案。
+      menu: { title: t('ui.menu') },
+      deviceMode: { toIpad: t('ui.deviceMode.toIpad'), toPc: t('ui.deviceMode.toPc') },
+      proxy,
+      approval: this._buildApprovalInfo(),
+      theme: showThemeBlock ? { mode: themeColor === 'light' ? 'light' : 'dark', title: themeColor === 'light' ? t('ui.themeColor.light') : t('ui.themeColor.dark') } : null,
+      terminal: (cliMode && viewMode === 'chat' && !isLocalLog) ? { active: !!terminalVisible, label: t('ui.terminal') } : null,
+      viewMode: { mode: viewMode, label: viewMode === 'raw' ? t('ui.chatMode') : t('ui.rawMode') },
+      im,
+      countdown,
+      qr: showThemeBlock ? { title: t('ui.scanToCoding') } : null,
+    };
+  }
+
+  _pushHeaderModel() {
+    if (!this._isElectronTab()) return;
+    try {
+      const model = this._buildHeaderModel();
+      const json = JSON.stringify(model);
+      if (json === this._lastHeaderModelJson) return;
+      this._lastHeaderModelJson = json;
+      window.tabBridge.setHeaderModel(model);
+    } catch {}
+  }
+
+  _setupHeaderBridge() {
+    if (!this._isElectronTab()) return;
+    if (this._headerActionDispose) { try { this._headerActionDispose(); } catch {} this._headerActionDispose = null; }
+    try {
+      this._headerActionDispose = window.tabBridge.onHeaderAction((payload) => this._handleHeaderAction(payload));
+    } catch {}
+    this._pushHeaderModel();
+  }
+
+  _handleHeaderAction(payload) {
+    if (!payload || !payload.type) return;
+    const { themeColor, onThemeColorChange, onToggleTerminal, onToggleViewMode, onApprovalReopen } = this.props;
+    switch (payload.type) {
+      case 'menuOpen': this.setState((s) => ({ electronMenuOpen: !s.electronMenuOpen })); break;
+      case 'theme': if (onThemeColorChange) onThemeColorChange(themeColor === 'light' ? 'dark' : 'light'); break;
+      case 'terminal': if (onToggleTerminal) onToggleTerminal(); break;
+      case 'viewMode': if (onToggleViewMode) onToggleViewMode(); break;
+      case 'approval': if (onApprovalReopen) onApprovalReopen(); break;
+      case 'proxy': this.setState({ proxyModalVisible: true }); break;
+      case 'im': this.setState({ messagingModalVisible: true, messagingInitialTool: payload.id }); break;
+      case 'qrOpen': this.setState((s) => ({ electronQrOpen: !s.electronQrOpen })); break;
+      default: break;
+    }
+  }
+
   componentDidMount() {
     this.startCountdown();
     fetch(apiUrl('/api/local-url')).then(r => r.json()).then(data => {
@@ -149,9 +268,11 @@ class AppHeader extends React.Component {
     // 预热：live-tail 下提前拉一次文件系统 skill，首次打开 popover 就是权威视图而非闪一下历史。
     if (!this.props.isLocalLog) this.reloadFsSkills();
     // ipinfo.io 请求已移到 CountryFlag 组件里
+    this._setupHeaderBridge();
   }
 
   componentDidUpdate(prevProps) {
+    this._pushHeaderModel();
     if (prevProps.cacheExpireAt !== this.props.cacheExpireAt) {
       this.startCountdown();
     }
@@ -488,6 +609,7 @@ class AppHeader extends React.Component {
   }
 
   componentWillUnmount() {
+    if (this._headerActionDispose) { try { this._headerActionDispose(); } catch {} this._headerActionDispose = null; }
     if (this._countdownTimer) clearTimeout(this._countdownTimer);
     if (this._expiredTimer) clearTimeout(this._expiredTimer);
     if (this._cacheFadeClearTimer) clearTimeout(this._cacheFadeClearTimer);
@@ -1343,76 +1465,65 @@ class AppHeader extends React.Component {
     const showFullToolContent = !!_prefs.showFullToolContent;
     const onlyCurrentSession = !!_prefs.onlyCurrentSession;
 
-    const menuItems = [
-      {
-        key: 'import-local',
-        icon: <ImportOutlined />,
-        label: t('ui.importLocalLogs'),
-        onClick: onImportLocalLogs,
-      },
-      {
-        key: 'export-prompts',
-        icon: <ExportOutlined />,
-        label: t('ui.exportPrompts'),
-        onClick: this.handleShowPrompts,
-      },
-      {
-        key: 'plugin-management',
-        icon: <ApiOutlined />,
-        label: t('ui.pluginManagement'),
-        onClick: this.handleShowPlugins,
-      },
-      {
-        key: 'process-management',
-        icon: <DashboardOutlined />,
-        label: t('ui.processManagement'),
-        onClick: this.handleShowProcesses,
-      },
-      {
-        key: 'proxy-switch',
-        icon: <SwapOutlined />,
-        label: t('ui.proxySwitch'),
-        onClick: () => this.setState({ proxyModalVisible: true }),
-      },
-      { type: 'divider' },
-      {
-        key: 'project-stats',
-        icon: <BarChartOutlined />,
-        label: t('ui.projectStats'),
-        onClick: this.handleShowProjectStats,
-      },
-      {
-        key: 'messaging',
-        icon: <MessageOutlined />,
-        label: t('ui.messaging.menu'),
-        onClick: () => this.setState({ messagingModalVisible: true, messagingInitialTool: null }),
-      },
-      ...(viewMode === 'raw' ? [{
-        key: 'global-settings',
-        icon: <SettingOutlined />,
-        label: t('ui.globalSettings'),
-        onClick: () => this.setState({ globalSettingsVisible: true }),
-      }] : []),
-      ...(viewMode === 'chat' ? [{
-        key: 'display-settings',
-        icon: <SettingOutlined />,
-        label: t('ui.settings'),
-        onClick: () => this.setState({ settingsDrawerVisible: true }),
-      }] : []),
-    ];
+    const menuItems = this.getMenuItems();
+    const isElectronTab = this._isElectronTab();
 
     return (
       <div className={styles.headerBar}>
         <Space size="middle" align="center">
+          {!isElectronTab && (
           <Dropdown menu={{ items: menuItems, className: 'logo-dropdown-menu' }} trigger={['hover']} onOpenChange={(open) => this.setState({ logoDropdownOpen: open })} align={{ offset: [-4, 0] }}>
             <span className={`${styles.logoWrap}${this.state.logoDropdownOpen ? ` ${styles.logoWrapActive}` : ''}`}>
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`${styles.logoImage}${this.state.logoDropdownOpen ? ` ${styles.logoImageActive}` : ''}`}><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
             </span>
           </Dropdown>
+          )}
+          {isElectronTab && (
+            <Dropdown
+              menu={{ items: menuItems, className: 'logo-dropdown-menu' }}
+              open={!!this.state.electronMenuOpen}
+              onOpenChange={(open) => this.setState({ electronMenuOpen: open })}
+              trigger={['click']}
+              placement="bottomLeft"
+              getPopupContainer={() => document.body}
+            >
+              <span aria-hidden="true" style={{ position: 'fixed', top: 4, left: 74, width: 1, height: 1, pointerEvents: 'none' }} />
+            </Dropdown>
+          )}
           {IM_PLATFORMS.map((p) => (
-            <ImStatusChip key={p.id} descriptor={p} onClick={() => this.setState({ messagingModalVisible: true, messagingInitialTool: p.id })} />
+            <ImStatusChip key={p.id} descriptor={p} onStatus={this._onImStatus} onClick={() => this.setState({ messagingModalVisible: true, messagingInitialTool: p.id })} />
           ))}
-          {this.props.activeProxyId && this.props.activeProxyId !== 'max' && (() => {
+          {isElectronTab && (
+            <Popover
+              content={
+                <div className={styles.qrcodePopover} onClick={e => e.stopPropagation()}>
+                  <div className={styles.qrcodeTitle}>{t('ui.scanToCoding')} <ConceptHelp doc="QRCode" /></div>
+                  <QRCodeCanvas value={this.shareUrl()} size={200} bgColor={themeColor === 'light' ? '#ffffff' : '#141414'} fgColor={themeColor === 'light' ? '#1a1a1a' : '#d9d9d9'} level="M" />
+                  <Input
+                    readOnly
+                    value={this.shareUrl()}
+                    className={styles.qrcodeUrlInput}
+                    suffix={
+                      <CopyOutlined
+                        className={styles.qrcodeUrlCopy}
+                        onClick={() => { navigator.clipboard.writeText(this.shareUrl()).then(() => { message.success(t('ui.copied')); }).catch(() => {}); }}
+                      />
+                    }
+                  />
+                  {this.state.authState.isAdmin && this.renderPasswordSection()}
+                </div>
+              }
+              trigger={[]}
+              open={!!this.state.electronQrOpen}
+              onOpenChange={(o) => this.setState({ electronQrOpen: o })}
+              placement="bottomRight"
+              getPopupContainer={() => document.body}
+              overlayInnerStyle={{ background: 'var(--bg-elevated)', border: '1px solid var(--border-hover)', borderRadius: 8, padding: '8px 8px' }}
+            >
+              <span aria-hidden="true" style={{ position: 'fixed', top: 4, right: 90, width: 1, height: 1, pointerEvents: 'none' }} />
+            </Popover>
+          )}
+          {!isElectronTab && this.props.activeProxyId && this.props.activeProxyId !== 'max' && (() => {
             const p = (this.props.proxyProfiles || []).find(x => x.id === this.props.activeProxyId);
             return p ? (
               <Tag className={styles.proxyProfileTag} onClick={() => this.setState({ proxyModalVisible: true })}>
@@ -1431,33 +1542,22 @@ class AppHeader extends React.Component {
             // 或本 tab 在 main 端有 ownPending 但本地 approvalGlobal 为空（WS 重连/丢状态边缘），
             // 渲染一个 bell 按钮供用户主动唤起 modal。点击 → onApprovalReopen 清 dismissedIds，
             // ApprovalModal 的 visibleKinds 由此重新命中显示。
-            const ag = this.props.approvalGlobal;
-            const adi = this.props.approvalDismissedIds;
-            const own = this.props.approvalOwnPending || { ask: 0, ptyPlan: 0 };
-            if (!ag || !this.props.onApprovalReopen) return null;
-            let dismissedActive = 0;
-            if (ag.ask?.ask?.id != null && adi instanceof Set && adi.has(`ask:${ag.ask.ask.id}`)) dismissedActive++;
-            if (ag.ptyPlan?.ptyPlan?.id != null && adi instanceof Set && adi.has(`ptyPlan:${ag.ptyPlan.ptyPlan.id}`)) dismissedActive++;
-            const localEmpty = !ag.ask?.ask && !ag.ptyPlan?.ptyPlan;
-            const orphanCount = localEmpty ? ((own.ask || 0) + (own.ptyPlan || 0)) : 0;
-            const total = dismissedActive + orphanCount;
-            if (total === 0) return null;
-            const titleKey = dismissedActive > 0 ? 'ui.approval.bell.reopen' : 'ui.approval.bell.orphan';
-            const titleFallback = dismissedActive > 0 ? 'Reopen approval modal' : 'Server has pending approvals';
-            const _tr = (k, p, f) => { try { const r = t(k, p); return (r && r !== k) ? r : f; } catch { return f; } };
+            if (isElectronTab) return null; // Electron 下 bell 在 tab bar 渲染
+            const info = this._buildApprovalInfo();
+            if (!info) return null;
             return (
               <button
                 type="button"
                 className={styles.approvalBell}
-                aria-label={_tr(titleKey, null, titleFallback)}
-                title={_tr(titleKey, null, titleFallback)}
+                aria-label={info.title}
+                title={info.title}
                 onClick={() => this.props.onApprovalReopen && this.props.onApprovalReopen()}
               >
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                   <path d="M12 2a6 6 0 0 0-6 6v3.5L4.5 14a1 1 0 0 0 .8 1.6h13.4a1 1 0 0 0 .8-1.6L18 11.5V8a6 6 0 0 0-6-6z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" fill="none"/>
                   <path d="M10 18a2 2 0 0 0 4 0" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" fill="none"/>
                 </svg>
-                {total > 0 && <span className={styles.approvalBellBadge}>{total}</span>}
+                {info.count > 0 && <span className={styles.approvalBellBadge}>{info.count}</span>}
               </button>
             );
           })()}
@@ -1467,7 +1567,7 @@ class AppHeader extends React.Component {
               <strong className={styles.countdownStrong}>{countdownText}</strong>
             </Tag>
           )}
-          {viewMode === 'chat' && cliMode && !isLocalLog && this.state.localUrl && (
+          {!isElectronTab && viewMode === 'chat' && cliMode && !isLocalLog && this.state.localUrl && (
             <>
 <Popover
               content={
@@ -1517,6 +1617,7 @@ class AppHeader extends React.Component {
                 </svg>
               </button>
             </Popover>
+              {!isElectronTab && (
               <button
                 type="button"
                 className={styles.themeToggle}
@@ -1550,9 +1651,10 @@ class AppHeader extends React.Component {
                   )}
                 </span>
               </button>
+              )}
             </>
           )}
-          {cliMode && viewMode === 'chat' && !isLocalLog && (
+          {!isElectronTab && cliMode && viewMode === 'chat' && !isLocalLog && (
             <Button
               className={styles.compactBtn}
               type={terminalVisible ? 'primary' : 'default'}
@@ -1563,6 +1665,7 @@ class AppHeader extends React.Component {
               {t('ui.terminal')}
             </Button>
           )}
+          {!isElectronTab && (
           <Button
             className={styles.compactBtn}
             type={viewMode === 'raw' ? 'primary' : 'default'}
@@ -1571,6 +1674,7 @@ class AppHeader extends React.Component {
           >
             {viewMode === 'raw' ? t('ui.chatMode') : t('ui.rawMode')}
           </Button>
+          )}
         </Space>
         <MemoryDetailModal
           detail={this.state._memoryDetail}

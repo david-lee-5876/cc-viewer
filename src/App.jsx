@@ -66,7 +66,18 @@ class App extends AppBase {
 
   componentDidMount() {
     super.componentDidMount();
-    // 窗口宽度 < 600px 时提示切换到侧边栏模式
+    // Electron：模式切换只跟随右上角开关（device mode 状态），不随窗口宽度变化；挂载时按当前状态对齐。
+    // 浏览器：窗口 < 600px 时弹框提示切换到侧边栏(pad)模式。
+    const inElectronTab = typeof window !== 'undefined' && !!window.tabBridge;
+    if (inElectronTab) {
+      this._onDeviceMode = (on) => {
+        const target = on ? 'pad' : 'pc';
+        if (localStorage.getItem('ccv_viewMode') !== target) setViewMode(target);
+      };
+      this._disposeDeviceMode = window.tabBridge.onDeviceModeChange?.(this._onDeviceMode);
+      window.tabBridge.requestDeviceMode?.();
+      return;
+    }
     this._mqlNarrow = window.matchMedia('(max-width: 600px)');
     this._modeSwitchDialog = null;
     this._onNarrowChange = (e) => {
@@ -87,6 +98,7 @@ class App extends AppBase {
   }
 
   componentWillUnmount() {
+    if (this._disposeDeviceMode) { this._disposeDeviceMode(); this._disposeDeviceMode = null; }
     if (this._mqlNarrow) {
       this._mqlNarrow.removeEventListener('change', this._onNarrowChange);
     }
@@ -291,7 +303,7 @@ class App extends AppBase {
           </div>
         )}
         <Layout className={styles.layout} ref={this._layoutRef} onDragOver={this._onDragOver} onDragLeave={this._onDragLeave} onDrop={this._onDrop}>
-          <Layout.Header className={styles.header}>
+          <Layout.Header className={styles.header} inert={(typeof window !== 'undefined' && window.tabBridge) ? '' : undefined} style={(typeof window !== 'undefined' && window.tabBridge) ? { height: 0, minHeight: 0, padding: 0, overflow: 'hidden', border: 'none', lineHeight: 0 } : undefined}>
             <AppHeader
               ref={this.appHeaderRef}
               requestCount={filteredRequests.length}

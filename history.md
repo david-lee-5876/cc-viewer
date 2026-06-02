@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- feat(electron): iPad/设备预览模式——tab bar 右上角开关把窗口收窄到 500px 预览 pad 布局（main 持有状态、跨 tab 不丢，可手动再拉大），React viewMode 跟随设备模式信号切 pad⇄pc；header 控件（菜单/代理/IM 状态/审批 bell/主题/终端/视图模式/二维码）经序列化 header 模型迁入原生 tab bar 渲染、点击回传执行；tab bar 改版至 50px（`ui.menu`/`ui.deviceMode.toIpad`/`ui.deviceMode.toPc` 补 18 语言）
 - feat(im): 多 IM 平台桥接——钉钉专用桥接重构为通用编排核心 `im-bridge-core.js` + 平台适配器 `adapters/` + 配置层 `im-config.js`，钉钉保留薄壳兼容旧接口
 - feat(im): 新增飞书/Lark 桥接（长连接事件订阅，支持 feishu.cn / larksuite.com 区域选择）
 - feat(im): 新增企业微信桥接（智能机器人长连接，botId + secret）

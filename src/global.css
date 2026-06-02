@@ -309,6 +309,12 @@ body {
   -webkit-tap-highlight-color: transparent;
 }
 
+/* 工作区选择器浮层模式（Electron 多 tab 点「+」）：body 透明，使透明 workspaceView 叠加在
+   当前 tab 之上时能透出后面变暗的项目界面。类选择器特异性高于上面的 body 规则，无需 !important。 */
+body.ccv-ws-popup {
+  background-color: transparent;
+}
+
 /* 阻止子滚动容器到边后将滚动事件冒泡到 body/html，消除"滚到顶/底继续拖会拖动整页"
    的 rubber-band 体感。cc-viewer 整体 flex 布局，body 不应承载滚动；这一行
    彻底关掉滚动冒泡链，对 MDXEditor / chat 流 / 文件浏览树 / terminal 等所有

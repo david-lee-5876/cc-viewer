@@ -37,7 +37,10 @@ if (isMobile && isIOS && !isPad) {
   document.documentElement.classList.add('mobile-ios');
 }
 
-/** 切换视图模式并重载页面 */
+/**
+ * 切换视图模式并重载页面。必须 reload：isPad/isMobile（本文件顶部）在模块加载时按 ccv_viewMode
+ * 计算一次，决定挂载 App 还是 Mobile 树，运行期无法软切换，故写入偏好后整页重载。
+ */
 export function setViewMode(mode) {
   localStorage.setItem('ccv_viewMode', mode);
   location.reload();

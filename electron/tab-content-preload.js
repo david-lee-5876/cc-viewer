@@ -45,4 +45,18 @@ contextBridge.exposeInMainWorld('tabBridge', {
   // 整体显示缩放(原生)。f ∈ [0.5, 2.0](见 displayScaleHelper 预设 50–200)。renderer 用本方法
   // 是否存在(window.tabBridge.setZoomFactor)判定「Electron 桌面 → 显示下拉」vs「浏览器 → (?) 提示」。
   setZoomFactor: (f) => { try { webFrame.setZoomFactor(f); } catch {} },
+  // Header 控件迁移到 tab bar：active tab 把 header 模型推上去；接收 tab bar 的点击动作。
+  setHeaderModel: (model) => ipcRenderer.send('set-header-model', model),
+  onHeaderAction: (cb) => {
+    const handler = (_, payload) => cb(payload);
+    ipcRenderer.on('header-action', handler);
+    return () => ipcRenderer.removeListener('header-action', handler);
+  },
+  // iPad/设备模式：右上角开关切换 → main 广播 device-mode-changed；React 据此切 viewMode(pad⇄pc)，不依赖窗口宽度。
+  requestDeviceMode: () => ipcRenderer.send('request-device-mode'),
+  onDeviceModeChange: (cb) => {
+    const handler = (_, on) => cb(on);
+    ipcRenderer.on('device-mode-changed', handler);
+    return () => ipcRenderer.removeListener('device-mode-changed', handler);
+  },
 });

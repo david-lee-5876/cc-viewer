@@ -2,7 +2,7 @@
  * CC Viewer Electron — Multi-Tab Architecture
  *
  * BaseWindow with:
- * - tabBarView (36px, tab-bar.html)
+ * - tabBarView (50px, tab-bar.html)
  * - workspaceView (project selector, shown when no tabs / adding new)
  * - per-tab WebContentsView (each loads its own server port)
  *
@@ -177,7 +177,7 @@ async function startMgmtServer() {
 }
 
 // --- Tab state ---
-const TAB_BAR_HEIGHT = 60;
+const TAB_BAR_HEIGHT = 50;
 // debug worker 日志保留窗口（CCV_DEBUG_WORKER_LOGS=1 时使用）
 const LOG_RETENTION_MS = 7 * 24 * 3600 * 1000;
 const tabs = new Map(); // tabId -> { child, port, token, projectName, realPath, view, status }
@@ -188,6 +188,23 @@ let activeTabId = null;
 let mainWindow = null;
 let tabBarView = null;
 let workspaceView = null;
+
+// --- iPad/device mode (window resize) ---
+// 状态由 main 进程持有，跨 tab 切换不丢失。deviceMode = 当前处于 iPad 模式；
+// savedBounds = 进入 iPad 模式前记下的窗口尺寸，退出时还原。
+// iPad 模式只是把窗口收窄到 DEVICE_WIDTH，并把最小宽度放宽到 DEVICE_WIDTH，
+// 因此用户仍可手动把窗口再拉大。
+const DEVICE_WIDTH = 500;       // iPad 预览默认宽度
+const DEVICE_MIN_WIDTH = 460;   // iPad 模式下允许手动缩到的最小宽度
+const PC_MIN_WIDTH = 800;   // 原始 minWidth（见 BaseWindow 创建处）
+const WIN_MIN_HEIGHT = 600;
+let deviceMode = false;
+let savedBounds = null;
+
+// --- Workspace selector popup mode ---
+// 工作区选择器有两种呈现：整页（零 tab 的初始化界面）/ 浮层（已有 tab 时点「+」，叠在当前
+// tab 之上居中弹出，当前界面变暗保留在后面）。workspacePopupOpen = 当前处于浮层模式。
+let workspacePopupOpen = false;
 
 // --- Pending-approval aggregation across tabs ---
 // pendingByTab: tabId -> { permission?: Map<id,payload>, plan?: Map<id,payload>, ask?: Map<id,payload>, projectName }
@@ -372,6 +389,9 @@ function broadcastTabs() {
   if (tabBarView?.webContents && !tabBarView.webContents.isDestroyed()) {
     tabBarView.webContents.send('tabs-updated', getTabList());
     tabBarView.webContents.send('tab-activated', activeTabId);
+    // 同步当前活动 tab 的 header 模型（迁移到 tab bar 的那批控件）；无活动 tab → null 清空。
+    const hm = activeTabId != null ? (tabs.get(activeTabId)?.headerModel ?? null) : null;
+    tabBarView.webContents.send('header-model', hm, activeTabId);
   }
 }
 
@@ -394,6 +414,49 @@ function updateLayout() {
   for (const tab of tabs.values()) {
     if (tab.view) tab.view.setBounds({ x: 0, y: TAB_BAR_HEIGHT, width: w, height: h - TAB_BAR_HEIGHT });
   }
+}
+
+// 把主窗口在 PC / iPad 模式间切换。进入时记下当前尺寸并收窄到 DEVICE_WIDTH（高度、位置不变），
+// 退出时还原到记下的尺寸。窗口最小宽度随模式调整：进入前先放宽到 DEVICE_MIN_WIDTH(460)，否则 setBounds 会被
+// 原 minWidth(800) 钳制；退出后再恢复到 800。programmatic setBounds 会触发 'resize' → updateLayout，
+// 但 updateLayout 只重排子视图、不动窗口，无回环，这里再同步调一次确保即时生效。
+function setDeviceMode(on) {
+  if (!mainWindow) return;
+  if (on === deviceMode) { broadcastDeviceMode(); return; }
+  if (mainWindow.isFullScreen && mainWindow.isFullScreen()) { broadcastDeviceMode(); return; } // 全屏下无法 resize：回弹按钮态，不改 deviceMode
+  if (on) {
+    if (mainWindow.isMaximized && mainWindow.isMaximized()) mainWindow.unmaximize();
+    // getNormalBounds() 返回「非最大化」几何，避免从最大化进入时把全屏尺寸误记为 savedBounds。
+    const b = (typeof mainWindow.getNormalBounds === 'function' ? mainWindow.getNormalBounds() : mainWindow.getBounds());
+    savedBounds = { x: b.x, y: b.y, width: b.width, height: b.height };
+    mainWindow.setMinimumSize(DEVICE_MIN_WIDTH, WIN_MIN_HEIGHT); // 先放宽 min 到 460，否则被原 minWidth 钳制
+    mainWindow.setBounds({ x: b.x, y: b.y, width: DEVICE_WIDTH, height: b.height });
+    deviceMode = true;
+  } else {
+    const cur = mainWindow.getBounds();
+    const tgt = savedBounds || { width: 1400, height: cur.height };
+    mainWindow.setBounds({ x: cur.x, y: cur.y, width: tgt.width, height: tgt.height });
+    mainWindow.setMinimumSize(PC_MIN_WIDTH, WIN_MIN_HEIGHT); // 放大后再恢复 min
+    savedBounds = null;
+    deviceMode = false;
+  }
+  updateLayout();
+  broadcastDeviceMode();
+}
+
+// 把当前 deviceMode 推给 tab bar（按钮所在的窗口级 chrome），让图标与窗口状态一致。
+function broadcastDeviceMode() {
+  const wc = tabBarView && tabBarView.webContents;
+  if (wc && !wc.isDestroyed()) wc.send('device-mode-changed', deviceMode);
+  sendDeviceModeToTab(activeTabId); // 仅活动 tab：React 据 device mode 状态切 viewMode(pad⇄pc)，不依赖宽度
+}
+
+// 把当前 deviceMode 推给指定 tab 的 content（React 据此对齐 viewMode）。只推活动/被切到的 tab：
+// 不全量广播——会话在 tab-worker 后端不受前端 reload 影响，但避免后台 tab 无谓 reload 丢前端草稿。
+function sendDeviceModeToTab(tabId) {
+  const tab = tabId != null ? tabs.get(tabId) : null;
+  const twc = tab && tab.view && tab.view.webContents;
+  if (twc && !twc.isDestroyed()) twc.send('device-mode-changed', deviceMode);
 }
 
 // --- Tab management ---
@@ -567,8 +630,10 @@ function switchTab(tabId) {
   const target = tabs.get(tabId);
   if (!target) return;
 
-  // If target tab is still loading (no view yet), just mark it active but keep workspace visible
+  // If target tab is still loading (no view yet), just mark it active but keep workspace visible.
+  // 但浮层模式必须先收起：否则切到加载中的 tab 会让浮层悬空（视图仍叠着、workspacePopupOpen 仍为 true、activeTabId 已变）。
   if (!target.view) {
+    if (workspacePopupOpen) hideWorkspaceSelector();
     activeTabId = tabId;
     broadcastTabs();
     updateWindowTitle();
@@ -579,6 +644,7 @@ function switchTab(tabId) {
   if (workspaceView && !workspaceView.webContents.isDestroyed()) {
     try { mainWindow.contentView.removeChildView(workspaceView); } catch {}
   }
+  if (workspacePopupOpen) { workspacePopupOpen = false; sendWorkspaceMode('full'); } // 切 tab 时浮层让位 + 复位 React 浮层态
   for (const [id, tab] of tabs) {
     if (tab.view) {
       if (id === tabId) {
@@ -594,6 +660,7 @@ function switchTab(tabId) {
   updateLayout();
   activeTabId = tabId;
   broadcastTabs();
+  sendDeviceModeToTab(tabId); // 切到的 tab 同步 device mode → 对齐 viewMode（仅不匹配时 reload）
   updateWindowTitle();
 }
 
@@ -648,7 +715,9 @@ async function closeTab(tabId) {
   updateWindowTitle();
 }
 
-function showWorkspaceSelector() {
+// 懒创建并复用 workspaceView。背景设透明（'#00000000'），让浮层模式下 React 画的半透明遮罩
+// 能透出后面的 tab；整页模式下 React 自身画不透明背景，透明视图无副作用。
+function ensureWorkspaceView() {
   if (!workspaceView || workspaceView.webContents.isDestroyed()) {
     workspaceView = new WebContentsView({
       webPreferences: {
@@ -658,10 +727,32 @@ function showWorkspaceSelector() {
         autoplayPolicy: 'no-user-gesture-required',
       },
     });
+    try { workspaceView.setBackgroundColor('#00000000'); } catch {}
     const token = mgmtServerMod.getAccessToken();
     attachDiagListeners(workspaceView.webContents, 'workspace');
+    // 加载完成后重推当前模式：首次开浮层时 sendWorkspaceMode('popup') 早于 loadURL 完成会丢，靠这里兜底（不再只依赖 React mount 端 request）。
+    workspaceView.webContents.on('did-finish-load', () => sendWorkspaceMode(workspacePopupOpen ? 'popup' : 'full'));
+    // 渲染进程崩溃：复位浮层标志并丢弃视图，下次开 picker 由 ensureWorkspaceView 重建，避免「崩溃后首次点 + 只清状态不打开」的双击 papercut。
+    workspaceView.webContents.on('render-process-gone', () => { workspacePopupOpen = false; workspaceView = null; });
     workspaceView.webContents.loadURL(`http://127.0.0.1:${mgmtPort}${token ? `?token=${token}` : ''}`);
   }
+  return workspaceView;
+}
+
+// 把当前工作区选择器模式推给 workspaceView 的 React 端（'full' 整页 / 'popup' 浮层）。
+function sendWorkspaceMode(mode) {
+  const wc = workspaceView && workspaceView.webContents;
+  if (wc && !wc.isDestroyed()) wc.send('workspace-mode', mode);
+}
+
+// 「+」/Cmd+T 入口：有 tab → 浮层；无 tab → 整页（理论上无 tab 时 tab bar 不显示「+」，这里兜底）。
+function openProjectPicker() {
+  if (tabs.size > 0) showWorkspacePopup();
+  else showWorkspaceSelector();
+}
+
+function showWorkspaceSelector() {
+  ensureWorkspaceView();
   // Remove all tab views, then add workspace view on top
   for (const tab of tabs.values()) {
     if (tab.view) {
@@ -673,26 +764,89 @@ function showWorkspaceSelector() {
   workspaceView.setVisible(true);
   updateLayout();
   activeTabId = null;
+  workspacePopupOpen = false;
   broadcastTabs();
+  sendWorkspaceMode('full');
   updateWindowTitle();
+}
+
+// 浮层模式：保留当前活动 tab 视图不移除，把 workspaceView 叠在其上置顶（透明背景），
+// activeTabId 不变 → tab bar 仍高亮当前 tab、保留「+」与 header 控件。
+function showWorkspacePopup() {
+  if (tabs.size === 0) { showWorkspaceSelector(); return; } // 无 tab 兜底回整页，避免浮层后无内容
+  ensureWorkspaceView();
+  try { mainWindow.contentView.removeChildView(workspaceView); } catch {}
+  mainWindow.contentView.addChildView(workspaceView);
+  workspaceView.setVisible(true);
+  updateLayout();
+  workspacePopupOpen = true;
+  sendWorkspaceMode('popup');
+  broadcastTabs();
 }
 
 function hideWorkspaceSelector() {
   if (workspaceView && !workspaceView.webContents.isDestroyed()) {
     try { mainWindow.contentView.removeChildView(workspaceView); } catch {}
   }
+  workspacePopupOpen = false;
+  sendWorkspaceMode('full'); // 收起即把 React 浮层态 / ccv-ws-popup body class 复位，避免隐藏视图上的悬挂状态
 }
 
 // --- IPC handlers ---
 ipcMain.on('tab-switch', (_, tabId) => switchTab(tabId));
 ipcMain.on('tab-close', (_, tabId) => closeTab(tabId));
-ipcMain.on('tab-new', () => showWorkspaceSelector());
+// 「+」点击：浮层已开 → 再点收起（toggle）；否则按是否有 tab 弹浮层/整页。
+ipcMain.on('tab-new', () => {
+  if (workspacePopupOpen) { hideWorkspaceSelector(); broadcastTabs(); }
+  else openProjectPicker();
+});
+// 浮层内的关闭按钮 / 点遮罩 / Esc → 收起浮层，露出原 tab。
+ipcMain.on('workspace-popup-close', () => {
+  if (workspacePopupOpen) { hideWorkspaceSelector(); broadcastTabs(); }
+});
+// React 端挂载即拉取当前模式，消除首帧竞态（镜像 device-mode 的 request/response）。
+ipcMain.on('request-workspace-mode', (event) => {
+  if (event.sender && !event.sender.isDestroyed()) {
+    event.sender.send('workspace-mode', workspacePopupOpen ? 'popup' : 'full');
+  }
+});
 ipcMain.on('workspace-launch', (_, data) => {
   console.log('[main] workspace-launch IPC:', data);
   createTab(data.path, data.extraArgs);
 });
 ipcMain.on('approval-jump', (_, tabId) => {
   if (tabId != null && tabs.has(tabId)) switchTab(tabId);
+});
+// iPad 模式：renderer 发无状态 toggle，main 翻转权威状态并应用；新挂载的 header 用 request 同步初值。
+ipcMain.on('toggle-device-mode', () => setDeviceMode(!deviceMode));
+ipcMain.on('request-device-mode', (event) => {
+  if (event.sender && !event.sender.isDestroyed()) event.sender.send('device-mode-changed', deviceMode);
+});
+// tab bar 挂载即拉取当前活动 tab 已缓存的 header 模型，消除 did-finish-load 与首次 push 的竞态。
+ipcMain.on('request-header-model', (event) => {
+  if (!event.sender || event.sender.isDestroyed()) return;
+  const hm = activeTabId != null ? (tabs.get(activeTabId)?.headerModel ?? null) : null;
+  event.sender.send('header-model', hm, activeTabId);
+});
+// Header 控件迁移：活动 tab 的 React header 把「迁移到 tab bar 的控件」模型推上来，main 缓存到该 tab，
+// 若它是活动 tab 则转发给 tab bar 渲染。tab bar 的点击回传 header-action → 转发给当前活动 tab 执行。
+ipcMain.on('set-header-model', (event, model) => {
+  const id = _resolveSenderTabId(event.sender);
+  if (id == null) return;
+  const tab = tabs.get(id);
+  if (!tab) return;
+  tab.headerModel = model;
+  if (id === activeTabId && tabBarView?.webContents && !tabBarView.webContents.isDestroyed()) {
+    tabBarView.webContents.send('header-model', model, id);
+  }
+});
+ipcMain.on('header-action', (_event, payload) => {
+  // 优先投递给「按钮所属 tab」（tab bar 随模型回传 tabId）；切 tab 竞态下不会误投到新活动 tab。
+  // 无 tabId（兜底/旧路径）时退回当前活动 tab。
+  const targetId = (payload && payload.tabId != null && tabs.has(payload.tabId)) ? payload.tabId : activeTabId;
+  const tab = targetId != null ? tabs.get(targetId) : null;
+  const wc = tab && tab.view && tab.view.webContents;
+  if (wc && !wc.isDestroyed()) wc.send('header-action', payload);
 });
 
 // Resolve sender's tabId by reverse-scanning the tabs Map. O(n) but n is small (<10).
@@ -784,7 +938,7 @@ function buildMenu() {
     {
       label: 'File',
       submenu: [
-        { label: 'New Tab', accelerator: 'CmdOrCtrl+T', click: () => showWorkspaceSelector() },
+        { label: 'New Tab', accelerator: 'CmdOrCtrl+T', click: () => openProjectPicker() },
         { label: 'Close Tab', accelerator: 'CmdOrCtrl+W', click: () => { if (activeTabId) closeTab(activeTabId); } },
       ],
     },
@@ -926,7 +1080,7 @@ if (!gotLock) {
       minHeight: 600,
       title: 'CC Viewer',
       titleBarStyle: 'hiddenInset',
-      trafficLightPosition: { x: 16, y: 22 },
+      trafficLightPosition: { x: 16, y: 17 },
     });
 
     // Tab bar
@@ -950,6 +1104,16 @@ if (!gotLock) {
     tabBarView.webContents.on('did-finish-load', sendFullscreenState);
     mainWindow.on('enter-full-screen', sendFullscreenState);
     mainWindow.on('leave-full-screen', sendFullscreenState);
+    // 设备模式下经历 OS 全屏往返：离开全屏后系统还原「进全屏前」的窄窗，但若期间宽度被改，
+    // 据权威 deviceMode 重新收窄，保证 deviceMode=true ⇔ 窗口=DEVICE_WIDTH 不漂移。
+    mainWindow.on('leave-full-screen', () => {
+      if (deviceMode && mainWindow && !mainWindow.isFullScreen()) {
+        const b = mainWindow.getBounds();
+        if (b.width !== DEVICE_WIDTH) mainWindow.setBounds({ x: b.x, y: b.y, width: DEVICE_WIDTH, height: b.height });
+        mainWindow.setMinimumSize(DEVICE_MIN_WIDTH, WIN_MIN_HEIGHT);
+        updateLayout();
+      }
+    });
 
     // When the user brings the window back to focus, stop the taskbar/dock flash and clear notifications already opened on screen.
     mainWindow.on('focus', () => {
