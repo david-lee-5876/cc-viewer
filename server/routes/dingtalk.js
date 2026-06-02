@@ -18,13 +18,19 @@ function readBody(req, deps, cb) {
   req.on('end', () => cb(body));
 }
 
-function dingtalkStatus(req, res, parsedUrl, isLocal, deps) {
-  const conn = deps.dingtalk.getBridgeStatus();
+async function dingtalkStatus(req, res, parsedUrl, isLocal, deps) {
+  // 与 /api/im/:platform/status 一致：worker 报自身在进程适配器状态（manager 据此探活）；
+  // 主进程经 manager 报 detached worker 的进程/连接状态。
+  let conn;
+  let processInfo = null;
+  if (deps.dingtalk.isWorker) {
+    conn = deps.dingtalk.getBridgeStatus();
+  } else {
+    processInfo = await deps.dingtalk.getProcessStatus();
+    conn = { running: processInfo.running, connected: processInfo.connected };
+  }
   res.writeHead(200, JSON_HEADERS);
   if (!isLocal) {
-    // Loopback gate: a token-authorized LAN client must not see the appKey, the staffId
-    // allowlist, the bound conversation id, or raw error strings. Expose only the minimum the
-    // header status chip needs. (config/test are already loopback-only.)
     res.end(JSON.stringify({
       enabled: loadDingTalkState().enabled,
       hasSecret: loadDingTalkState().hasSecret,
@@ -32,9 +38,14 @@ function dingtalkStatus(req, res, parsedUrl, isLocal, deps) {
     }));
     return;
   }
-  // 本机(127.0.0.1)= admin：附带明文 appSecret 供本人查阅/复制（镜像 /api/auth/state 的密码、
-  // /api/proxy-profiles 的 apiKey 策略）。上方 !isLocal 分支只下发 hasSecret，绝不下发 secret。
-  res.end(JSON.stringify({ ...loadDingTalkState(), appSecret: loadDingTalkConfig().appSecret, connection: conn }));
+  // 本机(127.0.0.1)= admin / manager 探活：附带明文 appSecret 与 pid（供身份匹配）。
+  res.end(JSON.stringify({
+    ...loadDingTalkState(),
+    appSecret: loadDingTalkConfig().appSecret,
+    connection: conn,
+    process: processInfo,
+    pid: deps.dingtalk.isWorker ? process.pid : (processInfo?.pid ?? null),
+  }));
 }
 
 function dingtalkConfigPost(req, res, parsedUrl, isLocal, deps) {
@@ -44,7 +55,7 @@ function dingtalkConfigPost(req, res, parsedUrl, isLocal, deps) {
     res.end(JSON.stringify({ error: 'Loopback only' }));
     return;
   }
-  readBody(req, deps, (body) => {
+  readBody(req, deps, async (body) => {
     let incoming;
     try { incoming = JSON.parse(body); }
     catch {
@@ -52,8 +63,17 @@ function dingtalkConfigPost(req, res, parsedUrl, isLocal, deps) {
       res.end(JSON.stringify({ error: 'Invalid JSON' }));
       return;
     }
+    // 发送者白名单为非必填：启用时若 allowStaffIds 为空不再硬拦截（前端弹安全警告）。worker 以
+    // --dangerously-skip-permissions 运行，空白名单运行期退化为 bind-first-conversation。打一条
+    // 服务端审计（curl/headless 启用走不到前端 toast）；PreToolUse permissions.deny 硬拦截仍生效。
+    const staff = Array.isArray(incoming.allowStaffIds)
+      ? incoming.allowStaffIds.filter((s) => typeof s === 'string' && s.trim())
+      : [];
+    if (incoming.enabled && staff.length === 0) {
+      console.warn('[CC Viewer] IM dingtalk enabled with EMPTY allowlist — bind-first-conversation; the first conversation to message can drive this --dangerously-skip-permissions session');
+    }
     // saveDingTalkConfig preserves the stored secret when appSecret is empty/omitted.
-    saveDingTalkConfig({
+    const saved = saveDingTalkConfig({
       enabled: incoming.enabled,
       appKey: incoming.appKey,
       appSecret: incoming.appSecret,
@@ -61,10 +81,15 @@ function dingtalkConfigPost(req, res, parsedUrl, isLocal, deps) {
       maxChunkChars: incoming.maxChunkChars,
       blockOnSkipPermissions: incoming.blockOnSkipPermissions,
     });
-    // Apply immediately: stop the old Stream connection and (re)start with the new config.
-    Promise.resolve(deps.dingtalk.reloadBridge()).catch(() => {});
+    // 驱动进程管理器（替代旧的在进程 reloadBridge）：启用→重启 worker，停用→停 worker。
+    try {
+      if (saved?.enabled ?? incoming.enabled) await deps.dingtalk.restartProcess();
+      else await deps.dingtalk.stopProcess();
+    } catch (e) {
+      console.error('[CC Viewer] IM config apply failed for dingtalk:', e?.message || e);
+    }
     res.writeHead(200, JSON_HEADERS);
-    res.end(JSON.stringify({ ...loadDingTalkState(), connection: deps.dingtalk.getBridgeStatus() }));
+    res.end(JSON.stringify({ ...loadDingTalkState(), connection: { running: !!(saved?.enabled ?? incoming.enabled), connected: false } }));
   });
 }
 

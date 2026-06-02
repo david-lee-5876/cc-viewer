@@ -247,7 +247,9 @@ export function createStreamAssembler() {
 export function findRecentLog(dir, projectName) {
   try {
     const files = readdirSync(dir)
-      .filter(f => f.startsWith(projectName + '_') && f.endsWith('.jsonl'))
+      // 排除 *_temp.jsonl：临时文件是未完成的写入态（resume 流程中途产物），
+      // 不应被当作"最近完整日志"（否则 _temp 因 sort 排在正式文件之后会被误选）。
+      .filter(f => f.startsWith(projectName + '_') && f.endsWith('.jsonl') && !f.endsWith('_temp.jsonl'))
       .sort()
       .reverse();
     if (files.length === 0) return null;

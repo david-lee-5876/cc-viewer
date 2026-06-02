@@ -35,30 +35,44 @@ export default function ImStatusChip({ descriptor, onClick, onStatus }) {
   // 向上汇报状态（供 Electron tab bar 渲染迁移过去的 IM 图标；web 下不传 onStatus，无副作用）。
   useEffect(() => {
     if (!onStatus) return;
-    onStatus(descriptor.id, { enabled, connected: !!(connection && connection.connected && !connection.lastError) });
+    onStatus(descriptor.id, {
+      enabled,
+      running: !!connection?.running,
+      connected: !!(connection && connection.connected && !connection.lastError),
+    });
   }, [enabled, connection, onStatus, descriptor.id]);
 
   if (!enabled) return null;
 
-  let state = 'disconnected';
+  // 进程感知五态：每个 IM 现在跑在独立 worker 进程里，主 ccv 经 manager 汇报 {running, connected}。
+  //   error      —— worker 报了 lastError（灰 + 红点）
+  //   connected  —— 进程在 + 适配器已连（品牌色）
+  //   running    —— 进程在但适配器未连（品牌色 + 降透明度，"运行中，连接中…"）
+  //   stopped    —— 进程不在（灰）
+  let state = 'stopped';
   if (connection?.lastError) state = 'error';
-  else if (connection?.connected) state = 'connected';
+  else if (connection?.running && connection?.connected) state = 'connected';
+  else if (connection?.running) state = 'running';
 
   const statusLabel = state === 'connected'
     ? _tr('ui.im.statusConnected', null, 'Connected')
-    : state === 'error'
-      ? `${_tr('ui.im.statusError', null, 'Error')}: ${connection.lastError}`
-      : _tr('ui.im.statusDisconnected', null, 'Disconnected');
+    : state === 'running'
+      ? _tr('ui.im.statusRunning', null, 'Running, connecting…')
+      : state === 'error'
+        ? `${_tr('ui.im.statusError', null, 'Error')}: ${connection.lastError}`
+        : _tr('ui.im.statusStopped', null, 'Stopped');
   const label = _tr(descriptor.labelKey, null, descriptor.fallback);
-  // Brand color when connected, grey otherwise — driven by the descriptor, not a per-brand class.
-  const color = state === 'connected' ? descriptor.color : 'var(--text-tertiary, #999)';
+  // Brand color when running/connected, grey when stopped/error — driven by the descriptor.
+  const color = (state === 'connected' || state === 'running') ? descriptor.color : 'var(--text-tertiary, #999)';
+  const iconClass = state === 'running' ? `${styles.logo} ${styles.connecting}` : styles.logo;
 
   return (
     <Tooltip title={`${label} · ${statusLabel}`}>
       <span className={styles.chip} onClick={onClick} role="button" tabIndex={0}
         aria-label={`${label} · ${statusLabel}`}
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onClick?.(); }}>
-        <Icon size={16} className={styles.logo} style={{ color }} />
+        <Icon size={16} className={iconClass} style={{ color }} />
+        {state === 'error' ? <span className={styles.dotError} aria-hidden="true" /> : null}
       </span>
     </Tooltip>
   );

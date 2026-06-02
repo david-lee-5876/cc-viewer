@@ -102,7 +102,7 @@ describe('GET /api/dingtalk/status loopback gate', () => {
     const { saveDingTalkConfig } = await import('../server/lib/dingtalk-config.js');
     saveDingTalkConfig({ enabled: true, appKey: 'dkSECRET', appSecret: 'appSecretSECRET', allowStaffIds: ['staff-x'] });
     const route = dingtalkRoutes.find((r) => r.path === '/api/dingtalk/status' && r.method === 'GET');
-    const deps = { dingtalk: { getBridgeStatus: () => ({ running: true, connected: true, boundConversationId: 'cidSECRET', appKeyTail: 'CRET', lastError: 'boom' }) } };
+    const deps = { dingtalk: { isWorker: true, getBridgeStatus: () => ({ running: true, connected: true, boundConversationId: 'cidSECRET', appKeyTail: 'CRET', lastError: 'boom' }) } };
     const mkRes = () => { let payload = ''; return { writeHead() {}, end(b) { payload = b || ''; }, get payload() { return payload; } }; };
 
     const remote = mkRes();
@@ -143,5 +143,32 @@ describe('POST /api/dingtalk/config loopback-only guard', () => {
     assert.equal(status, 403);
     assert.match(payload, /Loopback only/);
     assert.equal(reloaded, false, 'must not reload bridge for a remote caller');
+  });
+});
+
+// Allowlist is optional: enabling with an empty allowStaffIds now saves (200) and drives the
+// worker, instead of the old 400 allowlist_required (the legacy gate matched the generic im route).
+// Note: dingtalk deps' restartProcess/stopProcess take NO id arg, unlike deps.im.
+describe('POST /api/dingtalk/config allowlist optional', () => {
+  const fakeReq = (bodyStr) => ({
+    on(ev, cb) { if (ev === 'data' && bodyStr) cb(Buffer.from(bodyStr)); if (ev === 'end') cb(); return this; },
+  });
+  function call(route, body, deps) {
+    let status = 0, payload = '';
+    let resolveEnd; const done = new Promise((r) => { resolveEnd = r; });
+    const res = { writeHead(s) { status = s; }, end(b) { payload = b || ''; resolveEnd(); } };
+    route.handler(fakeReq(JSON.stringify(body)), res, { pathname: '/api/dingtalk/config' }, /* isLocal */ true, deps);
+    return done.then(() => ({ status, json: () => JSON.parse(payload) }));
+  }
+
+  it('enabled:true with empty allowStaffIds → 200 and drives restartProcess', async () => {
+    const { dingtalkRoutes } = await import('../server/routes/dingtalk.js');
+    const route = dingtalkRoutes.find((r) => r.path === '/api/dingtalk/config' && r.method === 'POST');
+    const calls = [];
+    const deps = { MAX_POST_BODY: 1e6, dingtalk: { isWorker: false, restartProcess: async () => calls.push('restart'), stopProcess: async () => calls.push('stop') } };
+    const r = await call(route, { enabled: true, appKey: 'a', appSecret: 'b', allowStaffIds: [] }, deps);
+    assert.equal(r.status, 200);
+    assert.equal(r.json().connection.running, true);
+    assert.deepEqual(calls, ['restart']);
   });
 });

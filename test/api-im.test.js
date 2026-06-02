@@ -179,7 +179,9 @@ describe('POST /api/im/:platform/config loopback-only guard', () => {
     const { saveConfig } = await import('../server/lib/im-config.js');
     saveConfig('feishu', { enabled: true, appId: 'cli_SECRET', appSecret: 'sec_SECRET', region: 'lark', allowUserIds: ['ou_SECRET'] });
     const route = imRoutes.find((r) => r.predicate('/api/im/feishu/status', 'GET'));
-    const deps = { im: { getBridgeStatus: () => ({ running: true, connected: true, boundConversationId: 'oc_SECRET', appKeyTail: 'CRET', lastError: 'boom' }) } };
+    // isWorker:true → imStatus reports its own in-process adapter (the leaky connection we stub here);
+    // the !isLocal branch must strip it. (A worker actually binds loopback-only, but the strip logic stays.)
+    const deps = { im: { isWorker: true, getBridgeStatus: () => ({ running: true, connected: true, boundConversationId: 'oc_SECRET', appKeyTail: 'CRET', lastError: 'boom' }) } };
     let payload = '';
     const res = { writeHead() {}, end(b) { payload = b || ''; } };
     route.handler({}, res, { pathname: '/api/im/feishu/status' }, /* isLocal */ false, deps);
@@ -200,7 +202,7 @@ describe('POST /api/im/:platform/config loopback-only guard', () => {
     const { saveConfig } = await import('../server/lib/im-config.js');
     saveConfig('discord', { enabled: true, botToken: 'tok_SECRET', allowUserIds: ['u_SECRET'] });
     const route = imRoutes.find((r) => r.predicate('/api/im/discord/status', 'GET'));
-    const deps = { im: { getBridgeStatus: () => ({ running: true, connected: true, boundConversationId: 'dm_SECRET', lastError: 'boom' }) } };
+    const deps = { im: { isWorker: true, getBridgeStatus: () => ({ running: true, connected: true, boundConversationId: 'dm_SECRET', lastError: 'boom' }) } };
     let payload = '';
     const res = { writeHead() {}, end(b) { payload = b || ''; } };
     route.handler({}, res, { pathname: '/api/im/discord/status' }, /* isLocal */ false, deps);
@@ -213,5 +215,93 @@ describe('POST /api/im/:platform/config loopback-only guard', () => {
     }
     assert.equal('botToken' in rd, false);
     assert.equal('allowUserIds' in rd, false);
+  });
+});
+
+// New behavior: allowlist gate + process control + logs (direct handler calls with deps doubles so
+// no real worker process is ever spawned).
+describe('IM routes: allowlist optional / process control / logs (manager-backed)', () => {
+  const fakeReq = (bodyStr) => ({
+    on(ev, cb) { if (ev === 'data' && bodyStr) cb(Buffer.from(bodyStr)); if (ev === 'end') cb(); return this; },
+  });
+  function call(route, { pathname, body, isLocal = true, deps }) {
+    let status = 0, payload = '';
+    let resolveEnd; const done = new Promise((r) => { resolveEnd = r; });
+    const res = { writeHead(s) { status = s; }, end(b) { payload = b || ''; resolveEnd(); } };
+    route.handler(fakeReq(body ? JSON.stringify(body) : null), res, { pathname }, isLocal, deps);
+    return done.then(() => ({ status, payload, json: () => JSON.parse(payload) }));
+  }
+
+  it('config POST with enabled:true but NO allowlist → 200, still spawns (allowlist is optional)', async () => {
+    const { imRoutes } = await import('../server/routes/im.js');
+    const route = imRoutes.find((r) => r.predicate('/api/im/feishu/config', 'POST'));
+    const calls = [];
+    const deps = { MAX_POST_BODY: 1e6, im: { isWorker: false, restartProcess: async (id) => calls.push(['restart', id]), stopProcess: async (id) => calls.push(['stop', id]) } };
+    const r = await call(route, { pathname: '/api/im/feishu/config', body: { enabled: true, appId: 'a', appSecret: 'b', allowUserIds: [] }, deps });
+    assert.equal(r.status, 200);
+    assert.equal(r.json().connection.running, true);
+    // Empty allowlist no longer hard-rejected; the worker IS driven (UI surfaces a security warning).
+    assert.deepEqual(calls, [['restart', 'feishu']]);
+  });
+
+  it('config POST enabled with whitespace-only allowlist → fires audit warning + still 200/spawns', async () => {
+    const { imRoutes } = await import('../server/routes/im.js');
+    const route = imRoutes.find((r) => r.predicate('/api/im/feishu/config', 'POST'));
+    const calls = [];
+    const deps = { MAX_POST_BODY: 1e6, im: { isWorker: false, restartProcess: async (id) => calls.push(['restart', id]), stopProcess: async (id) => calls.push(['stop', id]) } };
+    // 全空白白名单经 normalize 后等同空名单 → 必须照样打审计告警（不能因原始数组非空而漏报）
+    const origWarn = console.warn; let warned = '';
+    console.warn = (...a) => { warned += a.join(' '); };
+    try {
+      const r = await call(route, { pathname: '/api/im/feishu/config', body: { enabled: true, appId: 'a', appSecret: 'b', allowUserIds: ['   '] }, deps });
+      assert.equal(r.status, 200);
+      assert.match(warned, /EMPTY allowlist/);
+    } finally { console.warn = origWarn; }
+    assert.deepEqual(calls, [['restart', 'feishu']]);
+  });
+
+  it('config POST with enabled:true AND allowlist → restartProcess(id)', async () => {
+    const { imRoutes } = await import('../server/routes/im.js');
+    const route = imRoutes.find((r) => r.predicate('/api/im/feishu/config', 'POST'));
+    const calls = [];
+    const deps = { MAX_POST_BODY: 1e6, im: { isWorker: false, restartProcess: async (id) => calls.push(['restart', id]), stopProcess: async (id) => calls.push(['stop', id]) } };
+    const r = await call(route, { pathname: '/api/im/feishu/config', body: { enabled: true, appId: 'a', appSecret: 'b', allowUserIds: ['ou_ok'] }, deps });
+    assert.equal(r.status, 200);
+    assert.equal(r.json().connection.running, true);
+    assert.deepEqual(calls, [['restart', 'feishu']]);
+  });
+
+  it('config POST with enabled:false → stopProcess(id)', async () => {
+    const { imRoutes } = await import('../server/routes/im.js');
+    const route = imRoutes.find((r) => r.predicate('/api/im/feishu/config', 'POST'));
+    const calls = [];
+    const deps = { MAX_POST_BODY: 1e6, im: { isWorker: false, restartProcess: async (id) => calls.push(['restart', id]), stopProcess: async (id) => calls.push(['stop', id]) } };
+    const r = await call(route, { pathname: '/api/im/feishu/config', body: { enabled: false }, deps });
+    assert.equal(r.status, 200);
+    assert.deepEqual(calls, [['stop', 'feishu']]);
+  });
+
+  it('process POST {action:restart} drives the manager; rejects in a worker process', async () => {
+    const { imRoutes } = await import('../server/routes/im.js');
+    const route = imRoutes.find((r) => r.predicate('/api/im/feishu/process', 'POST'));
+    const calls = [];
+    const mainDeps = { MAX_POST_BODY: 1e6, im: { isWorker: false, restartProcess: async (id) => calls.push(['restart', id]), getProcessStatus: async () => ({ running: true, connected: false }) } };
+    const r = await call(route, { pathname: '/api/im/feishu/process', body: { action: 'restart' }, deps: mainDeps });
+    assert.equal(r.status, 200);
+    assert.equal(r.json().ok, true);
+    assert.deepEqual(calls, [['restart', 'feishu']]);
+    // worker → 409
+    const workerDeps = { MAX_POST_BODY: 1e6, im: { isWorker: true } };
+    const r2 = await call(route, { pathname: '/api/im/feishu/process', body: { action: 'restart' }, deps: workerDeps });
+    assert.equal(r2.status, 409);
+  });
+
+  it('logs GET returns {project, latest:null} when the worker has no logs', async () => {
+    const { imRoutes } = await import('../server/routes/im.js');
+    const route = imRoutes.find((r) => r.predicate('/api/im/discord/logs', 'GET'));
+    const r = await call(route, { pathname: '/api/im/discord/logs', isLocal: true, deps: { im: {} } });
+    assert.equal(r.status, 200);
+    assert.equal(r.json().project, 'IM_discord');
+    assert.equal(r.json().latest, null);
   });
 });

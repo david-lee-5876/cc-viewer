@@ -13,7 +13,7 @@ export const dingtalkDescriptor = {
   fallback: 'DingTalk',
   icon: DingTalkIcon,
   color: '#1677ff',
-  endpoints: { status: '/api/dingtalk/status', config: '/api/dingtalk/config', test: '/api/dingtalk/test' },
+  endpoints: { status: '/api/im/dingtalk/status', config: '/api/im/dingtalk/config', test: '/api/im/dingtalk/test' },
   enable: { key: 'ui.dingtalk.enable', fallback: 'Enable DingTalk bridge' },
   fields: [
     { key: 'appKey', type: 'text', section: 'main', required: true, labelKey: 'ui.dingtalk.appKey', fallback: 'AppKey' },

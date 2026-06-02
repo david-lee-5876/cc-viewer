@@ -74,6 +74,43 @@ describe('perm-bridge.js', () => {
     assert.notEqual(output.hookSpecificOutput?.permissionDecision, 'allow');
   });
 
+  // IM worker hard-deny (CCV_IM_DENY=1) must win OVER the bypass auto-allow.
+  describe('IM deny (CCV_IM_DENY=1) runs before bypass auto-allow', () => {
+    const imEnv = { CCVIEWER_PORT: '9999', CCV_BYPASS_PERMISSIONS: '1', CCV_IM_DENY: '1' };
+
+    for (const cmd of ['rm -rf /tmp/x', 'git push origin main', 'sudo reboot', 'ssh box']) {
+      it(`denies "${cmd}" even under bypass`, async () => {
+        const input = JSON.stringify({ tool_name: 'Bash', tool_input: { command: cmd } });
+        const { code, stdout } = await runBridge(input, imEnv);
+        assert.equal(code, 0);
+        const output = JSON.parse(stdout.trim());
+        assert.equal(output.hookSpecificOutput.permissionDecision, 'deny');
+        assert.ok(output.hookSpecificOutput.permissionDecisionReason);
+      });
+    }
+
+    it('still auto-allows a benign command under bypass (proves deny is selective)', async () => {
+      const input = JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'ls -la' } });
+      const { code, stdout } = await runBridge(input, imEnv);
+      assert.equal(code, 0);
+      assert.equal(JSON.parse(stdout.trim()).hookSpecificOutput.permissionDecision, 'allow');
+    });
+
+    it('denies Write into a credential dir even under bypass', async () => {
+      const input = JSON.stringify({ tool_name: 'Write', tool_input: { file_path: `${process.env.HOME}/.ssh/authorized_keys`, content: 'x' } });
+      const { code, stdout } = await runBridge(input, imEnv);
+      assert.equal(code, 0);
+      assert.equal(JSON.parse(stdout.trim()).hookSpecificOutput.permissionDecision, 'deny');
+    });
+
+    it('without CCV_IM_DENY, bypass auto-allows the same command (deny is opt-in)', async () => {
+      const input = JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'rm -rf /tmp/x' } });
+      const { code, stdout } = await runBridge(input, { CCVIEWER_PORT: '9999', CCV_BYPASS_PERMISSIONS: '1' });
+      assert.equal(code, 0);
+      assert.equal(JSON.parse(stdout.trim()).hookSpecificOutput.permissionDecision, 'allow');
+    });
+  });
+
   it('exits 1 when toolName is missing', async () => {
     const input = JSON.stringify({ tool_input: { command: 'ls' } });
     const { code } = await runBridge(input, { CCVIEWER_PORT: '9999' });

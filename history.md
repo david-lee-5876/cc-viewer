@@ -1,7 +1,17 @@
 # Changelog
 
-## Unreleased
+## 1.6.293 (2026-06-02)
 
+- feat(ui): 汉堡菜单支持「钉住」——hover 菜单行右侧出现钉按钮，点击后钉变实心常驻，并在汉堡右侧生成常驻快捷方式图标，点击即触发对应入口；全局持久（localStorage，跨项目共享），Electron 原生 tab bar 同步显示（`ui.menuPin`/`ui.menuUnpin` 补 18 语言）
+- feat(ui): 顶栏主题切换由滑块开关简化为纯图标按钮——点击切换，图标随当前主题在 太阳(亮)/月亮(暗) 间变化，30×30 无边框与国旗/二维码按钮对齐
+- feat(ui): IM 对话记录弹窗优化——标题旁新增「配置」入口（打开对应平台配置面板）、刷新按钮紧贴标题且刷新时图标转圈、标题栏去白底；刷新时保留旧内容不再塌缩闪烁、失败有内容时只弹 toast；正文仅纵向滚动消除 hover 横向滚动条（`ui.imRecord.config` 补 18 语言）
+- feat(im): IM 接入改为「每平台一个独立常驻 ccv 进程」——工作目录 `~/.claude/cc-viewer/IM_<id>/`、绑 127.0.0.1、以 `--dangerously-skip-permissions` 全自动运行；主 ccv 不再把 IM 消息注入当前会话（消除排队/上下文污染），独立 worker 各跑自己的 PTY
+- feat(im): 主 ccv 启动时 reconcile 自动拉起已启用但未在跑的 IM worker（detached 常驻，主 ccv 关闭后仍在线）；配置启用/停用即驱动 worker spawn/stop；新增 `POST /api/im/:platform/process`（start/stop/restart）与 `GET /api/im/:platform/logs`
+- feat(im): 全局唯一锁 `IM_<id>/im.lock`（HTTP 身份探测三态活性）防同一机器人多处接入；首次启动若缺 `IM_<id>/CLAUDE.md` 自动生成行为约束预置
+- feat(ui): 点击 header IM logo 改为打开「对话记录」弹窗（读 worker 的 `.jsonl`、复用 ChatMessage 渲染、可刷新）；IM 配置入口保留在全局设置菜单；状态徽标改为进程感知（运行中/连接中/已停止/错误，`ui.im.statusRunning`/`ui.im.statusStopped`/`ui.imRecord.*` 补 18 语言）
+- feat(security): skip-permissions worker 加固——PreToolUse 在 bypass 放行前硬拦截危险操作（递归 rm / git push / 提权 / 外泄 / 凭证目录读写等）、注入 `permissions.deny`、绑 127.0.0.1 不暴露局域网
+- fix(im): 发送者白名单改为非必填——空白名单也可保存并启用（不再 400），保存时前端弹安全警告（运行期退化为 bind-first-conversation，首个会话绑定即可驱动）；save 失败改为透出服务端原因而非通用「保存失败」
+- feat(im): IM worker 端口段从 7050 起扫；主交互式 ccv 默认端口上限收到 7049（`CCV_MAX_PORT` 可覆盖），两池不重叠
 - feat(electron): iPad/设备预览模式——tab bar 右上角开关把窗口收窄到 500px 预览 pad 布局（main 持有状态、跨 tab 不丢，可手动再拉大），React viewMode 跟随设备模式信号切 pad⇄pc；header 控件（菜单/代理/IM 状态/审批 bell/主题/终端/视图模式/二维码）经序列化 header 模型迁入原生 tab bar 渲染、点击回传执行；tab bar 改版至 50px（`ui.menu`/`ui.deviceMode.toIpad`/`ui.deviceMode.toPc` 补 18 语言）
 - feat(im): 多 IM 平台桥接——钉钉专用桥接重构为通用编排核心 `im-bridge-core.js` + 平台适配器 `adapters/` + 配置层 `im-config.js`，钉钉保留薄壳兼容旧接口
 - feat(im): 新增飞书/Lark 桥接（长连接事件订阅，支持 feishu.cn / larksuite.com 区域选择）

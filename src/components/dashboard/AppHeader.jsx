@@ -3,11 +3,12 @@ import { createPortal } from 'react-dom';
 import { Space, Tag, Button, Dropdown, Popover, Modal, Collapse, Drawer, Switch, Radio, Tabs, Spin, Input, Select, Segmented, Tooltip, message } from 'antd';
 import { DISPLAY_SCALE_PRESETS } from '../../utils/displayScaleHelper';
 import { hasNativeZoom, isMac } from '../../env';
-import { MessageOutlined, FileTextOutlined, ImportOutlined, DashboardOutlined, ExportOutlined, DownloadOutlined, SettingOutlined, BarChartOutlined, CodeOutlined, CopyOutlined, ApiOutlined, SwapOutlined, QuestionCircleOutlined } from '@ant-design/icons';
+import { MessageOutlined, FileTextOutlined, ImportOutlined, DashboardOutlined, ExportOutlined, DownloadOutlined, SettingOutlined, BarChartOutlined, CodeOutlined, CopyOutlined, ApiOutlined, SwapOutlined, QuestionCircleOutlined, PushpinOutlined, PushpinFilled } from '@ant-design/icons';
 import { QRCodeCanvas } from 'qrcode.react';
 import { formatTokenCount, computeTokenStats, computeCacheRebuildStats, computeToolUsageStats, computeSkillUsageStats, resolveCalibrationTokens, adaptContextWindow, AUTO_COMPACT_USABLE_RATIO, AUTO_APPROVE_INSTANT } from '../../utils/helpers';
 import { isSystemText, classifyUserContent, isMainAgent } from '../../utils/contentFilter';
 import { parseImOrigin } from '../../utils/imOrigin';
+import { PINNED_KEY, parsePinned, serializePinned, togglePinned } from '../../utils/pinnedMenu';
 import { classifyRequest } from '../../utils/requestType';
 import { resolveTeammateNames } from '../../utils/contentFilter';
 import { t, getLang, setLang, LANG_OPTIONS } from '../../i18n';
@@ -26,6 +27,7 @@ import ProxyModal from '../settings/ProxyModal';
 import VoicePackSettings from '../settings/VoicePackSettings';
 import ProjectAliasEditor from '../settings/ProjectAliasEditor';
 import MessagingModal from '../settings/MessagingModal';
+import ImConversationModal from '../settings/ImConversationModal';
 import ImStatusChip from '../settings/ImStatusChip';
 import { IM_PLATFORMS } from '../settings/imPlatforms';
 import { useProjectAlias } from '../../hooks/useProjectAlias';
@@ -87,7 +89,7 @@ class AppHeader extends React.Component {
 
   constructor(props) {
     super(props);
-    this.state = { countdownText: '', promptModalVisible: false, promptData: [], promptViewMode: 'original', settingsDrawerVisible: false, globalSettingsVisible: false, projectStatsVisible: false, projectStats: null, projectStatsLoading: false, localUrl: '', pluginModalVisible: false, processModalVisible: false, logoDropdownOpen: false, electronMenuOpen: false, cacheHighlightIdx: null, cacheHighlightFading: false, calibrationModel: readCalibrationModel(), proxyModalVisible: false, messagingModalVisible: false, messagingInitialTool: null, logDirDraft: null, qrPopoverOpen: false, electronQrOpen: false, _skillsModal: { open: false, loading: false, skills: [], error: null, toggling: new Set() },
+    this.state = { countdownText: '', promptModalVisible: false, promptData: [], promptViewMode: 'original', settingsDrawerVisible: false, globalSettingsVisible: false, projectStatsVisible: false, projectStats: null, projectStatsLoading: false, localUrl: '', pluginModalVisible: false, processModalVisible: false, logoDropdownOpen: false, electronMenuOpen: false, cacheHighlightIdx: null, cacheHighlightFading: false, calibrationModel: readCalibrationModel(), proxyModalVisible: false, messagingModalVisible: false, messagingInitialTool: null, imRecordVisible: false, imRecordPlatform: null, logDirDraft: null, qrPopoverOpen: false, electronQrOpen: false, _skillsModal: { open: false, loading: false, skills: [], error: null, toggling: new Set() },
       // 文件系统权威的 skill 列表（/api/skills 返回）；live-tail 下作为 popover chip 和管理弹窗的共享数据源。
       // null=未加载 / false=失败 / [] 或 Array=加载结果。workspace 切换由 componentDidUpdate + seq 控制。
       _fsSkills: null,
@@ -114,6 +116,9 @@ class AppHeader extends React.Component {
       _authSaving: false,
       // 管理区当前选中的作用域 tab；null=跟随生效 scope。切换 tab 时清空草稿。
       _authScope: null,
+      // 汉堡菜单「钉住」的菜单 key 列表（全局持久，跨项目共享；存 localStorage ccv_pinnedMenuKeys）。
+      // 顺序=用户钉住先后；驱动行内钉按钮实心态、汉堡右侧快捷方式行、Electron header model 的 pins。
+      pinnedKeys: parsePinned(typeof localStorage !== 'undefined' ? localStorage.getItem(PINNED_KEY) : null),
     };
     this._countdownTimer = null;
     this._expiredTimer = null;
@@ -132,21 +137,69 @@ class AppHeader extends React.Component {
     return typeof window !== 'undefined' && !!(window.tabBridge && window.tabBridge.setHeaderModel);
   }
 
-  // 汉堡菜单项：render 内的下拉与 _handleHeaderAction 共用同一份定义。
-  getMenuItems() {
+  // 汉堡菜单的「纯描述符」单一数据源：{ key, icon, label, onClick, dividerAfter? }，不含 divider 节点。
+  // 四处复用：下拉 antd items 构建(getMenuItems)、汉堡右侧快捷方式行、Electron header model(pins)、
+  // Electron 点击回传派发(_handleHeaderAction case 'menuShortcut')。
+  // onClick 全部是 bound class-field arrow / inline arrow，可脱离菜单上下文 standalone 调用。
+  _getMenuDescriptors() {
     const { viewMode, onImportLocalLogs } = this.props;
     return [
       { key: 'import-local', icon: <ImportOutlined />, label: t('ui.importLocalLogs'), onClick: onImportLocalLogs },
       { key: 'export-prompts', icon: <ExportOutlined />, label: t('ui.exportPrompts'), onClick: this.handleShowPrompts },
       { key: 'plugin-management', icon: <ApiOutlined />, label: t('ui.pluginManagement'), onClick: this.handleShowPlugins },
       { key: 'process-management', icon: <DashboardOutlined />, label: t('ui.processManagement'), onClick: this.handleShowProcesses },
-      { key: 'proxy-switch', icon: <SwapOutlined />, label: t('ui.proxySwitch'), onClick: () => this.setState({ proxyModalVisible: true }) },
-      { type: 'divider' },
+      { key: 'proxy-switch', icon: <SwapOutlined />, label: t('ui.proxySwitch'), onClick: () => this.setState({ proxyModalVisible: true }), dividerAfter: true },
       { key: 'project-stats', icon: <BarChartOutlined />, label: t('ui.projectStats'), onClick: this.handleShowProjectStats },
       { key: 'messaging', icon: <MessageOutlined />, label: t('ui.messaging.menu'), onClick: () => this.setState({ messagingModalVisible: true, messagingInitialTool: null }) },
       ...(viewMode === 'raw' ? [{ key: 'global-settings', icon: <SettingOutlined />, label: t('ui.globalSettings'), onClick: () => this.setState({ globalSettingsVisible: true }) }] : []),
       ...(viewMode === 'chat' ? [{ key: 'display-settings', icon: <SettingOutlined />, label: t('ui.settings'), onClick: () => this.setState({ settingsDrawerVisible: true }) }] : []),
     ];
+  }
+
+  // 切换某菜单项的钉住状态：更新 state + 写 localStorage(全局持久)。
+  // componentDidUpdate 会自动 _pushHeaderModel()，Electron 侧无需在此显式推送。
+  togglePin = (key) => {
+    this.setState((s) => {
+      const next = togglePinned(s.pinnedKeys, key);
+      try { localStorage.setItem(PINNED_KEY, serializePinned(next)); } catch {}
+      return { pinnedKeys: next };
+    });
+  };
+
+  // 由描述符构建 antd Dropdown items：按 dividerAfter 插入分隔线；每行 label 包成
+  // flex 节点，右侧挂一个「钉」按钮(hover 显形 / 钉住后实心常驻，样式见 global.css [data-pin-trigger])。
+  // 钉按钮 onClick 必须 stopPropagation，否则冒泡触发菜单项动作并关闭下拉。
+  getMenuItems() {
+    const pinned = new Set(this.state.pinnedKeys);
+    const items = [];
+    for (const d of this._getMenuDescriptors()) {
+      const isPinned = pinned.has(d.key);
+      const pinTitle = isPinned ? t('ui.menuUnpin') : t('ui.menuPin');
+      items.push({
+        key: d.key,
+        icon: d.icon,
+        onClick: d.onClick,
+        label: (
+          <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+            <span>{d.label}</span>
+            <span
+              data-pin-trigger
+              data-pinned={isPinned ? 'true' : 'false'}
+              role="button"
+              tabIndex={0}
+              aria-label={pinTitle}
+              title={pinTitle}
+              style={{ display: 'inline-flex', alignItems: 'center' }}
+              onClick={(e) => { e.stopPropagation(); this.togglePin(d.key); }}
+            >
+              {isPinned ? <PushpinFilled /> : <PushpinOutlined />}
+            </span>
+          </span>
+        ),
+      });
+      if (d.dividerAfter) items.push({ type: 'divider' });
+    }
+    return items;
   }
 
   // 审批 bell 的数量/标题：header 右侧 render 与 tab bar 模型共用，避免重复计算。
@@ -191,6 +244,13 @@ class AppHeader extends React.Component {
         const nm = t(p.labelKey);
         return { id: p.id, connected: !!this._imStatus[p.id].connected, name: (nm && nm !== p.labelKey) ? nm : (p.fallback || p.id) };
       });
+    // 钉住的快捷方式：原生 tab bar 渲染所需。基于当前(已按 viewMode 过滤的)描述符过滤，
+    // 顺序=用户钉住先后(稳定)，避免 _lastHeaderModelJson 抖动。name=菜单标签(已本地化)，作 title/aria。
+    const descByKey = new Map(this._getMenuDescriptors().map(d => [d.key, d]));
+    const pins = this.state.pinnedKeys
+      .map(k => descByKey.get(k))
+      .filter(Boolean)
+      .map(d => ({ key: d.key, name: d.label }));
     const cd = this.state.countdownText;
     const countdown = (viewMode === 'raw' && cd)
       ? { text: `${t('ui.cacheCountdown', { type: this.props.cacheType ? `(${this.props.cacheType})` : '' })} ${cd}` }
@@ -205,6 +265,7 @@ class AppHeader extends React.Component {
       terminal: (cliMode && viewMode === 'chat' && !isLocalLog) ? { active: !!terminalVisible, label: t('ui.terminal') } : null,
       viewMode: { mode: viewMode, label: viewMode === 'raw' ? t('ui.chatMode') : t('ui.rawMode') },
       im,
+      pins,
       countdown,
       qr: showThemeBlock ? { title: t('ui.scanToCoding') } : null,
     };
@@ -240,7 +301,8 @@ class AppHeader extends React.Component {
       case 'viewMode': if (onToggleViewMode) onToggleViewMode(); break;
       case 'approval': if (onApprovalReopen) onApprovalReopen(); break;
       case 'proxy': this.setState({ proxyModalVisible: true }); break;
-      case 'im': this.setState({ messagingModalVisible: true, messagingInitialTool: payload.id }); break;
+      case 'im': this.setState({ imRecordVisible: true, imRecordPlatform: payload.id }); break;
+      case 'menuShortcut': { const d = this._getMenuDescriptors().find(x => x.key === payload.key); if (d && d.onClick) d.onClick(); break; }
       case 'qrOpen': this.setState((s) => ({ electronQrOpen: !s.electronQrOpen })); break;
       default: break;
     }
@@ -1490,8 +1552,28 @@ class AppHeader extends React.Component {
               <span aria-hidden="true" style={{ position: 'fixed', top: 4, left: 74, width: 1, height: 1, pointerEvents: 'none' }} />
             </Dropdown>
           )}
+          {!isElectronTab && (() => {
+            // 钉住的快捷方式：汉堡右侧的常驻入口。按描述符过滤(mode-gated 项当前不存在则跳过渲染，
+            // 但保留在 localStorage，切回对应模式自动恢复)。Electron 下走原生 tab bar(见 _buildHeaderModel.pins)。
+            const descByKey = new Map(this._getMenuDescriptors().map(d => [d.key, d]));
+            const pins = this.state.pinnedKeys.map(k => descByKey.get(k)).filter(Boolean);
+            if (pins.length === 0) return null;
+            return pins.map((d) => (
+              <Tooltip key={d.key} title={d.label}>
+                <span
+                  role="button"
+                  tabIndex={0}
+                  aria-label={d.label}
+                  className={styles.pinnedShortcut}
+                  onClick={d.onClick}
+                >
+                  {d.icon}
+                </span>
+              </Tooltip>
+            ));
+          })()}
           {IM_PLATFORMS.map((p) => (
-            <ImStatusChip key={p.id} descriptor={p} onStatus={this._onImStatus} onClick={() => this.setState({ messagingModalVisible: true, messagingInitialTool: p.id })} />
+            <ImStatusChip key={p.id} descriptor={p} onStatus={this._onImStatus} onClick={() => this.setState({ imRecordVisible: true, imRecordPlatform: p.id })} />
           ))}
           {isElectronTab && (
             <Popover
@@ -1621,35 +1703,31 @@ class AppHeader extends React.Component {
               <button
                 type="button"
                 className={styles.themeToggle}
-                data-theme={themeColor === 'light' ? 'light' : 'dark'}
-                role="switch"
-                aria-checked={themeColor === 'light'}
                 title={themeColor === 'light' ? t('ui.themeColor.light') : t('ui.themeColor.dark')}
+                aria-label={themeColor === 'light' ? t('ui.themeColor.light') : t('ui.themeColor.dark')}
                 onClick={() => onThemeColorChange && onThemeColorChange(themeColor === 'light' ? 'dark' : 'light')}
               >
-                <span className={styles.themeToggleKnob}>
-                  {themeColor === 'light' ? (
-                    /* Sun: 中心圆 + 8 条呈十字斜向分布的光芒 */
-                    <svg className={styles.themeToggleIcon} width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                      <circle cx="8" cy="8" r="2.8" fill="currentColor"/>
-                      <g stroke="currentColor" strokeWidth="1.2" strokeLinecap="round">
-                        <line x1="8" y1="1" x2="8" y2="2.6"/>
-                        <line x1="8" y1="13.4" x2="8" y2="15"/>
-                        <line x1="1" y1="8" x2="2.6" y2="8"/>
-                        <line x1="13.4" y1="8" x2="15" y2="8"/>
-                        <line x1="2.95" y1="2.95" x2="4.1" y2="4.1"/>
-                        <line x1="11.9" y1="11.9" x2="13.05" y2="13.05"/>
-                        <line x1="2.95" y1="13.05" x2="4.1" y2="11.9"/>
-                        <line x1="11.9" y1="4.1" x2="13.05" y2="2.95"/>
-                      </g>
-                    </svg>
-                  ) : (
-                    /* Moon: 右向月牙 */
-                    <svg className={styles.themeToggleIcon} width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                      <path d="M8.4 2.5a5.9 5.9 0 1 0 5.1 8.55A4.8 4.8 0 0 1 8.4 2.5Z" fill="currentColor"/>
-                    </svg>
-                  )}
-                </span>
+                {themeColor === 'light' ? (
+                  /* Sun: 中心圆 + 8 条呈十字斜向分布的光芒（亮色态显示太阳） */
+                  <svg className={styles.themeToggleIcon} width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                    <circle cx="8" cy="8" r="2.8" fill="currentColor"/>
+                    <g stroke="currentColor" strokeWidth="1.2" strokeLinecap="round">
+                      <line x1="8" y1="1" x2="8" y2="2.6"/>
+                      <line x1="8" y1="13.4" x2="8" y2="15"/>
+                      <line x1="1" y1="8" x2="2.6" y2="8"/>
+                      <line x1="13.4" y1="8" x2="15" y2="8"/>
+                      <line x1="2.95" y1="2.95" x2="4.1" y2="4.1"/>
+                      <line x1="11.9" y1="11.9" x2="13.05" y2="13.05"/>
+                      <line x1="2.95" y1="13.05" x2="4.1" y2="11.9"/>
+                      <line x1="11.9" y1="4.1" x2="13.05" y2="2.95"/>
+                    </g>
+                  </svg>
+                ) : (
+                  /* Moon: 右向月牙（暗色态显示月亮） */
+                  <svg className={styles.themeToggleIcon} width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                    <path d="M8.4 2.5a5.9 5.9 0 1 0 5.1 8.55A4.8 4.8 0 0 1 8.4 2.5Z" fill="currentColor"/>
+                  </svg>
+                )}
               </button>
               )}
             </>
@@ -1980,6 +2058,12 @@ class AppHeader extends React.Component {
           open={this.state.messagingModalVisible}
           initialTool={this.state.messagingInitialTool}
           onClose={() => this.setState({ messagingModalVisible: false })}
+        />
+        <ImConversationModal
+          open={this.state.imRecordVisible}
+          platform={this.state.imRecordPlatform}
+          onClose={() => this.setState({ imRecordVisible: false })}
+          onOpenConfig={(platform) => this.setState({ imRecordVisible: false, messagingModalVisible: true, messagingInitialTool: platform })}
         />
 
         {/* Skills Manager Modal — 从 AppHeader popover「已载入 Skill」→「管理」按钮打开 */}

@@ -14,6 +14,7 @@
 import { readFileSync } from 'node:fs';
 import http from 'node:http';
 import https from 'node:https';
+import { evaluateImDeny } from './im-deny.js';
 
 const port = process.env.CCVIEWER_PORT;
 const rawProtocol = process.env.CCVIEWER_PROTOCOL;
@@ -61,6 +62,22 @@ if (!toolName || !toolInput) {
 // 真正不可撤销的对外发布(npm publish)才走硬闸
 const isPublishCmd = toolName === 'Bash' && toolInput.command &&
   /npm\s+publish/i.test(toolInput.command);
+
+// IM worker (skip-permissions) 硬拦截 —— 必须在下面的 bypass auto-allow 之前求值，
+// 否则 CCV_BYPASS_PERMISSIONS=1 会把一切先放行（见 plan §安全 2）。仅对 IM worker 生效。
+if (process.env.CCV_IM_DENY === '1') {
+  const verdict = evaluateImDeny(toolName, toolInput);
+  if (verdict.deny) {
+    process.stdout.write(JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'deny',
+        permissionDecisionReason: `cc-viewer IM guard: ${verdict.reason}. 该操作在 IM 机器人(--dangerously-skip-permissions)下被禁止；请改用更安全的方式，或在回复中说明并请用户手动执行。`,
+      },
+    }) + '\n');
+    process.exit(0);
+  }
+}
 
 // Bypass mode: auto-allow all tools except publish commands
 // 使用显式 allow 而非 exit(1) fallback，避免 Claude Code 记录 hook error 日志

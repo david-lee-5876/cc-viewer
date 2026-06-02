@@ -78,15 +78,35 @@ export default function ImPlatformSettings({ descriptor }) {
     return body;
   };
 
+  // 白名单是非必填字段：每个平台恰有一个 type:'tags' 字段（imPlatforms.js），即发送者白名单。
+  // 启用且白名单为空时保存仍成功，但弹安全警告（服务端已不再硬拦截）。
+  const allowlistField = descriptor.fields.find((f) => f.type === 'tags');
+  const isAllowlistEmpty = () => {
+    if (!allowlistField) return false;
+    const v = values[allowlistField.key];
+    return !Array.isArray(v) || v.length === 0;
+  };
+
   const save = async () => {
     setSaving(true);
     try {
       const r = await fetch(apiUrl(descriptor.endpoints.config), {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(buildBody(true)),
       });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      if (!r.ok) {
+        // 透出服务端原因（{error,detail}），别再吞成通用「保存失败」。body 可能为空/非 JSON
+        // （如超 MAX_POST_BODY 直接 destroy socket）→ 退回 HTTP 状态码。
+        let detail = '';
+        try { const e = await r.json(); detail = e.detail || e.error || ''; } catch { detail = `HTTP ${r.status}`; }
+        message.error(_tr('ui.im.saveFailed', null, 'Save failed') + (detail ? `: ${detail}` : ''));
+        return;
+      }
       await fetchStatus(true);
-      message.success(_tr('ui.im.saved', null, 'Saved'));
+      if (enabled && isAllowlistEmpty()) {
+        message.warning(_tr('ui.im.savedNoAllowlistWarn', null, 'Saved. No sender allowlist set: the first conversation that messages the bot is bound and anyone in it can drive the local session with no approval. Add an allowlist under More settings.'), 8);
+      } else {
+        message.success(_tr('ui.im.saved', null, 'Saved'));
+      }
     } catch {
       message.error(_tr('ui.im.saveFailed', null, 'Save failed'));
     } finally {

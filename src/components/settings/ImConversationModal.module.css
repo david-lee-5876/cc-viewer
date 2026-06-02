@@ -1,0 +1,45 @@
+.scrollBody {
+  max-height: 70vh;
+  overflow-y: auto;
+  /* 仅纵向滚动：hover 出现气泡边框 + 纵向滚动条占宽时，内容会差几像素溢出导致整框出现横向滚动条。
+     ChatMessage 内部的代码块等宽内容自带 overflow-x，外层容器横向一律裁掉即可。 */
+  overflow-x: hidden;
+  /* 预留滚动条槽位，避免内容在纵向滚动条出现/消失时左右抖动 */
+  scrollbar-gutter: stable;
+  padding: 4px 2px;
+  background: var(--bg-container);
+  border-radius: 8px;
+}
+
+.headerBar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.titleIcon {
+  display: inline-flex;
+  align-items: center;
+  width: 18px;
+  height: 18px;
+}
+
+.refreshBtn {
+  /* 紧贴标题：不再 margin-left:auto 推到最右，靠 headerBar 的 gap 跟在标题后面 */
+  flex: 0 0 auto;
+}
+
+.center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 40px 0;
+  color: var(--text-secondary);
+}
+
+.hint {
+  color: var(--text-secondary);
+  font-size: 13px;
+}

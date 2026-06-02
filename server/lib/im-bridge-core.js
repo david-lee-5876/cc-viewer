@@ -353,16 +353,21 @@ function drainQueue(inst) {
     inst.queue.shift();
     const cfg = d.getConfig();
     const skipPerm = d.getPtySkipPermissions();
-    // Optional hard block — when the session runs skip-permissions AND the admin opted in, refuse
-    // to inject (remote input would execute with no approval) and tell the sender.
-    if (skipPerm && cfg.blockOnSkipPermissions) {
+    // 独立 IM worker 模型下，worker 本就以 --dangerously-skip-permissions 自主运行（安全由
+    // 强制 allowlist + PreToolUse 硬拦截 + 注入的 permissions.deny 保证）。因此对 IM worker：
+    //   - 不应用 blockOnSkipPermissions（否则 skipPerm 恒真 → 拦下每条消息让机器人彻底失能，
+    //     尤其坑迁移用户：旧设置里若开了此项，升级后机器人将完全不回复）；
+    //   - 不再逐条发送 skip-perm 警告（worker 恒为 skip-perm，逐条警告纯噪声）。
+    // 仅在非 worker 场景保留旧硬阻/告警语义（防御性；新模型下适配器只在 worker 内运行）。
+    const isImWorker = !!process.env.CCV_IM_PLATFORM;
+    if (!isImWorker && skipPerm && cfg.blockOnSkipPermissions) {
       audit(inst, 'skip-perm-blocked', { conversationId: item.conversationId });
       void sendReply(inst, item, tr(inst, 'skipPermBlocked'));
       continue; // not armed, not injected — move to the next queued prompt
     }
     const since = Date.now();
     armActiveInjection(inst, item, since);
-    if (skipPerm) {
+    if (!isImWorker && skipPerm) {
       audit(inst, 'skip-perm-warning', { conversationId: item.conversationId });
       void sendReply(inst, item, tr(inst, 'skipPermWarning'));
     }

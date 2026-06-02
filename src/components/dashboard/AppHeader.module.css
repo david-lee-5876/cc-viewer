@@ -712,67 +712,61 @@
   border-color: var(--text-disabled);
 }
 
+/* 钉住的快捷方式：汉堡右侧常驻入口图标。与 logoImage 同色系，hover 提亮。
+   盒高 24px + margin-top 对齐 logoWrap(汉堡按钮)，否则会浮到行顶比汉堡高一截。 */
+.pinnedShortcut {
+  height: 24px;
+  margin-top: 11px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  line-height: 1;
+  color: var(--text-tertiary);
+  opacity: 0.75;
+  cursor: pointer;
+  transition: opacity 0.2s, color 0.2s;
+}
+.pinnedShortcut:hover {
+  opacity: 1;
+  color: var(--text-secondary);
+}
+/* antd <span class="anticon"> 继承 inline-block，用 flex 强制居中，
+   避免 SVG 基线对齐造成的 1~3px 纵偏（与 compactBtnNoBorder 同治）。 */
+.pinnedShortcut :global(.anticon) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 0;
+}
+
 /* ─── Theme toggle pill（雪山白 / 曜石黑）──────────────────────
-   data-theme=light: 浅背景 + 白色 knob 居左 + 太阳图标
-   data-theme=dark : 深背景 + 深灰 knob 居右 + 月亮图标
-   宽 56 / 高 30 / knob 24，两侧 padding 2，位移 28px。
-   高度与 compactBtn / compactBtnNoBorder 统一为 30px。 */
+   简化为纯图标按钮：点击切换主题，图标随当前主题在 太阳(亮)/月亮(暗) 之间变化，
+   无滑块/轨道。尺寸 30×30、无边框，与 compactBtnNoBorder（国旗/二维码）一致。 */
 .themeToggle {
-  position: relative;
   box-sizing: border-box;
   display: inline-flex;
+  align-items: center;
+  justify-content: center;
   vertical-align: middle;
-  width: 56px;
+  width: 30px;
   height: 30px;
-  border-radius: 15px;
-  border: 1px solid var(--border-hover);
-  cursor: pointer;
   padding: 0;
-  overflow: hidden;
-  transition: background-color 0.2s ease, border-color 0.2s ease;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background-color 0.2s ease, color 0.2s ease;
   flex-shrink: 0;
   outline: none;
 }
+.themeToggle:hover {
+  background: var(--color-bg-hover, rgba(127, 127, 127, 0.12));
+  color: var(--text-primary);
+}
 .themeToggle:focus-visible {
   box-shadow: 0 0 0 2px var(--primary-color, #1677ff);
-}
-.themeToggle[data-theme="light"] {
-  background: linear-gradient(135deg, #eaf2fa 0%, #d9e4ef 100%);
-  border-color: #c8d4e0;
-}
-.themeToggle[data-theme="dark"] {
-  background: #1a1a1a;
-  border-color: #2a2a2a;
-}
-
-.themeToggleKnob {
-  position: absolute;
-  top: 50%;
-  left: 2px;
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transform: translate(0, -50%);
-  transition: transform 0.28s cubic-bezier(0.4, 0.2, 0.2, 1),
-              background-color 0.2s ease,
-              color 0.2s ease,
-              box-shadow 0.2s ease;
-  pointer-events: none;
-}
-.themeToggle[data-theme="light"] .themeToggleKnob {
-  background: #ffffff;
-  color: #8fa2b7;
-  box-shadow: 0 1px 3px rgba(30, 50, 80, 0.18);
-}
-.themeToggle[data-theme="dark"] .themeToggleKnob {
-  /* 位移：56(宽) - 24(knob) - 2(左间距) - 2(右间距) = 28px */
-  transform: translate(28px, -50%);
-  background: #2a2a2a;
-  color: #e8e8e8;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
 }
 
 .themeToggleIcon {

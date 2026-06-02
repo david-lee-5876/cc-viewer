@@ -2,7 +2,7 @@ import { resolveNativePath, LOG_DIR } from '../findcc.js';
 import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
 import { chmodSync, statSync } from 'node:fs';
-import { platform, arch } from 'node:os';
+import { platform, arch, homedir } from 'node:os';
 import { createRequire } from 'node:module';
 import { prepareEmbeddedShellSpawn, stripClaudeNoFlickerUnlessOptedIn } from './lib/terminal-env.js';
 
@@ -208,11 +208,32 @@ export async function spawnClaude(proxyPort, cwd, extraArgs = [], claudePath = n
 
   // 通过 --settings 注入 ANTHROPIC_BASE_URL，确保覆盖 settings.json 中的配置。
   // 仅覆盖 env.ANTHROPIC_BASE_URL，不影响其他 settings 字段。
-  const settingsJson = JSON.stringify({
+  const settingsObj = {
     env: {
       ANTHROPIC_BASE_URL: env.ANTHROPIC_BASE_URL
     }
-  });
+  };
+  // IM worker（skip-permissions）注入 permissions.deny 作为第二道防御（见 plan §安全 3）。
+  // 仅追加 deny 规则（deny 优先级最高、只会收紧不会放宽），不会破坏用户既有 permissions。
+  // 注：bypass 模式下 deny 是否仍被消费取决于 Claude Code 行为；真正可靠的强制层是
+  // perm-bridge.js 的 PreToolUse deny（CCV_IM_DENY）。此处为纵深防御的 best-effort 一层。
+  if (process.env.CCV_IM_DENY === '1') {
+    const home = homedir();
+    settingsObj.permissions = {
+      deny: [
+        'Bash(sudo:*)', 'Bash(rm -rf:*)', 'Bash(rm -fr:*)',
+        'Bash(git push:*)', 'Bash(npm publish:*)', 'Bash(ssh:*)', 'Bash(scp:*)',
+        `Read(${home}/.ssh/**)`, `Edit(${home}/.ssh/**)`, `Write(${home}/.ssh/**)`,
+        `Read(${home}/.aws/**)`, `Edit(${home}/.aws/**)`, `Write(${home}/.aws/**)`,
+        // 精确到文件：保护 deny 机制本身(settings/hooks)与 IM 密钥库(preferences.json)，
+        // 但不封禁整个 ~/.claude —— worker 的工作目录就在 ~/.claude/cc-viewer/IM_<id>/ 下，需保持可写。
+        `Edit(${home}/.claude/settings.json)`, `Write(${home}/.claude/settings.json)`,
+        `Edit(${home}/.claude/settings.local.json)`, `Write(${home}/.claude/settings.local.json)`,
+        `Edit(${home}/.claude/cc-viewer/preferences.json)`, `Write(${home}/.claude/cc-viewer/preferences.json)`,
+      ],
+    };
+  }
+  const settingsJson = JSON.stringify(settingsObj);
 
   // 注入 --thinking-display summarized；以下任一情况跳过注入：
   // - 路径在拒绝集里（上次因此 crash 过）

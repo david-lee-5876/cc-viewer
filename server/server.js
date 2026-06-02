@@ -33,6 +33,7 @@ import { authRoutes } from './routes/auth.js';
 import { dingtalkRoutes } from './routes/dingtalk.js';
 import { imRoutes } from './routes/im.js';
 import * as imCore from './lib/im-bridge-core.js';
+import * as imProcMgr from './lib/im-process-manager.js';
 import './lib/adapters/dingtalk-adapter.js'; // side-effect: registers the DingTalk adapter
 import './lib/adapters/feishu-adapter.js';   // side-effect: registers the Feishu adapter
 import './lib/adapters/wecom-adapter.js';    // side-effect: registers the WeCom adapter
@@ -291,8 +292,12 @@ const SSE_BACKPRESSURE_TIMEOUT_MS = 5000;
 
 
 const START_PORT = parseInt(process.env.CCV_START_PORT) || 7008;
-const MAX_PORT = parseInt(process.env.CCV_MAX_PORT) || 7099;
-const HOST = '0.0.0.0';
+// 主交互式 ccv 默认收到 7049，把 7050-7099 让给独立 IM worker 进程（worker 经 env 覆盖为 7050-7099）。
+// env 可覆盖（向后兼容逃生口）。
+const MAX_PORT = parseInt(process.env.CCV_MAX_PORT) || 7049;
+// IM worker 绑 127.0.0.1（仅 loopback），避免把 N 个 skip-permissions 端点暴露到局域网（见 plan §安全 1）。
+// 主进程默认仍绑 0.0.0.0 以支持手机/局域网访问。
+const HOST = process.env.CCV_HOST || '0.0.0.0';
 
 // 局域网访问 token（本地 127.0.0.1 免验证）
 const ACCESS_TOKEN = randomBytes(16).toString('hex');
@@ -480,16 +485,28 @@ const deps = {
     return authConfig;
   },
   // Constants local to server.js.
-  // Generic IM bridge admin surface (config routes → bridge lifecycle), keyed by platform id.
+  // Generic IM bridge admin surface, keyed by platform id.
+  // IM adapters now run in detached worker processes (im-process-manager), NOT in this process.
+  //  - isWorker: are we an IM worker (CCV_IM_PLATFORM set)? The worker reports its own in-process
+  //    adapter status (getBridgeStatus) — that's what the main process's manager probes.
+  //  - In the MAIN process, status/lifecycle go through the manager (lock + loopback probe / spawn / kill).
   im: {
-    getBridgeStatus: (id) => imCore.getBridgeStatus(id),
-    reloadBridge: (id) => imCore.reloadBridge(id),
+    isWorker: !!process.env.CCV_IM_PLATFORM,
+    getBridgeStatus: (id) => imCore.getBridgeStatus(id),   // worker-side: real in-process adapter status
+    getProcessStatus: (id) => imProcMgr.getImProcessStatus(id), // main-side: detached worker status (async)
+    startProcess: (id) => imProcMgr.spawnImProcess(id),
+    stopProcess: (id) => imProcMgr.stopImProcess(id),
+    restartProcess: async (id) => { await imProcMgr.stopImProcess(id); return imProcMgr.spawnImProcess(id); },
     testConnection: (id, cfg) => imCore.testConnection(id, cfg),
   },
-  // DingTalk back-compat alias over the generic IM core (the unchanged dingtalk route uses this).
+  // DingTalk back-compat alias (legacy /api/dingtalk/* routes). Same manager-backed semantics.
   dingtalk: {
+    isWorker: !!process.env.CCV_IM_PLATFORM,
     getBridgeStatus: () => imCore.getBridgeStatus('dingtalk'),
-    reloadBridge: () => imCore.reloadBridge('dingtalk'),
+    getProcessStatus: () => imProcMgr.getImProcessStatus('dingtalk'),
+    startProcess: () => imProcMgr.spawnImProcess('dingtalk'),
+    stopProcess: () => imProcMgr.stopImProcess('dingtalk'),
+    restartProcess: async () => { await imProcMgr.stopImProcess('dingtalk'); return imProcMgr.spawnImProcess('dingtalk'); },
     testConnection: (cfg) => imCore.testConnection('dingtalk', cfg),
   },
   ACCESS_TOKEN,
@@ -914,21 +931,32 @@ export async function startViewer() {
               resolveSdkApproval: (...args) => _sdkResolveApproval?.(...args),
             },
           });
-          // IM bridges (DingTalk, Feishu, …): only meaningful in CLI mode (where the singleton
-          // PTY lives). startAll primes each adapter's deps then no-ops unless enabled+creds
-          // present, so calling it unconditionally also primes reloadBridge() for later
-          // enable-via-UI. The PTY deps are shared across platforms; getConfig is per-platform.
-          if (isCliMode) {
+          // IM adapters no longer run in the main ccv. Each enabled IM runs as an independent,
+          // detached worker process (im-process-manager). Two CLI-mode cases:
+          //   - WORKER (CCV_IM_PLATFORM set): connect ONLY this one platform to the singleton PTY.
+          //   - MAIN ccv: connect NOTHING in-process; reconcile spawns/adopts the enabled IM workers.
+          // (Non-CLI workspace/SDK modes do neither — IM only makes sense with the singleton PTY.)
+          if (isCliMode && process.env.CCV_IM_PLATFORM) {
+            const id = process.env.CCV_IM_PLATFORM;
             const pmb = await import('./pty-manager.js');
-            await imCore.startAll((id) => ({
-              writeToPty: pmb.writeToPty,
-              writeToPtySequential: pmb.writeToPtySequential,
-              getPtyState: pmb.getPtyState,
-              getPtyKind: pmb.getPtyKind,
-              getPtySkipPermissions: pmb.getPtySkipPermissions,
-              isStreaming: () => streamingState.active,
-              getConfig: () => loadConfig(id),
-            }));
+            try {
+              await imCore.startBridge(id, {
+                writeToPty: pmb.writeToPty,
+                writeToPtySequential: pmb.writeToPtySequential,
+                getPtyState: pmb.getPtyState,
+                getPtyKind: pmb.getPtyKind,
+                getPtySkipPermissions: pmb.getPtySkipPermissions,
+                isStreaming: () => streamingState.active,
+                getConfig: () => loadConfig(id),
+              });
+            } catch (e) {
+              console.error(`[CC Viewer] IM worker startBridge(${id}) failed:`, e?.message || e);
+            }
+          } else if (isCliMode) {
+            // 主 ccv：先 stopAll（无在进程实例时为 no-op，防御升级残留）再 reconcile，
+            // 杜绝"旧在进程连接 + 新 detached worker"同时连同一机器人导致丢/重消息。
+            try { await imCore.stopAll(); } catch { /* no in-process instances */ }
+            imProcMgr.reconcileImProcesses().catch((e) => console.error('[CC Viewer] IM reconcile failed:', e?.message || e));
           }
           resolve(server);
         });

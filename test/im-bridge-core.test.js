@@ -129,6 +129,31 @@ describe('generic orchestration through a non-DingTalk adapter', () => {
   });
 });
 
+describe('IM worker skip-permissions handling', () => {
+  it('non-worker: blockOnSkipPermissions blocks injection (legacy behavior preserved)', async () => {
+    skipPerm = true;
+    cfgA = { ...cfgA, blockOnSkipPermissions: true };
+    delete process.env.CCV_IM_PLATFORM;
+    await inbound(recA, { msgId: 'blk1', content: 'x' });
+    assert.equal(injects.length, 0, 'blocked when not a worker');
+    assert.ok(recA.sends.length > 0, 'sender told it was blocked');
+  });
+
+  it('worker (CCV_IM_PLATFORM set): ignores blockOnSkipPermissions, injects, no per-message warning', async () => {
+    skipPerm = true;
+    cfgA = { ...cfgA, blockOnSkipPermissions: true };
+    process.env.CCV_IM_PLATFORM = 'imA';
+    try {
+      await inbound(recA, { msgId: 'wrk1', content: 'go' });
+      assert.equal(injects.length, 1, 'worker injects despite blockOnSkipPermissions');
+      assert.equal(injects[0], '\x1b[200~' + MARK('imA', 'go') + '\x1b[201~');
+      assert.equal(recA.sends.length, 0, 'no per-message skip-perm warning in worker mode');
+    } finally {
+      delete process.env.CCV_IM_PLATFORM;
+    }
+  });
+});
+
 describe('cross-adapter single-flight', () => {
   it('only one adapter injects at a time; the other is deferred, not dropped, then drains', async () => {
     await inbound(recA, { msgId: 'a1', content: 'a-first' }); // A injects, owns the slot

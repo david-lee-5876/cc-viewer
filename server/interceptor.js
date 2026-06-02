@@ -333,6 +333,13 @@ const _initPromise = (async () => {
   try {
     const recentLog = findRecentLog(_logDir, _projectName);
     if (recentLog) {
+      // IM worker：无人值守、无 UI 可应答 resume 交互。直接 continue 最近会话日志（保留记忆、
+      // 让记录弹窗读到同一份持续增长的文件），不进入 resume 交互状态（否则会一直写 *_temp.jsonl，
+      // 仅在干净退出时才 rename，SIGKILL 下丢失）。
+      if (process.env.CCV_IM_PLATFORM) {
+        LOG_FILE = recentLog;
+        return;
+      }
       // Leader / 普通进程：走 resume 交互流程
       const tempFile = _newLogFile.replace('.jsonl', '_temp.jsonl');
       LOG_FILE = tempFile;

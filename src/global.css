@@ -464,6 +464,24 @@ html, body, #root {
   border: 1px solid var(--border-hover);
   border-radius: 4px;
 }
+/* 行内「钉住」按钮：默认隐藏，hover 当前行显形；钉住后(data-pinned=true)常驻。
+   双类特异性压过 antd，无 !important(CLAUDE.md)。菜单在 portal 渲染，故规则放 global.css。 */
+.ant-dropdown .logo-dropdown-menu.logo-dropdown-menu [data-pin-trigger] {
+  opacity: 0;
+  color: var(--text-tertiary);
+  transition: opacity 0.15s, color 0.15s;
+}
+.ant-dropdown .logo-dropdown-menu.logo-dropdown-menu .ant-dropdown-menu-item:hover [data-pin-trigger] {
+  opacity: 0.55;
+}
+.ant-dropdown .logo-dropdown-menu.logo-dropdown-menu [data-pin-trigger]:hover {
+  opacity: 0.85;
+  color: var(--text-secondary);
+}
+.ant-dropdown .logo-dropdown-menu.logo-dropdown-menu [data-pin-trigger][data-pinned="true"] {
+  opacity: 1;
+  color: var(--color-primary, var(--text-secondary));
+}
 .ant-tooltip .ant-tooltip-inner {
   background-color: var(--bg-base-alt);
   color: var(--text-primary);

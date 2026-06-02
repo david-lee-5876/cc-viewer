@@ -312,9 +312,11 @@ async function runCliMode(extraClaudeArgs = [], cwd, noOpen = false) {
 
   const workingDir = cwd || process.cwd();
 
-  // 注册工作区
-  const { registerWorkspace } = await import('./server/workspace-registry.js');
-  registerWorkspace(workingDir);
+  // 注册工作区（IM worker 跳过：避免把 IM_<id>/ 目录塞进工作区选择器）
+  if (!process.env.CCV_IM_PLATFORM) {
+    const { registerWorkspace } = await import('./server/workspace-registry.js');
+    registerWorkspace(workingDir);
+  }
 
   // 确保 AskUserQuestion hook 已注册到 ~/.claude/settings.json
   ensureHooks();
@@ -338,18 +340,37 @@ async function runCliMode(extraClaudeArgs = [], cwd, noOpen = false) {
   // 3. 启动 HTTP 服务器
   const serverMod = await import('./server/server.js');
 
-  // 等待服务器启动完成
-  await new Promise(resolve => {
+  // 等待服务器启动完成。IM worker 加 30s 死线：端口段(7050-7099)耗尽时 getPort() 恒为 0，
+  // 否则 worker 会永久空转并占着 im.lock(port:null)。超时则退出(exit 钩子释放锁)，让用户快速看到失败、
+  // manager 也能据此判死。普通 ccv 保持原有无限轮询行为不变。
+  const _imPortDeadline = process.env.CCV_IM_PLATFORM ? Date.now() + 30000 : null;
+  await new Promise((resolve, reject) => {
     const check = () => {
       const port = serverMod.getPort();
-      if (port) resolve(port);
-      else setTimeout(check, 100);
+      if (port) return resolve(port);
+      if (_imPortDeadline && Date.now() > _imPortDeadline) {
+        return reject(new Error('no free port in 7050-7099 within 30s'));
+      }
+      setTimeout(check, 100);
     };
     setTimeout(check, 200);
+  }).catch((e) => {
+    console.error('[CC Viewer] IM worker could not bind a port:', e.message);
+    process.exit(1); // process.on('exit') 会按身份释放 im.lock
   });
 
   const port = serverMod.getPort();
   const serverProtocol = serverMod.getProtocol();
+
+  // IM worker：服务器监听成功后把真实端口回填进 im.lock（manager 据此做 HTTP 身份探测）
+  if (process.env.CCV_IM_PLATFORM) {
+    try {
+      const { updateImLockPort } = await import('./server/lib/im-lock.js');
+      updateImLockPort(process.env.CCV_IM_PLATFORM, port);
+    } catch (e) {
+      console.error('[CC Viewer] updateImLockPort failed:', e.message);
+    }
+  }
 
   // 3. 启动 PTY 中的 claude
   const { spawnClaude, killPty } = await import('./server/pty-manager.js');
@@ -401,6 +422,47 @@ async function runCliMode(extraClaudeArgs = [], cwd, noOpen = false) {
   };
   process.on('SIGINT', cleanup);
   process.on('SIGTERM', cleanup);
+}
+
+// 启动一个独立常驻 IM worker。本质是「在 IM_<id>/ 工作目录、绑 127.0.0.1、skip-permissions」的 runCliMode，
+// 外加：全局唯一锁、CLAUDE.md 预置、IM 专属 env。由 im-process-manager 以 detached 子进程拉起，
+// 也可手动 `ccv --im <id>` 启动。
+async function runImMode(platformId) {
+  const { getDescriptor } = await import('./server/lib/im-config.js');
+  if (!getDescriptor(platformId)) {
+    console.error(t('cli.imUnknownPlatform', { id: platformId }));
+    process.exit(1);
+  }
+
+  const { acquireImLock, releaseImLock, imDir } = await import('./server/lib/im-lock.js');
+  const { ensureImClaudeMd } = await import('./server/lib/im-claude-md.js');
+
+  const dir = imDir(platformId);
+  mkdirSync(dir, { recursive: true });
+
+  // 全局唯一：被活进程持有则拒绝启动（loser 退出，manager 会观察到子进程秒退）
+  const lockRes = acquireImLock(platformId);
+  if (!lockRes.ok) {
+    console.error(t('cli.imAlreadyRunning', { id: platformId, pid: lockRes.holder?.pid ?? '?' }));
+    process.exit(3);
+  }
+  // 退出时按身份释放锁（exit 同步钩子在 process.exit()/SIGINT/SIGTERM→cleanup 后仍执行；
+  // SIGKILL 不触发，由 manager 的 getImLiveness 兜底清理陈旧锁）
+  process.on('exit', () => { try { releaseImLock(platformId, process.pid); } catch { /* noop */ } });
+
+  // 首次缺失则生成默认 CLAUDE.md（行为约束，建议层）
+  try { ensureImClaudeMd(platformId, dir); }
+  catch (e) { console.error('[CC Viewer] ensureImClaudeMd failed:', e.message); }
+
+  // 以下 env 必须在 import server.js（runCliMode 内）之前设置：server 顶层读 START_PORT/MAX_PORT/HOST。
+  process.env.CCV_IM_PLATFORM = platformId;
+  process.env.CCV_START_PORT = process.env.CCV_START_PORT || '7050'; // IM 端口段从 7050 起
+  process.env.CCV_MAX_PORT = process.env.CCV_MAX_PORT || '7099';
+  process.env.CCV_HOST = '127.0.0.1';  // 仅 loopback：不把 skip-perms 端点暴露到局域网
+  process.env.CCV_IM_DENY = '1';       // 启用 perm-bridge 的 IM 硬拦截层
+
+  // worker 全自动：skip-permissions + 不开浏览器，工作目录设为 IM_<id>/
+  return runCliMode(['--dangerously-skip-permissions'], dir, true);
 }
 
 async function runSdkMode(extraClaudeArgs = [], cwd, noOpen = false) {
@@ -675,6 +737,21 @@ if (usePwdIdx !== -1) {
   args.splice(usePwdIdx, 1);
 }
 
+// Extract --im <platformId> — 启动一个独立常驻 IM worker：工作目录 IM_<id>/、绑 127.0.0.1、
+// skip-permissions、全局唯一锁。必须在动态 import 之前提取（runImMode 会在 import server.js 前设 env）。
+let imPlatform = null;
+const imIdx = args.indexOf('--im');
+if (imIdx !== -1) {
+  const val = args[imIdx + 1];
+  if (val && !val.startsWith('-')) {
+    imPlatform = val;
+    args.splice(imIdx, 2);
+  } else {
+    console.error(t('cli.imRequiresId'));
+    process.exit(1);
+  }
+}
+
 // ccv 自有命令判断
 const isLogger = args.includes('-logger');
 const isUninstall = args.includes('--uninstall') || args.includes('-uninstall');
@@ -827,7 +904,13 @@ if (isLogger) {
   process.exit(0);
 }
 
-if (args[0] === 'run') {
+if (imPlatform) {
+  // 独立 IM worker 模式
+  runImMode(imPlatform).catch(err => {
+    console.error('IM mode error:', err);
+    process.exit(1);
+  });
+} else if (args[0] === 'run') {
   runProxyCommand(args);
 } else if (args.includes('-SDK') || args.includes('--sdk')) {
   // SDK 模式（显式 -SDK 切换）
