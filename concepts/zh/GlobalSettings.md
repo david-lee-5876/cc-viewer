@@ -66,6 +66,7 @@
 | `CCV_PROJECT_DIR` | `process.cwd()` | 项目工作目录，用于文件操作和 Git 命令 |
 | `CCV_PROXY_PORT` | 未设置 | 本地 MITM 代理端口 |
 | `CCV_BYPASS_PERMISSIONS` | 未设置 | `=1` 跳过工具权限审批（配合 `--dangerously-skip-permissions`） |
+| `CCV_DISABLE_ASK_HOOK` | 未设置 | `=1` 跳过 cc-viewer 网页端 AskUserQuestion 答题，交回终端 / 下游 PermissionRequest hook 处理 |
 | `CCV_DISABLE_DELTA` | 未设置 | `=1` 禁用增量日志存储，每次写入完整消息 |
 | `CCV_DEBUG` | 未设置 | `=1` 启用 HTTP 代理调试日志 |
 | `CCV_DEBUG_PLUGINS` | 未设置 | `=1` 启用插件加载调试日志 |

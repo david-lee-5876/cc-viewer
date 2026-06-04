@@ -40,6 +40,17 @@ if (!port) {
   process.exit(0);
 }
 
+// Opt-out: skip cc-viewer's web AskUserQuestion interception and let the prompt fall
+// through to the terminal TUI / any downstream PreToolUse|PermissionRequest hooks
+// (e.g. a desktop notifier that renders the options elsewhere). Runtime env gate,
+// mirroring CCV_BYPASS_PERMISSIONS in perm-bridge.js — the hook stays registered, so
+// this toggles per-launch with no settings.json churn. Emitting continue:true (rather
+// than exit 1) avoids Claude Code logging a "hook error" on every AskUserQuestion call.
+if (process.env.CCV_DISABLE_ASK_HOOK === '1') {
+  process.stdout.write(JSON.stringify({ continue: true, suppressOutput: true }) + '\n');
+  process.exit(0);
+}
+
 let stdinData;
 try {
   stdinData = readFileSync(0, 'utf-8');

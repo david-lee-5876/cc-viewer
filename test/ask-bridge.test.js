@@ -368,4 +368,60 @@ describe('ask-bridge.js', () => {
       });
     });
   });
+
+  describe('CCV_DISABLE_ASK_HOOK opt-out', () => {
+    let server;
+    let port;
+    let requestCount;
+
+    beforeEach(async () => {
+      requestCount = 0;
+      server = createServer((req, res) => {
+        requestCount++;
+        req.resume();
+        req.on('end', () => {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ answers: { 'Q?': 'A' } }));
+        });
+      });
+      await new Promise((resolve) => {
+        server.listen(0, '127.0.0.1', () => { port = server.address().port; resolve(); });
+      });
+    });
+
+    afterEach(async () => {
+      await new Promise((resolve) => server.close(resolve));
+    });
+
+    const STDIN = JSON.stringify({
+      tool_input: { questions: [{ question: 'Q?', header: 'H', options: [{ label: 'A', description: '' }], multiSelect: false }] },
+    });
+
+    it('falls through (continue:true) WITHOUT contacting the server when set to "1"', async () => {
+      const { code, stdout } = await runBridge(STDIN, { CCVIEWER_PORT: String(port), CCV_DISABLE_ASK_HOOK: '1' });
+      assert.equal(code, 0);
+      const output = JSON.parse(stdout.trim());
+      assert.equal(output.continue, true);
+      assert.equal(output.suppressOutput, true);
+      // The whole point: the prompt is handed to the terminal / a downstream PermissionRequest
+      // hook, so cc-viewer's ask endpoint must never be hit.
+      assert.equal(requestCount, 0, 'disabled ask hook must not reach the server');
+    });
+
+    it('keeps intercepting (contacts server, returns answers) when the flag is unset', async () => {
+      const { code, stdout } = await runBridge(STDIN, { CCVIEWER_PORT: String(port), CCV_DISABLE_ASK_HOOK: '' });
+      assert.equal(code, 0);
+      const output = JSON.parse(stdout.trim());
+      assert.equal(output.hookSpecificOutput.permissionDecision, 'allow');
+      assert.ok(requestCount >= 1, 'unset flag preserves the existing interception behavior');
+    });
+
+    it('treats values other than "1" as unset (still intercepts)', async () => {
+      const { code, stdout } = await runBridge(STDIN, { CCVIEWER_PORT: String(port), CCV_DISABLE_ASK_HOOK: 'true' });
+      assert.equal(code, 0);
+      const output = JSON.parse(stdout.trim());
+      assert.equal(output.hookSpecificOutput.permissionDecision, 'allow');
+      assert.ok(requestCount >= 1, 'only the exact value "1" disables — mirrors CCV_BYPASS_PERMISSIONS');
+    });
+  });
 });

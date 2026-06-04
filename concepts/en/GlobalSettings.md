@@ -66,6 +66,7 @@ All UI settings are persisted to `<log_dir>/preferences.json` via the `/api/pref
 | `CCV_PROJECT_DIR` | `process.cwd()` | Project working directory for file operations and Git commands |
 | `CCV_PROXY_PORT` | unset | Local MITM proxy port |
 | `CCV_BYPASS_PERMISSIONS` | unset | `=1` skip tool permission approval (with `--dangerously-skip-permissions`) |
+| `CCV_DISABLE_ASK_HOOK` | unset | `=1` skip cc-viewer's web AskUserQuestion prompt; let it fall through to the terminal / a downstream PermissionRequest hook |
 | `CCV_DISABLE_DELTA` | unset | `=1` disable incremental log storage, write full messages every time |
 | `CCV_DEBUG` | unset | `=1` enable HTTP proxy debug logging |
 | `CCV_DEBUG_PLUGINS` | unset | `=1` enable plugin loading debug logging |
