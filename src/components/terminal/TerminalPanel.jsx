@@ -902,7 +902,10 @@ class TerminalPanel extends React.Component {
         this._throttledWrite(msg.data);
       } else if (msg.type === 'data-resync') {
         // 服务端反压恢复:丢弃本地积压、重置 xterm、写快照一步对齐到服务端当前末态
-        // (与 ws close→重连全量 replay 的既有恢复惯例同款;TUI 重绘由服务端 SIGWINCH/resize 抖动驱动)
+        // (与 ws close→重连全量 replay 的既有恢复惯例同款;TUI 重绘由服务端 SIGWINCH/resize 抖动驱动)。
+        // 有意取舍:terminal.reset() 会连洪泛前的 scrollback 一起清掉——保留 scrollback 改写
+        // 分隔条+追加快照的方案会让快照开头与已渲染内容重叠重复,且洪泛流的半截转义残留可能
+        // 卡坏 ANSI 状态机;reset 换取干净对齐,黄字提示已向用户明示发生过跳过。
         this._writeQ.reset();
         this.terminal?.reset();
         this._writeQ.push('\x1b[33m[cc-viewer] output skipped during congestion\x1b[0m\r\n');

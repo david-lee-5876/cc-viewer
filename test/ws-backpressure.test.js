@@ -86,6 +86,26 @@ describe('createBackpressureGate', { concurrency: false }, () => {
     assert.equal(gate.offer(), false);
   });
 
+  it('onBehind 在进入 behind 时回调一次（带 bufferedAmount），hold 期间不重复', () => {
+    const behindCalls = [];
+    const g = createBackpressureGate({
+      ...OPTS,
+      getBufferedAmount: () => buffered,
+      onBehind: (b) => behindCalls.push(b),
+      onResume: () => {},
+    });
+    buffered = 1500;
+    g.offer();
+    g.offer();                  // behind 中再 offer 不应重复回调
+    assert.deepEqual(behindCalls, [1500]);
+    buffered = 100;
+    mock.timers.tick(100);      // 恢复
+    buffered = 2000;
+    g.offer();                  // 二次进 behind → 再回调一次
+    assert.deepEqual(behindCalls, [1500, 2000]);
+    g.dispose();
+  });
+
   it('恢复之后再次洪泛 → 重新进 behind（状态机可循环）', () => {
     buffered = 1500;
     gate.offer();               // 第一次进 behind
