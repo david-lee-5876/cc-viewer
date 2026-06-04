@@ -296,7 +296,7 @@ export default function ImPlatformSettings({ descriptor }) {
   // 状态徽标：以真实进程状态为准（含服务端口）。远端无 process → 回落 connection。
   const renderBadge = () => {
     if (connection?.lastError) return <Tag color="error">{_tr('ui.im.statusError', null, 'Error')}: {connection.lastError}</Tag>;
-    const portSuffix = proc?.port ? ` · :${proc.port}` : '';
+    const portSuffix = proc?.port ? ` :${proc.port}` : '';
     if (procState) {
       if (procState === 'ready') {
         return connection?.connected

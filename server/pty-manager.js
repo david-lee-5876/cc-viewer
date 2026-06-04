@@ -178,7 +178,7 @@ export async function spawnClaude(proxyPort, cwd, extraArgs = [], claudePath = n
   if (process.versions.electron) {
     const { execSync } = await import('node:child_process');
     try {
-      nodePath = execSync(process.platform === 'win32' ? 'where node' : 'which node', { encoding: 'utf-8' }).trim();
+      nodePath = execSync(process.platform === 'win32' ? 'where node' : 'which node', { encoding: 'utf-8', windowsHide: true }).trim();
       if (process.platform === 'win32') nodePath = nodePath.split('\n')[0].trim();
     } catch {
       nodePath = process.platform === 'win32' ? 'node' : '/usr/local/bin/node';

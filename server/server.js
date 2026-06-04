@@ -40,13 +40,18 @@ import './lib/adapters/wecom-adapter.js';    // side-effect: registers the WeCom
 import './lib/adapters/discord-adapter.js';  // side-effect: registers the Discord adapter
 import { loadConfig } from './lib/im-config.js';
 
-const execFileAsync = promisify(execFile);
-const execAsync = promisify(exec);
+// Windows：git.exe / cmd.exe 等 console-subsystem 子进程从无控制台的 worker node.exe 启动时
+// 会各弹一个可见控制台窗口（diff/status 轮询路径高频闪现）。在 promisify 包装层统一默认
+// windowsHide（POSIX 上为 no-op，调用方传入可覆盖）。deps.execFileAsync 注入下游路由同样受益。
+const _execFileAsyncRaw = promisify(execFile);
+const execFileAsync = (cmd, args, opts) => _execFileAsyncRaw(cmd, args, { windowsHide: true, ...opts });
+const _execAsyncRaw = promisify(exec);
+const execAsync = (cmd, opts) => _execAsyncRaw(cmd, { windowsHide: true, ...opts });
 
 // execFile with stdin input support (for git check-ignore --stdin)
 function execWithStdin(cmd, args, input, options) {
   return new Promise((resolve, reject) => {
-    const child = spawn(cmd, args, { ...options, stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = spawn(cmd, args, { ...options, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
     let stdout = '';
     let stderr = '';
     child.stdout.on('data', d => { stdout += d; });

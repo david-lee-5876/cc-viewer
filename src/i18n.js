@@ -5819,6 +5819,14 @@ const i18nData = {
     "ar": "التحديث عبر npm", "no": "Oppdater via npm", "pt-BR": "Atualizar via npm",
     "th": "อัปเดตผ่าน npm", "tr": "npm ile güncelle", "uk": "Оновити через npm"
   },
+  "ui.update.brew": {
+    "zh": "Homebrew 更新", "en": "Update via Homebrew", "zh-TW": "Homebrew 更新",
+    "ko": "Homebrew로 업데이트", "ja": "Homebrew で更新", "de": "Über Homebrew aktualisieren",
+    "es": "Actualizar vía Homebrew", "fr": "Mettre à jour via Homebrew", "it": "Aggiorna via Homebrew",
+    "da": "Opdater via Homebrew", "pl": "Aktualizuj przez Homebrew", "ru": "Обновить через Homebrew",
+    "ar": "التحديث عبر Homebrew", "no": "Oppdater via Homebrew", "pt-BR": "Atualizar via Homebrew",
+    "th": "อัปเดตผ่าน Homebrew", "tr": "Homebrew ile güncelle", "uk": "Оновити через Homebrew"
+  },
   "ui.update.electron": {
     "zh": "Electron 桌面版更新", "en": "Update Electron Desktop", "zh-TW": "Electron 桌面版更新",
     "ko": "Electron 데스크톱 업데이트", "ja": "Electron デスクトップ更新", "de": "Electron Desktop aktualisieren",

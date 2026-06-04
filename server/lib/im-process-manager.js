@@ -22,7 +22,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 export function resolveNodeBinary() {
   if (!process.versions.electron) return process.execPath;
   try {
-    const out = execSync(process.platform === 'win32' ? 'where node' : 'which node', { encoding: 'utf-8' });
+    const out = execSync(process.platform === 'win32' ? 'where node' : 'which node', { encoding: 'utf-8', windowsHide: true });
     const p = process.platform === 'win32' ? out.split('\n')[0].trim() : out.trim();
     if (p) return p;
   } catch { /* fall through */ }

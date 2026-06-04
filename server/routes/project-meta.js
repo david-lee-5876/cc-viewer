@@ -4,6 +4,23 @@ import { join } from 'node:path';
 import { PACKAGE_JSON } from '../_paths.js';
 import { LOG_DIR } from '../../findcc.js';
 import { _projectName } from '../interceptor.js';
+import { detectHomebrewInstall } from '../lib/updater.js';
+
+// 判定当前 cc-viewer 的安装渠道，供前端精准匹配升级命令。
+//   - electron：桌面版（in-process server），走 GitHub Releases 重新下载安装包。
+//   - brew：Homebrew Cellar 布局命中 → `brew upgrade cc-viewer`（npm install -g 会跟 Cellar 打架）。
+//   - npm：默认兜底 → `npm install -g cc-viewer --registry=...`（指定官方源避免镜像滞后拿到旧版本）。
+// deps 仅供单测注入；失败安全：detect 抛异常时回落到 npm（不会误导 brew 用户走 npm）。
+export function getInstallMethod({
+  electron = process.versions && process.versions.electron,
+  detect = detectHomebrewInstall,
+} = {}) {
+  if (electron) return 'electron';
+  try {
+    if (detect()) return 'brew';
+  } catch { /* 探测失败 → 回落 npm */ }
+  return 'npm';
+}
 
 function projectName(req, res) {
   res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -20,7 +37,7 @@ function versionInfo(req, res) {
   try {
     const pkg = JSON.parse(readFileSync(PACKAGE_JSON, 'utf-8'));
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ version: pkg.version }));
+    res.end(JSON.stringify({ version: pkg.version, installMethod: getInstallMethod() }));
   } catch {
     res.writeHead(500, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: 'Failed to read version' }));

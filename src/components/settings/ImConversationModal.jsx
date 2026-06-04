@@ -169,7 +169,7 @@ export default function ImConversationModal({ open, onClose, platform, onOpenCon
   // 状态徽标：以真实进程状态为准（含服务端口）。远端无 process → 回落 connection。与 ImPlatformSettings 一致。
   const renderStatus = () => {
     if (imConn?.lastError) return <Tag color="error">{t('ui.im.statusError')}: {imConn.lastError}</Tag>;
-    const portSuffix = imProc?.port ? ` · :${imProc.port}` : '';
+    const portSuffix = imProc?.port ? ` :${imProc.port}` : '';
     const st = imProc?.state;
     if (st) {
       if (st === 'ready') {

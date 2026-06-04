@@ -3,7 +3,10 @@ import { join, sep } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
-const execFileAsync = promisify(execFile);
+// Windows：从无控制台的 worker node.exe 启动 git.exe 会弹可见控制台窗口，
+// 包装层统一默认 windowsHide（POSIX no-op），覆盖本文件全部 git 调用。
+const _execFileAsyncRaw = promisify(execFile);
+const execFileAsync = (cmd, args, opts) => _execFileAsyncRaw(cmd, args, { windowsHide: true, ...opts });
 
 const UNTRACKED_MAX_BYTES = 5 * 1024 * 1024;
 const BINARY_PROBE_BYTES = 8192;

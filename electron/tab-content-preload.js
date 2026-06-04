@@ -47,6 +47,10 @@ contextBridge.exposeInMainWorld('tabBridge', {
   setZoomFactor: (f) => { try { webFrame.setZoomFactor(f); } catch {} },
   // Header 控件迁移到 tab bar：active tab 把 header 模型推上去；接收 tab bar 的点击动作。
   setHeaderModel: (model) => ipcRenderer.send('set-header-model', model),
+  // win32 HTML 菜单栏:React 下拉叶子点击 → main dispatchMenuCommand(new-tab/undo/reload/...)。
+  menuCommand: (id) => ipcRenderer.send('menu-command', id),
+  // 下拉开/关状态回报 → main 转给 tab bar(打开期间 hover 相邻顶级菜单即切换)。
+  menuBarState: (open) => ipcRenderer.send('menu-bar-state', !!open),
   onHeaderAction: (cb) => {
     const handler = (_, payload) => cb(payload);
     ipcRenderer.on('header-action', handler);

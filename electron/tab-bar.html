@@ -55,6 +55,59 @@
   body.fullscreen .traffic-light-spacer {
     width: 0;
   }
+  /* Windows：无 traffic lights，70px 幽灵占位去掉 */
+  body.win32 .traffic-light-spacer { display: none; }
+  /* Windows 品牌区(logo + 标题)：处于拖拽区，仅 win32 显示 */
+  #winBrand {
+    display: none;
+    align-items: center;
+    gap: 7px;
+    padding: 0 6px 0 12px;
+    flex-shrink: 0;
+    color: var(--text-active);
+    font-size: 12px;
+    font-weight: 600;
+    -webkit-app-region: drag;
+  }
+  body.win32 #winBrand { display: flex; }
+  #winBrand svg { display: block; color: var(--accent); }
+  /* Windows HTML 菜单栏(File/Edit/View/Window)：文案与下拉皮肤跟随主题,下拉由活动 tab 的 React 渲染 */
+  #menuBar {
+    display: none;
+    align-items: center;
+    flex-shrink: 0;
+    margin-right: 4px;
+    -webkit-app-region: no-drag;
+  }
+  body.win32 #menuBar { display: flex; }
+  .menubar-btn {
+    height: 26px;
+    padding: 0 9px;
+    border-radius: 6px;
+    border: none;
+    background: none;
+    color: var(--text);
+    cursor: pointer;
+    font-size: 12px;
+    white-space: nowrap;
+    -webkit-app-region: no-drag;
+    transition: background 0.1s, color 0.1s;
+  }
+  .menubar-btn:hover { background: var(--close-hover); color: var(--text-active); }
+  .menubar-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  /* Windows 原生窗控(最小化/最大化/关闭)overlay 区域占位:titleBarOverlay 的三按钮绘制在本视图
+     右上角之上,DOM 摸不到也测不了宽度(env(titlebar-area-*) 在子 WebContentsView 不可靠),
+     按 Win11 标准 3×46px≈138px 取 140px 固定值;若 Windows 改版导致重叠/留白,在此调整。
+     全屏时 overlay 按钮消失,占位收起。 */
+  .win-overlay-spacer {
+    display: none;
+    flex-shrink: 0;
+    width: 140px;
+    align-self: stretch;
+    -webkit-app-region: drag;
+  }
+  body.win32 .win-overlay-spacer { display: block; }
+  body.win32.fullscreen .win-overlay-spacer { width: 0; }
   /* Right-side drag area */
   .drag-spacer {
     flex-shrink: 0;
@@ -227,18 +280,23 @@
   body.device-mode #leftCluster,
   body.device-mode #rightCluster,
   body.device-mode .tab:not(.active),
-  body.device-mode .new-tab-btn {
+  body.device-mode .new-tab-btn,
+  body.device-mode #winBrand,
+  body.device-mode #menuBar {
     display: none;
   }
 </style>
 </head>
 <body>
   <div class="traffic-light-spacer"></div>
+  <div id="winBrand" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="5.5"/><circle cx="12" cy="12" r="1.8" fill="currentColor"/><line x1="12" y1="2" x2="12" y2="4.2"/><line x1="12" y1="19.8" x2="12" y2="22"/><line x1="2" y1="12" x2="4.2" y2="12"/><line x1="19.8" y1="12" x2="22" y2="12"/><line x1="4.9" y1="4.9" x2="6.5" y2="6.5"/><line x1="17.5" y1="17.5" x2="19.1" y2="19.1"/><line x1="4.9" y1="19.1" x2="6.5" y2="17.5"/><line x1="17.5" y1="6.5" x2="19.1" y2="4.9"/></svg><span>CC Viewer</span></div>
+  <div id="menuBar" role="menubar"></div>
   <div class="hdr-cluster" id="leftCluster"></div>
   <div class="tab-container" id="tabs"><!-- tabs + newBtn rendered here --></div>
   <div class="tab-drag-fill"></div>
   <div class="hdr-cluster" id="rightCluster"></div>
   <button class="mode-btn" id="modeBtn" title="Switch to iPad mode" aria-pressed="false"></button>
+  <div class="win-overlay-spacer" aria-hidden="true"></div>
 
 <script>
   let tabs = [];
@@ -246,6 +304,14 @@
 
   const tabsEl = document.getElementById('tabs');
   const newBtn = document.getElementById('newBtn');
+
+  // 平台 class:win32 时隐藏 traffic-light 占位、显示品牌区/HTML 菜单栏/原生窗控 overlay 占位(纯 CSS 接管)。
+  const PLATFORM = (window.tabAPI.platform || '');
+  if (PLATFORM) document.body.classList.add(PLATFORM);
+
+  // 主进程推来的已翻译菜单模型 + tab bar 文案(语言切换时会重推)。
+  let menuModel = null;
+  let uiStrings = {};
 
   function render() {
     // tab.name / tab.id 来自 main 进程，最终源头是用户输入的项目名 / 路径，可控字符串。
@@ -292,7 +358,7 @@
     if (tabs.length > 0) {
       const btn = document.createElement('button');
       btn.className = 'new-tab-btn';
-      btn.title = 'New project tab';
+      btn.title = uiStrings.newTab || 'New project tab';
       btn.textContent = '+';
       btn.addEventListener('click', () => window.tabAPI.newTab());
       tabsEl.appendChild(btn);
@@ -322,8 +388,10 @@
   const ICON_MONITOR = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/></svg>';
   const ICON_PHONE = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="2" width="12" height="20" rx="2.5"/><path d="M11 18h2"/></svg>';
   let deviceOn = false;
-  // tab bar 无 i18n：iPad/PC 开关的 tooltip 由活动 tab 的 header 模型（有 t()）下发；首帧无模型时英文兜底。
+  // iPad/PC 开关 tooltip:优先用活动 tab header 模型下发的(React t());无模型时用主进程
+  // menu-model 附带的 uiStrings(server i18n);两者都没到时英文兜底。
   let modeTitles = { toIpad: 'Switch to iPad mode', toPc: 'Switch to PC mode' };
+  let modeTitlesFromModel = false;
   function renderModeBtn() {
     modeBtn.innerHTML = deviceOn ? ICON_PHONE : ICON_MONITOR;
     modeBtn.setAttribute('aria-pressed', String(deviceOn));
@@ -396,7 +464,7 @@
     const m = headerModel;
     if (!m) return; // 无活动 tab（工作区选择器）→ 不显示任何迁移控件
     // 左侧：菜单（在 React 内打开下拉，避免被 50px 高的 tab bar 裁切）+ 代理 + IM 状态
-    leftCluster.appendChild(hBtn(HSVG.menu, (m.menu && m.menu.title) || 'Menu', 'menuOpen'));
+    leftCluster.appendChild(hBtn(HSVG.menu, (m.menu && m.menu.title) || uiStrings.menu || 'Menu', 'menuOpen'));
     if (m.proxy && m.proxy.label) {
       leftCluster.appendChild(hBtn(HSVG.proxy + '<span>' + hEsc(m.proxy.label) + '</span>', m.proxy.label, 'proxy', { cls: 'proxy-btn' }));
     }
@@ -445,10 +513,52 @@
   window.tabAPI.onHeaderModel?.((model, tabId) => {
     headerModel = model;
     if (tabId != null) headerModelTabId = tabId;
-    if (model && model.deviceMode) { modeTitles = model.deviceMode; renderModeBtn(); } // 习得本地化的开关 tooltip
+    if (model && model.deviceMode) { modeTitles = model.deviceMode; modeTitlesFromModel = true; renderModeBtn(); } // 习得本地化的开关 tooltip
     renderClusters();
+    renderMenuBar(); // 菜单栏仅在有活动 tab 时渲染(下拉宿主在活动 tab 的 React 里)
   });
   window.tabAPI.requestHeaderModel?.(); // 首帧拉取活动 tab 已缓存模型，规避 did-finish-load 竞态后空白
+
+  // ---- Windows HTML 菜单栏(File/Edit/View/Window) ----
+  // 点击把 menuId + 按钮横坐标经 header-action 发给 main(main 附上已翻译模型)→ 活动 tab 的
+  // React 在内容视图里渲染跟随皮肤的下拉(50px 高的 tab bar 自己放不下下拉)。
+  const menuBarEl = document.getElementById('menuBar');
+  // React 端回报的「菜单下拉是否打开」状态:打开时 hover 相邻顶级菜单即切换(原生菜单栏惯例)。
+  let menuDropdownOpen = false;
+  function renderMenuBar() {
+    menuBarEl.replaceChildren();
+    if (PLATFORM !== 'win32' || !Array.isArray(menuModel) || !headerModel) return;
+    menuModel.forEach((menu) => {
+      const b = document.createElement('button');
+      b.className = 'menubar-btn';
+      b.setAttribute('role', 'menuitem');
+      b.setAttribute('aria-haspopup', 'true');
+      b.textContent = menu.label;
+      const open = () => {
+        window.tabAPI.headerAction({
+          tabId: headerModelTabId,
+          type: 'menuBarOpen',
+          menuId: menu.id,
+          x: Math.round(b.getBoundingClientRect().left),
+        });
+      };
+      b.addEventListener('click', (e) => { e.stopPropagation(); open(); });
+      b.addEventListener('mouseenter', () => { if (menuDropdownOpen) open(); });
+      menuBarEl.appendChild(b);
+    });
+  }
+  window.tabAPI.onMenuModel?.((payload) => {
+    menuModel = (payload && payload.menus) || null;
+    uiStrings = (payload && payload.uiStrings) || {};
+    if (!modeTitlesFromModel && uiStrings.toIpad && uiStrings.toPc) {
+      modeTitles = { toIpad: uiStrings.toIpad, toPc: uiStrings.toPc };
+      renderModeBtn();
+    }
+    render();        // "+" tooltip 应用翻译
+    renderClusters(); // 汉堡兜底 tooltip 应用翻译
+    renderMenuBar();
+  });
+  window.tabAPI.onMenuBarState?.((open) => { menuDropdownOpen = !!open; });
 </script>
 </body>
 </html>

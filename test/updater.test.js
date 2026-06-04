@@ -540,6 +540,8 @@ describe('checkAndUpdate spawn return defense', () => {
     assert.equal(capturedOpts.shell, process.platform === 'win32');
     assert.equal(capturedOpts.detached, true);
     assert.equal(capturedOpts.stdio, 'ignore');
+    // Windows：npm.cmd 是 console-subsystem，缺 windowsHide 会在后台更新期间常驻可见控制台窗口
+    assert.equal(capturedOpts.windowsHide, true);
   });
 });
 

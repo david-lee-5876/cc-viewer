@@ -75,7 +75,7 @@ export async function installPluginFromUrl(pluginsDir, fileUrl, extractNameScrip
   writeFileSync(tmpFile, content, 'utf-8');
   try {
     const result = await new Promise((resolve, reject) => {
-      execFile('node', [extractNameScript, tmpFile], { timeout: 5000 }, (err, stdout) => {
+      execFile('node', [extractNameScript, tmpFile], { timeout: 5000, windowsHide: true }, (err, stdout) => {
         if (err) return reject(err);
         resolve(stdout);
       });

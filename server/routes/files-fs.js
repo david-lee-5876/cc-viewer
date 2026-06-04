@@ -614,7 +614,7 @@ function openFile(req, res, parsedUrl, isLocal, deps) {
       if (plat === 'darwin') {
         execFile('open', [fullPath], () => {});
       } else if (plat === 'win32') {
-        execFile('cmd.exe', ['/c', 'start', '', fullPath], () => {});
+        execFile('cmd.exe', ['/c', 'start', '', fullPath], { windowsHide: true }, () => {});
       } else {
         execFile('xdg-open', [fullPath], () => {});
       }
@@ -842,7 +842,7 @@ function createDir(req, res, parsedUrl, isLocal, deps) {
 function openLogDir(req, res) {
   const dir = LOG_FILE ? dirname(LOG_FILE) : LOG_DIR;
   const cmd = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'explorer' : 'xdg-open';
-  execFile(cmd, [dir], () => {});
+  execFile(cmd, [dir], { windowsHide: true }, () => {});
   res.writeHead(200, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify({ ok: true, dir }));
 }
@@ -851,7 +851,7 @@ function openProfileDir(req, res) {
   const dir = dirname(PROFILE_PATH);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   const cmd = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'explorer' : 'xdg-open';
-  execFile(cmd, [dir], () => {});
+  execFile(cmd, [dir], { windowsHide: true }, () => {});
   res.writeHead(200, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify({ ok: true, dir }));
 }
@@ -859,7 +859,7 @@ function openProfileDir(req, res) {
 function openProjectDir(req, res) {
   const dir = process.env.CCV_PROJECT_DIR || process.cwd();
   const cmd = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'explorer' : 'xdg-open';
-  execFile(cmd, [dir], () => {});
+  execFile(cmd, [dir], { windowsHide: true }, () => {});
   res.writeHead(200, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify({ ok: true, dir }));
 }

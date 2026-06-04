@@ -107,7 +107,7 @@ export function isAnyCcvBusy({ currentPid, busy, portRange, lsofImpl } = {}) {
 
   const [start, end] = Array.isArray(portRange) && portRange.length === 2 ? portRange : [7008, 7099];
   const pid = typeof currentPid === 'number' ? currentPid : process.pid;
-  const runLsof = lsofImpl || ((cmd) => execSync(cmd, { timeout: 2000, encoding: 'utf-8' }));
+  const runLsof = lsofImpl || ((cmd) => execSync(cmd, { timeout: 2000, encoding: 'utf-8', windowsHide: true }));
 
   try {
     const out = String(runLsof(`lsof -iTCP:${start}-${end} -sTCP:LISTEN -P -n -Fp`));
@@ -216,7 +216,9 @@ export async function checkAndUpdate(options = {}) {
         const child = spawnImpl(
           'npm',
           ['install', '-g', `cc-viewer@${remoteVersion}`, '--no-audit', '--no-fund'],
-          { detached: true, stdio: 'ignore', shell: process.platform === 'win32' }
+          // windowsHide：Windows 下 shell 模式经 cmd.exe 跑 npm.cmd（console-subsystem），
+          // 不隐藏会在后台更新期间常驻一个可见控制台窗口；POSIX 上为 no-op。
+          { detached: true, stdio: 'ignore', shell: process.platform === 'win32', windowsHide: true }
         );
         if (child && typeof child.unref === 'function') child.unref();
       } catch (err) {

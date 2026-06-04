@@ -8,19 +8,32 @@
  *
  * Each tab = fork('tab-worker.js') → isolated proxy + server + PTY
  */
-import { app, BaseWindow, WebContentsView, Menu, ipcMain, dialog, Notification } from 'electron';
+import { app, BaseWindow, WebContentsView, Menu, ipcMain, dialog, Notification, screen, clipboard } from 'electron';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { dirname, join, basename, delimiter } from 'path';
 import { fork, execSync } from 'child_process';
-import { realpathSync, existsSync, readFileSync, watch, mkdirSync, createWriteStream, readdirSync, statSync, unlinkSync } from 'fs';
-import { initDiag, appendDiag, attachDiagListeners } from './diag.js';
+import { realpathSync, existsSync, readFileSync, writeFileSync, watch, mkdirSync, createWriteStream, readdirSync, statSync, unlinkSync } from 'fs';
+import { initDiag, appendDiag, attachDiagListeners, diagFlush } from './diag.js';
+import { buildMenuModel, serializeMenuModel } from './menu-model.js';
+import { loadState, saveState, validateState } from './window-state.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const rootDir = join(__dirname, '..');
+
+// ─── 主进程防阻塞：console.* 守卫 ───────────────────────────
+// Windows 上写控制台是同步内核调用：从终端启动 + 用户在黑窗口里点选文字（QuickEdit
+// 选择模式）时，所有写 stdout/stderr 的进程被内核级无限期阻塞——主进程一旦中招即
+// "整窗永久冻结、hover 仍有高亮、永不恢复"（按 Esc 才解锁）。打包版 GUI 没有可见
+// 控制台，stdout 输出毫无价值 → 打包版一律静默；关键事件本就走 appendDiag 异步落盘。
+// dev（npx electron .）保留 console 输出不变。
+const _isDev = !app.isPackaged;
+const devLog = (...a) => { if (_isDev) console.log(...a); };
+const devWarn = (...a) => { if (_isDev) console.warn(...a); };
+const devError = (...a) => { if (_isDev) console.error(...a); };
 // Windows 下 import(绝对路径) 会被 Node 把 'c:' 当 URL scheme 拒绝 (ERR_UNSUPPORTED_ESM_URL_SCHEME)。
 // pathToFileURL(p).href 在 POSIX 产出 file:///abs/.. 在 Windows 产出 file:///C:/.. —— 两平台 ESM 等价。
-const { t } = await import(pathToFileURL(join(rootDir, 'server', 'i18n.js')).href);
+const { t, setLang } = await import(pathToFileURL(join(rootDir, 'server', 'i18n.js')).href);
 const { getClaudeConfigDir, LOG_DIR } = await import(pathToFileURL(join(rootDir, 'findcc.js')).href);
 
 // 白屏诊断日志（实现在 electron/diag.js）。
@@ -41,6 +54,7 @@ if (!_hasShellEnv && process.platform !== 'win32') {
     const _envOutput = execSync(`${_shell} -l -i -c 'env' 2>/dev/null`, {
       encoding: 'utf-8',
       timeout: 5000,
+      windowsHide: true,
       env: { ...process.env, TERM: process.env.TERM || 'xterm-256color' },
     });
     let _shellPath = null;
@@ -65,10 +79,10 @@ if (!_hasShellEnv && process.platform !== 'win32') {
       }
     }
     if (process.env.HTTP_PROXY || process.env.HTTPS_PROXY) {
-      console.error('[Electron] Injected proxy from shell profile:', process.env.HTTP_PROXY || process.env.HTTPS_PROXY);
+      devError('[Electron] Injected proxy from shell profile:', process.env.HTTP_PROXY || process.env.HTTPS_PROXY);
     }
   } catch (err) {
-    console.error('[Electron] Failed to resolve shell env:', err.message);
+    devError('[Electron] Failed to resolve shell env:', err.message);
   }
 }
 
@@ -86,7 +100,7 @@ process.env.PATH = pathDirs.join(delimiter);
 let _nodePath = process.execPath;
 if (process.versions.electron) {
   try {
-    _nodePath = execSync(process.platform === 'win32' ? 'where node' : 'which node', { encoding: 'utf-8' }).trim();
+    _nodePath = execSync(process.platform === 'win32' ? 'where node' : 'which node', { encoding: 'utf-8', windowsHide: true }).trim();
     if (process.platform === 'win32') _nodePath = _nodePath.split('\n')[0].trim();
   } catch { _nodePath = process.platform === 'win32' ? 'node' : '/usr/local/bin/node'; }
 }
@@ -227,7 +241,50 @@ try {
     }
   }
 } catch (e) {
-  console.warn('[main] failed to load notifyOnlyWhenHidden from preferences.json:', e?.message || e);
+  devWarn('[main] failed to load notifyOnlyWhenHidden from preferences.json:', e?.message || e);
+}
+
+// --- 启动期主题/语言(窗口创建前必须确定) ---
+// backgroundColor(防启动白屏闪烁)与 win32 titleBarOverlay 配色要在 new BaseWindow 时给出;
+// 菜单语言要在 buildMenu 前 setLang。preferences.json 由 server 进程写,这里只读。
+// winBg = 内容区底色(src/global.css --bg-base),barBg/sym = tab bar 底色/前景(tab-bar.html --bg/--text)。
+// ⚠ 这些值与上述 CSS 变量是两处维护:改任一侧配色必须同步另一侧,否则 win32 窗控区/启动首帧会露出色差。
+const THEME_COLORS = {
+  dark: { winBg: '#0a0a0a', barBg: '#1a1a1a', sym: '#aaa' },
+  light: { winBg: '#FAFAFA', barBg: '#f0f0f0', sym: '#666' },
+};
+let _startupTheme = 'dark';
+try {
+  const _prefsPath = join(LOG_DIR, 'preferences.json');
+  if (existsSync(_prefsPath)) {
+    const _prefs = JSON.parse(readFileSync(_prefsPath, 'utf-8'));
+    if (_prefs?.themeColor === 'light') _startupTheme = 'light';
+    // setLang 自带 locale 校验,非法值回落 en;缺失时保留 i18n.js 模块加载期的 detectLanguage() 结果。
+    if (_prefs?.lang) setLang(_prefs.lang);
+  }
+} catch (e) {
+  devWarn('[main] failed to load theme/lang from preferences.json:', e?.message || e);
+}
+
+// --- 窗口几何持久化(electron/window-state.js,纯逻辑;这里只做去抖与事件接线) ---
+// 存 LOG_DIR/window-state.json —— 不写 preferences.json(server 进程拥有写权,同写会竞争覆盖)。
+const WINDOW_STATE_FILE = join(LOG_DIR, 'window-state.json');
+let _winStateTimer = null;
+function saveWinStateNow() {
+  // deviceMode 下窗口被人为收窄到 DEVICE_WIDTH,写入会污染下次恢复值 → 跳过。
+  if (!mainWindow || mainWindow.isDestroyed() || deviceMode) return;
+  try {
+    const b = typeof mainWindow.getNormalBounds === 'function' ? mainWindow.getNormalBounds() : mainWindow.getBounds();
+    saveState(writeFileSync, WINDOW_STATE_FILE, {
+      x: b.x, y: b.y, width: b.width, height: b.height,
+      maximized: mainWindow.isMaximized(),
+    });
+  } catch { /* best-effort */ }
+}
+function scheduleWinStateSave() {
+  clearTimeout(_winStateTimer);
+  // 400ms 去抖:一次拖拽/缩放含连续多个 move/resize 事件,合并为一次磁盘写;cleanupAll 另有同步兜底。
+  _winStateTimer = setTimeout(saveWinStateNow, 400);
 }
 
 function _kindCount(tabState) {
@@ -263,6 +320,19 @@ function broadcastApproval() {
     const otherTabs = others.filter(o => o.tabId !== tabId);
     try { t.view.webContents.send('approval-broadcast', { ownTabId: tabId, ownPending, others: otherTabs }); } catch {}
   }
+}
+
+// 审批级联去抖：每条 pending-add/remove 都全量跑 setBadgeCount(任务栏 COM 同步调用) +
+// flashFrame + 对 N 个 tab + tab 栏的 N+3 次 IPC 广播。审批风暴（队列式 ask/plan）下
+// 主进程被级联放大持续占满；100ms 合并窗口内多次状态变更只跑一次——badge/广播读的是
+// 当前最终状态，本就幂等，延迟 ≤100ms 无感知。
+let _aggregateTimer = null;
+function scheduleAggregateApproval() {
+  if (_aggregateTimer) return;
+  _aggregateTimer = setTimeout(() => {
+    _aggregateTimer = null;
+    aggregateApproval();
+  }, 100);
 }
 
 function aggregateApproval() {
@@ -346,12 +416,12 @@ function recordPendingAdd(tabId, kind, id, payload) {
   }
   tabState[kind].set(id, payload || {});
   maybeNotify(tabId, kind, id, payload);
-  aggregateApproval();
+  scheduleAggregateApproval();
 }
 
 function recordPendingRemove(tabId, kind, id) {
   const tabState = pendingByTab.get(tabId);
-  if (!tabState) { aggregateApproval(); return; }
+  if (!tabState) { scheduleAggregateApproval(); return; }
   const sub = tabState[kind];
   if (sub) sub.delete(id);
   notifiedKeys.delete(`${tabId}|${kind}|${id}`);
@@ -363,7 +433,7 @@ function recordPendingRemove(tabId, kind, id) {
   if (_kindCount(tabState) === 0) {
     pendingByTab.delete(tabId);
   }
-  aggregateApproval();
+  scheduleAggregateApproval();
 }
 
 function clearPendingForTab(tabId) {
@@ -372,7 +442,7 @@ function clearPendingForTab(tabId) {
     for (const k of [...notifiedKeys]) {
       if (k.startsWith(`${tabId}|`)) notifiedKeys.delete(k);
     }
-    aggregateApproval();
+    scheduleAggregateApproval();
   }
 }
 
@@ -461,7 +531,7 @@ function sendDeviceModeToTab(tabId) {
 
 // --- Tab management ---
 function createTab(projectPath, extraArgs = []) {
-  console.log('[main] createTab:', projectPath, extraArgs);
+  devLog('[main] createTab:', projectPath, extraArgs);
   let realPath;
   try { realPath = realpathSync(projectPath); } catch { realPath = projectPath; }
 
@@ -502,7 +572,7 @@ function createTab(projectPath, extraArgs = []) {
   let _logStream = null;
   if (_debugWorkerLogs) {
     const _logDir = process.env.CCV_LOG_DIR || join(home, '.claude', 'cc-viewer');
-    try { mkdirSync(_logDir, { recursive: true }); } catch (err) { console.error('[Electron] mkdir log dir failed:', err.message); }
+    try { mkdirSync(_logDir, { recursive: true }); } catch (err) { devError('[Electron] mkdir log dir failed:', err.message); }
     try {
       const cutoff = Date.now() - LOG_RETENTION_MS;
       for (const f of readdirSync(_logDir)) {
@@ -510,20 +580,26 @@ function createTab(projectPath, extraArgs = []) {
         const fp = join(_logDir, f);
         if (statSync(fp).mtimeMs < cutoff) unlinkSync(fp);
       }
-    } catch (err) { console.error('[Electron] cleanup old debug logs failed:', err.message); }
+    } catch (err) { devError('[Electron] cleanup old debug logs failed:', err.message); }
     const _logPath = join(_logDir, `electron-debug-${Date.now()}-tab${tabId}.log`);
     _logStream = createWriteStream(_logPath, { flags: 'a' });
-    console.error(`[Electron] tab ${tabId} debug log → ${_logPath}`);
+    devError(`[Electron] tab ${tabId} debug log → ${_logPath}`);
   }
 
+  // stdio 策略：debug 模式 pipe 到文件日志；dev 模式 inherit 方便终端观察；
+  // 打包版一律 ignore——worker 若继承控制台句柄，从终端启动 + QuickEdit 点选黑窗口时
+  // 写 stdout 的 worker 会被内核级无限期阻塞（单 tab 永久卡死面），且打包版输出本就无处可看。
   const child = fork(join(__dirname, 'tab-worker.js'), [], {
     execPath: _nodePath,
     cwd: realPath,
     env: childEnv,
     stdio: _debugWorkerLogs
       ? ['ignore', 'pipe', 'pipe', 'ipc']
-      : ['inherit', 'inherit', 'inherit', 'ipc'],
+      : (_isDev ? ['inherit', 'inherit', 'inherit', 'ipc'] : ['ignore', 'ignore', 'ignore', 'ipc']),
     silent: _debugWorkerLogs,
+    // Windows：execPath 是真实 node.exe（console-subsystem），GUI 父进程不带 windowsHide
+    // 启动它会分配一个可见控制台窗口（用户报告的"多出来的 Node.js 窗口"）。POSIX 上为 no-op。
+    windowsHide: true,
   });
   if (_logStream) {
     child.stdout?.pipe(_logStream, { end: false });
@@ -548,7 +624,7 @@ function createTab(projectPath, extraArgs = []) {
   });
 
   child.on('message', (msg) => {
-    console.log(`[main] child msg for tab ${tabId}:`, msg.type, msg.port || '', msg.projectName || '', msg.message || '');
+    devLog(`[main] child msg for tab ${tabId}:`, msg.type, msg.port || '', msg.projectName || '', msg.message || '');
     if (msg.type === 'ready') {
       clearTimeout(timeout);
       const tab = tabs.get(tabId);
@@ -569,6 +645,7 @@ function createTab(projectPath, extraArgs = []) {
       });
       const url = `http://127.0.0.1:${msg.port}${msg.token ? `?token=${msg.token}` : ''}`;
       attachDiagListeners(view.webContents, 'tab', { tabId, port: msg.port, project: tab.projectName });
+      attachContextMenu(view.webContents);
       view.webContents.loadURL(url);
       tab.view = view;
 
@@ -730,6 +807,7 @@ function ensureWorkspaceView() {
     try { workspaceView.setBackgroundColor('#00000000'); } catch {}
     const token = mgmtServerMod.getAccessToken();
     attachDiagListeners(workspaceView.webContents, 'workspace');
+    attachContextMenu(workspaceView.webContents);
     // 加载完成后重推当前模式：首次开浮层时 sendWorkspaceMode('popup') 早于 loadURL 完成会丢，靠这里兜底（不再只依赖 React mount 端 request）。
     workspaceView.webContents.on('did-finish-load', () => sendWorkspaceMode(workspacePopupOpen ? 'popup' : 'full'));
     // 渲染进程崩溃：复位浮层标志并丢弃视图，下次开 picker 由 ensureWorkspaceView 重建，避免「崩溃后首次点 + 只清状态不打开」的双击 papercut。
@@ -811,7 +889,7 @@ ipcMain.on('request-workspace-mode', (event) => {
   }
 });
 ipcMain.on('workspace-launch', (_, data) => {
-  console.log('[main] workspace-launch IPC:', data);
+  devLog('[main] workspace-launch IPC:', data);
   createTab(data.path, data.extraArgs);
 });
 ipcMain.on('approval-jump', (_, tabId) => {
@@ -846,7 +924,25 @@ ipcMain.on('header-action', (_event, payload) => {
   const targetId = (payload && payload.tabId != null && tabs.has(payload.tabId)) ? payload.tabId : activeTabId;
   const tab = targetId != null ? tabs.get(targetId) : null;
   const wc = tab && tab.view && tab.view.webContents;
-  if (wc && !wc.isDestroyed()) wc.send('header-action', payload);
+  // win32 HTML 菜单栏:点 File/Edit/View/Window 时附上已翻译的菜单模型,
+  // React 端(AppHeader)据此渲染跟随皮肤的下拉,前端零 i18n key。展开拷贝、不原地改入参。
+  const fwd = (payload && payload.type === 'menuBarOpen')
+    ? { ...payload, menus: serializeMenuModel(t, process.platform) }
+    : payload;
+  if (wc && !wc.isDestroyed()) wc.send('header-action', fwd);
+});
+// win32 HTML 菜单下拉的叶子点击(React 端经 tab-content-preload 发来)。
+// sender 校验对标 set-approval-pref:挡掉 tab 销毁后的延迟事件触发 close-window 等全局命令。
+ipcMain.on('menu-command', (event, id) => {
+  if (!event.sender || event.sender.isDestroyed()) return;
+  dispatchMenuCommand(id);
+});
+// React 下拉开/关状态 → tab bar(打开期间 hover 相邻顶级菜单按钮即切换,原生菜单栏惯例)。
+ipcMain.on('menu-bar-state', (event, open) => {
+  if (!event.sender || event.sender.isDestroyed()) return;
+  if (tabBarView?.webContents && !tabBarView.webContents.isDestroyed()) {
+    tabBarView.webContents.send('menu-bar-state', !!open);
+  }
 });
 
 // Resolve sender's tabId by reverse-scanning the tabs Map. O(n) but n is small (<10).
@@ -903,6 +999,10 @@ async function cleanupAll() {
   if (isQuitting) return;
   isQuitting = true;
 
+  // 退出兜底:窗口还活着就把最终几何同步落盘(去抖 timer 可能还没到点)。
+  if (_winStateTimer) { clearTimeout(_winStateTimer); _winStateTimer = null; }
+  saveWinStateNow();
+
   const promises = [];
   for (const [id, tab] of tabs) {
     if (tab.child && tab.child.connected) {
@@ -918,12 +1018,21 @@ async function cleanupAll() {
   }
   await Promise.all(promises);
   if (mgmtServerMod) await mgmtServerMod.stopViewer().catch(() => {});
+  // 退出收尾：清掉去抖 timer（防悬挂回调对已 destroy 的 view 做无谓广播），
+  // 并等 diag 异步队列落盘——否则退出前最后几条诊断（child-exit 等）会丢。
+  if (_aggregateTimer) { clearTimeout(_aggregateTimer); _aggregateTimer = null; }
+  await diagFlush().catch(() => {});
 }
 
 // --- App menu ---
+// 菜单结构的单一数据源在 electron/menu-model.js(原生菜单与 win32 HTML 菜单栏共用)。
+// 文案经 server/i18n.js t() 翻译;preferences.json 的 lang 变化时 watchTheme 会重建。
+// 缩放(Cmd/Ctrl +/-/0)仍由 renderer 的「显示大小」接管,模型里不含 zoom 条目,
+// 否则两处各调 setZoomFactor 会叠加导致双重缩放。
 function buildMenu() {
+  const isMac = process.platform === 'darwin';
   const template = [
-    ...(process.platform === 'darwin' ? [{
+    ...(isMac ? [{
       label: app.name,
       submenu: [
         { role: 'about' },
@@ -935,37 +1044,19 @@ function buildMenu() {
         { role: 'quit' },
       ],
     }] : []),
-    {
-      label: 'File',
+    ...buildMenuModel().map((menu) => ({
+      label: t(menu.labelKey),
       submenu: [
-        { label: 'New Tab', accelerator: 'CmdOrCtrl+T', click: () => openProjectPicker() },
-        { label: 'Close Tab', accelerator: 'CmdOrCtrl+W', click: () => { if (activeTabId) closeTab(activeTabId); } },
-      ],
-    },
-    {
-      label: 'Edit',
-      submenu: [
-        { role: 'undo' }, { role: 'redo' }, { type: 'separator' },
-        { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' },
-      ],
-    },
-    {
-      label: 'View',
-      submenu: [
-        { role: 'reload' }, { role: 'forceReload' }, { role: 'toggleDevTools' },
-        { type: 'separator' },
-        // 缩放(Cmd/Ctrl +/-/0)由 renderer 的「显示大小」接管(自身调 webFrame.setZoomFactor 并与预设
-        // 下拉同步),移除原生菜单 zoom 角色,否则两处各调 setZoomFactor 会叠加导致双重缩放。
-        { role: 'togglefullscreen' },
-      ],
-    },
-    {
-      label: 'Window',
-      submenu: [
-        { role: 'minimize' }, { role: 'zoom' }, { role: 'close' },
-        { type: 'separator' },
-        // Tab switching shortcuts: Cmd+1-9
-        ...Array.from({ length: 9 }, (_, i) => ({
+        ...menu.items.map((it) => {
+          if (it.type === 'separator') return { type: 'separator' };
+          // edit 类条目走 role:作用于「当前聚焦」webContents(workspace 选择器里也要能粘贴);
+          // darwinRole:macOS 保留原生语义(zoom ≠ maximize,不改变 mac 既有行为)。
+          if (it.role) return { role: it.role, label: t(it.labelKey), accelerator: it.accel };
+          if (it.darwinRole && isMac) return { role: it.darwinRole, label: t(it.labelKey) };
+          return { label: t(it.labelKey), accelerator: it.accel, click: () => dispatchMenuCommand(it.id) };
+        }),
+        // Tab switching shortcuts: Cmd+1-9(仅挂在 Window 菜单,隐藏条目只为注册 accelerator)
+        ...(menu.id === 'window' ? Array.from({ length: 9 }, (_, i) => ({
           label: `Tab ${i + 1}`,
           accelerator: `CmdOrCtrl+${i + 1}`,
           visible: false,
@@ -973,13 +1064,89 @@ function buildMenu() {
             const ids = [...tabs.keys()];
             if (ids[i]) switchTab(ids[i]);
           },
-        })),
-        { label: 'Previous Tab', accelerator: 'CmdOrCtrl+Shift+[', click: () => cycleTab(-1) },
-        { label: 'Next Tab', accelerator: 'CmdOrCtrl+Shift+]', click: () => cycleTab(1) },
+        })) : []),
       ],
-    },
+    })),
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
+// 菜单命令统一派发:原生菜单 click 与 win32 HTML 菜单(React 下拉经 menu-command IPC)共用。
+// 编辑/视图类命令显式指向「活动 tab 的内容视图」—— 点 HTML 菜单时焦点在 tab-bar view,
+// 若走 role 派发会作用到 tab-bar 自己(reload 会把 tab 栏刷掉)。
+// 零 tab(workspace 选择器)时 tab 类命令为 no-op —— 有意行为:选择器不需要 reload/编辑命令,
+// 与改前 role 派发(刷聚焦视图)的差异已接受。
+function dispatchMenuCommand(id) {
+  const wc = activeTabId != null ? tabs.get(activeTabId)?.view?.webContents : null;
+  const tabWc = (wc && !wc.isDestroyed()) ? wc : null;
+  switch (id) {
+    case 'new-tab': openProjectPicker(); break;
+    case 'close-tab': if (activeTabId != null) closeTab(activeTabId); break;
+    case 'undo': case 'redo': case 'cut': case 'copy': case 'paste': case 'selectAll':
+      if (tabWc) tabWc[id]();
+      break;
+    case 'reload': if (tabWc) tabWc.reload(); break;
+    case 'force-reload': if (tabWc) tabWc.reloadIgnoringCache(); break;
+    case 'toggle-devtools': if (tabWc) tabWc.toggleDevTools(); break;
+    case 'toggle-fullscreen': if (mainWindow) mainWindow.setFullScreen(!mainWindow.isFullScreen()); break;
+    case 'minimize': if (mainWindow) mainWindow.minimize(); break;
+    case 'maximize':
+      if (mainWindow) { if (mainWindow.isMaximized()) mainWindow.unmaximize(); else mainWindow.maximize(); }
+      break;
+    case 'close-window': if (mainWindow) mainWindow.close(); break;
+    case 'prev-tab': cycleTab(-1); break;
+    case 'next-tab': cycleTab(1); break;
+  }
+}
+
+// 已翻译的菜单模型 + tab-bar 文案,经 IPC 发给 tab-bar(win32 渲染 HTML 菜单栏)。
+// lang 变化时 watchTheme 会重发。
+function menuModelPayload() {
+  return {
+    menus: serializeMenuModel(t, process.platform),
+    uiStrings: {
+      newTab: t('electron.tabbar.newTab'),
+      toIpad: t('electron.tabbar.toIpad'),
+      toPc: t('electron.tabbar.toPc'),
+      menu: t('electron.tabbar.menu'),
+    },
+  };
+}
+
+function broadcastMenuModel() {
+  if (tabBarView?.webContents && !tabBarView.webContents.isDestroyed()) {
+    try { tabBarView.webContents.send('menu-model', menuModelPayload()); } catch {}
+  }
+}
+
+// --- 右键菜单 ---
+// Electron 默认没有任何右键菜单(浏览器版才有 Chrome 的)。给内容视图补一份原生编辑菜单,
+// 文案走 server/i18n.js。页面里自带 React 右键菜单的区域(文件树等)会 preventDefault,
+// 此时 context-menu 事件不触发,不会出现双重菜单。原生 popup 样式跟随 OS,无法跟随应用皮肤(已接受)。
+function attachContextMenu(wc) {
+  wc.on('context-menu', (_e, params) => {
+    const items = [];
+    const ef = params.editFlags || {};
+    if (params.isEditable) {
+      items.push(
+        { label: t('electron.menu.undo'), role: 'undo', enabled: !!ef.canUndo },
+        { label: t('electron.menu.redo'), role: 'redo', enabled: !!ef.canRedo },
+        { type: 'separator' },
+        { label: t('electron.menu.cut'), role: 'cut', enabled: !!ef.canCut },
+        { label: t('electron.menu.copy'), role: 'copy', enabled: !!ef.canCopy },
+        { label: t('electron.menu.paste'), role: 'paste', enabled: !!ef.canPaste },
+        { label: t('electron.menu.selectAll'), role: 'selectAll', enabled: !!ef.canSelectAll },
+      );
+    } else if (params.selectionText && params.selectionText.trim()) {
+      items.push({ label: t('electron.menu.copy'), role: 'copy' });
+    }
+    if (params.linkURL) {
+      if (items.length) items.push({ type: 'separator' });
+      items.push({ label: t('electron.menu.copyLink'), click: () => clipboard.writeText(params.linkURL) });
+    }
+    if (!items.length) return;
+    try { Menu.buildFromTemplate(items).popup({ window: mainWindow }); } catch {}
+  });
 }
 
 function cycleTab(direction) {
@@ -999,36 +1166,75 @@ function watchTheme() {
   let warnedCorrupt = false;
   try {
     const prefsPath = join(getClaudeConfigDir(), 'cc-viewer', 'preferences.json');
-    if (!existsSync(prefsPath)) return;
-    const readTheme = () => {
+    if (!existsSync(prefsPath)) {
+      // 首装尚无 preferences.json:直接 return 会让 watcher 永不启动(主题/语言热切换失效到重启)。
+      // 改为 watch 所在目录,等文件出现后再切到文件级 watch。
+      const dir = dirname(prefsPath);
+      if (!existsSync(dir)) return; // 目录都没有(异常环境),放弃热切换,不影响主流程
+      const dirWatcher = watch(dir, () => {
+        if (existsSync(prefsPath)) {
+          try { dirWatcher.close(); } catch {}
+          watchTheme();
+        }
+      });
+      return;
+    }
+    // 读取 theme + lang:写入瞬间可能拿到不完整 JSON,沿用「读失败回落上次已知值」策略。
+    const readPrefs = () => {
       try {
         const prefs = JSON.parse(readFileSync(prefsPath, 'utf-8'));
         warnedCorrupt = false;
-        return prefs.themeColor === 'light' ? 'light' : 'dark';
+        return {
+          theme: prefs.themeColor === 'light' ? 'light' : 'dark',
+          lang: typeof prefs.lang === 'string' ? prefs.lang : null,
+        };
       } catch (err) {
         // prefs 写入瞬间被读到可能拿到不完整 JSON；仅首次 warn，避免连续事件刷屏
         if (!warnedCorrupt) {
           warnedCorrupt = true;
-          console.warn('[watchTheme] preferences.json read/parse failed, falling back to dark:', err.message);
+          devWarn('[watchTheme] preferences.json read/parse failed, falling back:', err.message);
         }
-        return 'dark';
+        return null;
       }
     };
-    let currentTheme = readTheme();
-    if (tabBarView?.webContents) tabBarView.webContents.send('theme-changed', currentTheme);
-    // writeFileSync 在写入过程中可能触发多次 change 事件（特别是 macOS 下原子替换路径）；
-    // 用 readTheme + diff 自己做幂等，重复事件无副作用。
-    watch(prefsPath, () => {
-      const newTheme = readTheme();
-      if (newTheme !== currentTheme) {
-        currentTheme = newTheme;
-        if (tabBarView?.webContents && !tabBarView.webContents.isDestroyed()) {
-          tabBarView.webContents.send('theme-changed', currentTheme);
+    const applyOverlayTheme = (theme) => {
+      // win32:原生 最小化/最大化/关闭 按钮区域跟随皮肤换色;backgroundColor 同步防止 resize 露底色。
+      if (process.platform !== 'win32' || !mainWindow || mainWindow.isDestroyed()) return;
+      const c = THEME_COLORS[theme] || THEME_COLORS.dark;
+      try {
+        if (typeof mainWindow.setTitleBarOverlay === 'function') {
+          mainWindow.setTitleBarOverlay({ color: c.barBg, symbolColor: c.sym, height: TAB_BAR_HEIGHT });
         }
+        if (typeof mainWindow.setBackgroundColor === 'function') mainWindow.setBackgroundColor(c.winBg);
+      } catch (err) {
+        devWarn('[watchTheme] setTitleBarOverlay failed:', err.message);
+      }
+    };
+    let current = readPrefs() || { theme: 'dark', lang: null };
+    if (tabBarView?.webContents) tabBarView.webContents.send('theme-changed', current.theme);
+    applyOverlayTheme(current.theme);
+    // writeFileSync 在写入过程中可能触发多次 change 事件（特别是 macOS 下原子替换路径）；
+    // 用 readPrefs + diff 自己做幂等，重复事件无副作用。
+    watch(prefsPath, () => {
+      const next = readPrefs();
+      if (!next) return;
+      if (next.theme !== current.theme) {
+        current = { ...current, theme: next.theme };
+        if (tabBarView?.webContents && !tabBarView.webContents.isDestroyed()) {
+          tabBarView.webContents.send('theme-changed', current.theme);
+        }
+        applyOverlayTheme(current.theme);
+      }
+      // UI 切语言 → server 已 setLang 并写入 prefs;主进程跟随:重建原生菜单 + 重发 HTML 菜单模型。
+      if (next.lang && next.lang !== current.lang) {
+        current = { ...current, lang: next.lang };
+        setLang(next.lang);
+        buildMenu();
+        broadcastMenuModel();
       }
     });
   } catch (err) {
-    console.warn('[watchTheme] init failed:', err.message);
+    devWarn('[watchTheme] init failed:', err.message);
   }
 }
 
@@ -1067,21 +1273,53 @@ if (!gotLock) {
   });
 
   app.whenReady().then(async () => {
+    // Windows 任务栏分组/通知身份:须与 electron-builder.yml 的 appId 一致,否则任务栏按钮分裂。
+    if (process.platform === 'win32') app.setAppUserModelId('com.ccviewer.app');
+
     // Start management server
     await startMgmtServer();
 
     buildMenu();
 
+    // 恢复上次窗口几何(显示器布局可能已变,validateState 越界则回落默认居中)。
+    let savedWinState = null;
+    try {
+      savedWinState = validateState(
+        loadState(readFileSync, WINDOW_STATE_FILE),
+        screen.getAllDisplays().map((d) => d.workArea),
+      );
+    } catch (err) {
+      devWarn('[main] restore window state failed:', err?.message || err);
+    }
+
     // Create window
+    // - backgroundColor:首帧用主题底色绘制,消除暗色皮肤下启动白屏闪烁;
+    // - win32:隐藏原生标题栏,titleBarOverlay 只保留原生 最小化/最大化/关闭(保住 Win11
+    //   Snap Layouts 与双击最大化),配色跟随皮肤,高度对齐 50px tab bar —— tab bar 即标题栏;
+    // - macOS/Linux:维持原 hiddenInset 行为不变。
+    const _themeColors = THEME_COLORS[_startupTheme];
     mainWindow = new BaseWindow({
-      width: 1400,
-      height: 900,
+      width: savedWinState?.width ?? 1400,
+      height: savedWinState?.height ?? 900,
+      ...(savedWinState ? { x: savedWinState.x, y: savedWinState.y } : {}),
       minWidth: 800,
       minHeight: 600,
       title: 'CC Viewer',
-      titleBarStyle: 'hiddenInset',
-      trafficLightPosition: { x: 16, y: 17 },
+      backgroundColor: _themeColors.winBg,
+      ...(process.platform === 'win32' ? {
+        titleBarStyle: 'hidden',
+        titleBarOverlay: { color: _themeColors.barBg, symbolColor: _themeColors.sym, height: TAB_BAR_HEIGHT },
+      } : {
+        titleBarStyle: 'hiddenInset',
+        trafficLightPosition: { x: 16, y: 17 },
+      }),
     });
+    if (savedWinState?.maximized) mainWindow.maximize();
+    // 原生菜单栏只隐藏不注销:accelerator 仍生效(setMenu(null) 会连快捷键一起杀掉;
+    // autoHideMenuBar 则按 Alt 会唤回原生英文菜单,与 HTML 菜单栏打架)。
+    if (process.platform === 'win32') {
+      try { mainWindow.setMenuBarVisibility(false); } catch {}
+    }
 
     // Tab bar
     tabBarView = new WebContentsView({
@@ -1102,6 +1340,8 @@ if (!gotLock) {
       try { tabBarView.webContents.send('fullscreen-changed', !!mainWindow?.isFullScreen?.()); } catch {}
     };
     tabBarView.webContents.on('did-finish-load', sendFullscreenState);
+    // 菜单模型(已翻译)推给 tab bar:win32 渲染 HTML 菜单栏 + 各平台 tooltip 文案。
+    tabBarView.webContents.on('did-finish-load', broadcastMenuModel);
     mainWindow.on('enter-full-screen', sendFullscreenState);
     mainWindow.on('leave-full-screen', sendFullscreenState);
     // 设备模式下经历 OS 全屏往返：离开全屏后系统还原「进全屏前」的窄窗，但若期间宽度被改，
@@ -1135,6 +1375,13 @@ if (!gotLock) {
       clearTimeout(resizeTimer);
       resizeTimer = setTimeout(updateLayout, 16);
     });
+
+    // 窗口几何持久化:resize/move/最大化切换 都去抖落盘(退出路径常走 app.exit,
+    // 不能只依赖 close 时机;cleanupAll 里另有一次兜底同步保存)。
+    mainWindow.on('resize', scheduleWinStateSave);
+    mainWindow.on('move', scheduleWinStateSave);
+    mainWindow.on('maximize', scheduleWinStateSave);
+    mainWindow.on('unmaximize', scheduleWinStateSave);
 
     mainWindow.on('close', async (e) => {
       if (isQuitting) return; // before-quit 已处理
@@ -1176,5 +1423,6 @@ if (!gotLock) {
   });
 }
 
-process.on('SIGINT', () => { cleanupAll().then(() => app.exit(0)); });
-process.on('SIGTERM', () => { cleanupAll().then(() => app.exit(0)); });
+// .finally 而非 .then：cleanupAll reject 时 .then 链断裂会让 app.exit 永不执行（进程吊死）。
+process.on('SIGINT', () => { cleanupAll().finally(() => app.exit(0)); });
+process.on('SIGTERM', () => { cleanupAll().finally(() => app.exit(0)); });

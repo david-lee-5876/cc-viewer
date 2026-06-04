@@ -2,6 +2,11 @@
 
 ## 1.6.294 (2026-06-03)
 
+- feat(electron/win): Windows 桌面版自定义标题栏——隐藏原生白色标题栏与菜单栏（快捷键保留），logo、标题、File/Edit/View/Window 菜单与项目 tabs 合并为一行；原生 最小化/最大化/关闭 按钮经 titleBarOverlay 保留（Win11 Snap Layouts、双击最大化不受影响）且配色随皮肤实时切换；菜单为跟随皮肤的 HTML 下拉，文案补 18 语言（macOS 原生菜单同步获得翻译）
+- feat(electron): 启动白屏闪烁修复（窗口首帧按主题底色绘制）；窗口位置/大小/最大化状态持久化，显示器拔掉/越界时安全回落默认；内容区右键菜单补齐（剪切/复制/粘贴/全选/复制链接，18 语言）；Windows 任务栏 AppUserModelId 对齐 appId；tab bar 按钮 tooltip 补 18 语言
+- fix(electron/win): 主进程防阻塞加固，针对 Windows 整窗永久冻结（渲染存活、hover 有高亮但全程无响应）——diag 日志 `appendFileSync` 改异步队列（256 条上限防错误风暴）；打包版主进程 console 输出静默、worker stdio 改 ignore（消除终端启动 + QuickEdit 点选导致的内核级写阻塞面）；审批级联（badge/flashFrame/广播）100ms 去抖合并
+- fix(electron/win): 全部 child_process 调用点统一补 `windowsHide: true`，修复 Windows 桌面版启动多弹一个 Node.js 控制台窗口；新增静态扫描测试防回归
+- feat(ui): 版本信息弹窗按安装渠道（electron / brew / npm）精准匹配升级命令——npm 命令补 `--registry` 指定官方源避免镜像滞后，brew 渠道提示 `brew upgrade cc-viewer`（补 18 语言）
 - feat(ui): 顶栏「网络报文 / 对话模式」切换按钮文案精简为「网络 / 对话」；对话中居中的 SVG loading 动画设为不可选中（user-select:none + pointer-events:none）
 - feat(ui): 偏好设置「对话展示」多项设置追加 (?) 悬浮说明（权限自动审批 / 弹出全局审批 Modal / 审批提示音 / 展开思考过程 / 完整展示所有内容，补 18 语言）
 - feat(ui): 代理热切换的「Max 用户请勿使用」告警改为仅当 Default(内置)端点为 api.anthropic.com 时显示

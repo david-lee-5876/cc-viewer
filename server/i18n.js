@@ -2639,6 +2639,214 @@ const i18nData = {
     "ar": "سؤال في {project}", "no": "Spørsmål i {project}", "pt-BR": "Pergunta em {project}",
     "th": "คำถามใน {project}", "tr": "{project} içinde soru", "uk": "Питання у {project}"
   },
+  "electron.menu.file": {
+    "zh": "文件", "en": "File", "zh-TW": "檔案",
+    "ko": "파일", "ja": "ファイル", "de": "Datei",
+    "es": "Archivo", "fr": "Fichier", "it": "File",
+    "da": "Fil", "pl": "Plik", "ru": "Файл",
+    "ar": "ملف", "no": "Fil", "pt-BR": "Arquivo",
+    "th": "ไฟล์", "tr": "Dosya", "uk": "Файл"
+  },
+  "electron.menu.edit": {
+    "zh": "编辑", "en": "Edit", "zh-TW": "編輯",
+    "ko": "편집", "ja": "編集", "de": "Bearbeiten",
+    "es": "Editar", "fr": "Édition", "it": "Modifica",
+    "da": "Rediger", "pl": "Edycja", "ru": "Правка",
+    "ar": "تحرير", "no": "Rediger", "pt-BR": "Editar",
+    "th": "แก้ไข", "tr": "Düzen", "uk": "Редагувати"
+  },
+  "electron.menu.view": {
+    "zh": "视图", "en": "View", "zh-TW": "檢視",
+    "ko": "보기", "ja": "表示", "de": "Ansicht",
+    "es": "Ver", "fr": "Affichage", "it": "Visualizza",
+    "da": "Vis", "pl": "Widok", "ru": "Вид",
+    "ar": "عرض", "no": "Vis", "pt-BR": "Exibir",
+    "th": "มุมมอง", "tr": "Görünüm", "uk": "Вигляд"
+  },
+  "electron.menu.window": {
+    "zh": "窗口", "en": "Window", "zh-TW": "視窗",
+    "ko": "창", "ja": "ウィンドウ", "de": "Fenster",
+    "es": "Ventana", "fr": "Fenêtre", "it": "Finestra",
+    "da": "Vindue", "pl": "Okno", "ru": "Окно",
+    "ar": "نافذة", "no": "Vindu", "pt-BR": "Janela",
+    "th": "หน้าต่าง", "tr": "Pencere", "uk": "Вікно"
+  },
+  "electron.menu.newTab": {
+    "zh": "新建标签页", "en": "New Tab", "zh-TW": "新增分頁",
+    "ko": "새 탭", "ja": "新しいタブ", "de": "Neuer Tab",
+    "es": "Nueva pestaña", "fr": "Nouvel onglet", "it": "Nuova scheda",
+    "da": "Ny fane", "pl": "Nowa karta", "ru": "Новая вкладка",
+    "ar": "علامة تبويب جديدة", "no": "Ny fane", "pt-BR": "Nova aba",
+    "th": "แท็บใหม่", "tr": "Yeni Sekme", "uk": "Нова вкладка"
+  },
+  "electron.menu.closeTab": {
+    "zh": "关闭标签页", "en": "Close Tab", "zh-TW": "關閉分頁",
+    "ko": "탭 닫기", "ja": "タブを閉じる", "de": "Tab schließen",
+    "es": "Cerrar pestaña", "fr": "Fermer l'onglet", "it": "Chiudi scheda",
+    "da": "Luk fane", "pl": "Zamknij kartę", "ru": "Закрыть вкладку",
+    "ar": "إغلاق علامة التبويب", "no": "Lukk fane", "pt-BR": "Fechar aba",
+    "th": "ปิดแท็บ", "tr": "Sekmeyi Kapat", "uk": "Закрити вкладку"
+  },
+  "electron.menu.undo": {
+    "zh": "撤销", "en": "Undo", "zh-TW": "復原",
+    "ko": "실행 취소", "ja": "元に戻す", "de": "Rückgängig",
+    "es": "Deshacer", "fr": "Annuler", "it": "Annulla",
+    "da": "Fortryd", "pl": "Cofnij", "ru": "Отменить",
+    "ar": "تراجع", "no": "Angre", "pt-BR": "Desfazer",
+    "th": "เลิกทำ", "tr": "Geri Al", "uk": "Скасувати"
+  },
+  "electron.menu.redo": {
+    "zh": "重做", "en": "Redo", "zh-TW": "重做",
+    "ko": "다시 실행", "ja": "やり直す", "de": "Wiederholen",
+    "es": "Rehacer", "fr": "Rétablir", "it": "Ripeti",
+    "da": "Gentag", "pl": "Ponów", "ru": "Повторить",
+    "ar": "إعادة", "no": "Gjør om", "pt-BR": "Refazer",
+    "th": "ทำซ้ำ", "tr": "Yinele", "uk": "Повторити"
+  },
+  "electron.menu.cut": {
+    "zh": "剪切", "en": "Cut", "zh-TW": "剪下",
+    "ko": "잘라내기", "ja": "切り取り", "de": "Ausschneiden",
+    "es": "Cortar", "fr": "Couper", "it": "Taglia",
+    "da": "Klip", "pl": "Wytnij", "ru": "Вырезать",
+    "ar": "قص", "no": "Klipp ut", "pt-BR": "Recortar",
+    "th": "ตัด", "tr": "Kes", "uk": "Вирізати"
+  },
+  "electron.menu.copy": {
+    "zh": "复制", "en": "Copy", "zh-TW": "複製",
+    "ko": "복사", "ja": "コピー", "de": "Kopieren",
+    "es": "Copiar", "fr": "Copier", "it": "Copia",
+    "da": "Kopiér", "pl": "Kopiuj", "ru": "Копировать",
+    "ar": "نسخ", "no": "Kopier", "pt-BR": "Copiar",
+    "th": "คัดลอก", "tr": "Kopyala", "uk": "Копіювати"
+  },
+  "electron.menu.paste": {
+    "zh": "粘贴", "en": "Paste", "zh-TW": "貼上",
+    "ko": "붙여넣기", "ja": "貼り付け", "de": "Einfügen",
+    "es": "Pegar", "fr": "Coller", "it": "Incolla",
+    "da": "Sæt ind", "pl": "Wklej", "ru": "Вставить",
+    "ar": "لصق", "no": "Lim inn", "pt-BR": "Colar",
+    "th": "วาง", "tr": "Yapıştır", "uk": "Вставити"
+  },
+  "electron.menu.selectAll": {
+    "zh": "全选", "en": "Select All", "zh-TW": "全選",
+    "ko": "모두 선택", "ja": "すべて選択", "de": "Alles auswählen",
+    "es": "Seleccionar todo", "fr": "Tout sélectionner", "it": "Seleziona tutto",
+    "da": "Vælg alt", "pl": "Zaznacz wszystko", "ru": "Выделить всё",
+    "ar": "تحديد الكل", "no": "Velg alt", "pt-BR": "Selecionar tudo",
+    "th": "เลือกทั้งหมด", "tr": "Tümünü Seç", "uk": "Виділити все"
+  },
+  "electron.menu.reload": {
+    "zh": "重新加载", "en": "Reload", "zh-TW": "重新載入",
+    "ko": "새로 고침", "ja": "再読み込み", "de": "Neu laden",
+    "es": "Recargar", "fr": "Recharger", "it": "Ricarica",
+    "da": "Genindlæs", "pl": "Załaduj ponownie", "ru": "Перезагрузить",
+    "ar": "إعادة تحميل", "no": "Last inn på nytt", "pt-BR": "Recarregar",
+    "th": "โหลดใหม่", "tr": "Yeniden Yükle", "uk": "Перезавантажити"
+  },
+  "electron.menu.forceReload": {
+    "zh": "强制重新加载", "en": "Force Reload", "zh-TW": "強制重新載入",
+    "ko": "강제 새로 고침", "ja": "強制再読み込み", "de": "Erzwungenes Neuladen",
+    "es": "Forzar recarga", "fr": "Forcer le rechargement", "it": "Forza ricarica",
+    "da": "Tving genindlæsning", "pl": "Wymuś ponowne załadowanie", "ru": "Принудительно перезагрузить",
+    "ar": "فرض إعادة التحميل", "no": "Tving omlasting", "pt-BR": "Forçar recarregamento",
+    "th": "บังคับโหลดใหม่", "tr": "Zorla Yeniden Yükle", "uk": "Примусово перезавантажити"
+  },
+  "electron.menu.toggleDevTools": {
+    "zh": "开发者工具", "en": "Developer Tools", "zh-TW": "開發人員工具",
+    "ko": "개발자 도구", "ja": "開発者ツール", "de": "Entwicklertools",
+    "es": "Herramientas de desarrollo", "fr": "Outils de développement", "it": "Strumenti di sviluppo",
+    "da": "Udviklerværktøjer", "pl": "Narzędzia deweloperskie", "ru": "Инструменты разработчика",
+    "ar": "أدوات المطور", "no": "Utviklerverktøy", "pt-BR": "Ferramentas do desenvolvedor",
+    "th": "เครื่องมือนักพัฒนา", "tr": "Geliştirici Araçları", "uk": "Інструменти розробника"
+  },
+  "electron.menu.fullscreen": {
+    "zh": "切换全屏", "en": "Toggle Full Screen", "zh-TW": "切換全螢幕",
+    "ko": "전체 화면 전환", "ja": "フルスクリーン切替", "de": "Vollbild umschalten",
+    "es": "Alternar pantalla completa", "fr": "Basculer en plein écran", "it": "Schermo intero",
+    "da": "Skift fuld skærm", "pl": "Przełącz pełny ekran", "ru": "Полноэкранный режим",
+    "ar": "ملء الشاشة", "no": "Veksle fullskjerm", "pt-BR": "Alternar tela cheia",
+    "th": "สลับเต็มหน้าจอ", "tr": "Tam Ekran", "uk": "Повноекранний режим"
+  },
+  "electron.menu.minimize": {
+    "zh": "最小化", "en": "Minimize", "zh-TW": "最小化",
+    "ko": "최소화", "ja": "最小化", "de": "Minimieren",
+    "es": "Minimizar", "fr": "Réduire", "it": "Riduci a icona",
+    "da": "Minimér", "pl": "Minimalizuj", "ru": "Свернуть",
+    "ar": "تصغير", "no": "Minimer", "pt-BR": "Minimizar",
+    "th": "ย่อเล็กสุด", "tr": "Simge Durumuna Küçült", "uk": "Згорнути"
+  },
+  "electron.menu.maximize": {
+    "zh": "最大化", "en": "Maximize", "zh-TW": "最大化",
+    "ko": "최대화", "ja": "最大化", "de": "Maximieren",
+    "es": "Maximizar", "fr": "Agrandir", "it": "Ingrandisci",
+    "da": "Maksimér", "pl": "Maksymalizuj", "ru": "Развернуть",
+    "ar": "تكبير", "no": "Maksimer", "pt-BR": "Maximizar",
+    "th": "ขยายใหญ่สุด", "tr": "Ekranı Kapla", "uk": "Розгорнути"
+  },
+  "electron.menu.close": {
+    "zh": "关闭窗口", "en": "Close Window", "zh-TW": "關閉視窗",
+    "ko": "창 닫기", "ja": "ウィンドウを閉じる", "de": "Fenster schließen",
+    "es": "Cerrar ventana", "fr": "Fermer la fenêtre", "it": "Chiudi finestra",
+    "da": "Luk vindue", "pl": "Zamknij okno", "ru": "Закрыть окно",
+    "ar": "إغلاق النافذة", "no": "Lukk vindu", "pt-BR": "Fechar janela",
+    "th": "ปิดหน้าต่าง", "tr": "Pencereyi Kapat", "uk": "Закрити вікно"
+  },
+  "electron.menu.prevTab": {
+    "zh": "上一个标签页", "en": "Previous Tab", "zh-TW": "上一個分頁",
+    "ko": "이전 탭", "ja": "前のタブ", "de": "Vorheriger Tab",
+    "es": "Pestaña anterior", "fr": "Onglet précédent", "it": "Scheda precedente",
+    "da": "Forrige fane", "pl": "Poprzednia karta", "ru": "Предыдущая вкладка",
+    "ar": "علامة التبويب السابقة", "no": "Forrige fane", "pt-BR": "Aba anterior",
+    "th": "แท็บก่อนหน้า", "tr": "Önceki Sekme", "uk": "Попередня вкладка"
+  },
+  "electron.menu.nextTab": {
+    "zh": "下一个标签页", "en": "Next Tab", "zh-TW": "下一個分頁",
+    "ko": "다음 탭", "ja": "次のタブ", "de": "Nächster Tab",
+    "es": "Pestaña siguiente", "fr": "Onglet suivant", "it": "Scheda successiva",
+    "da": "Næste fane", "pl": "Następna karta", "ru": "Следующая вкладка",
+    "ar": "علامة التبويب التالية", "no": "Neste fane", "pt-BR": "Próxima aba",
+    "th": "แท็บถัดไป", "tr": "Sonraki Sekme", "uk": "Наступна вкладка"
+  },
+  "electron.menu.copyLink": {
+    "zh": "复制链接地址", "en": "Copy Link Address", "zh-TW": "複製連結網址",
+    "ko": "링크 주소 복사", "ja": "リンクアドレスをコピー", "de": "Linkadresse kopieren",
+    "es": "Copiar dirección del enlace", "fr": "Copier l'adresse du lien", "it": "Copia indirizzo link",
+    "da": "Kopiér linkadresse", "pl": "Kopiuj adres linku", "ru": "Копировать адрес ссылки",
+    "ar": "نسخ عنوان الرابط", "no": "Kopier lenkeadresse", "pt-BR": "Copiar endereço do link",
+    "th": "คัดลอกที่อยู่ลิงก์", "tr": "Bağlantı Adresini Kopyala", "uk": "Копіювати адресу посилання"
+  },
+  "electron.tabbar.newTab": {
+    "zh": "新建项目标签页", "en": "New project tab", "zh-TW": "新增專案分頁",
+    "ko": "새 프로젝트 탭", "ja": "新しいプロジェクトタブ", "de": "Neuer Projekt-Tab",
+    "es": "Nueva pestaña de proyecto", "fr": "Nouvel onglet de projet", "it": "Nuova scheda progetto",
+    "da": "Ny projektfane", "pl": "Nowa karta projektu", "ru": "Новая вкладка проекта",
+    "ar": "علامة تبويب مشروع جديدة", "no": "Ny prosjektfane", "pt-BR": "Nova aba de projeto",
+    "th": "แท็บโปรเจกต์ใหม่", "tr": "Yeni Proje Sekmesi", "uk": "Нова вкладка проєкту"
+  },
+  "electron.tabbar.toIpad": {
+    "zh": "切换到 iPad 模式", "en": "Switch to iPad mode", "zh-TW": "切換到 iPad 模式",
+    "ko": "iPad 모드로 전환", "ja": "iPad モードに切替", "de": "Zu iPad-Modus wechseln",
+    "es": "Cambiar a modo iPad", "fr": "Passer en mode iPad", "it": "Passa alla modalità iPad",
+    "da": "Skift til iPad-tilstand", "pl": "Przełącz na tryb iPad", "ru": "Переключиться в режим iPad",
+    "ar": "التبديل إلى وضع iPad", "no": "Bytt til iPad-modus", "pt-BR": "Mudar para modo iPad",
+    "th": "สลับเป็นโหมด iPad", "tr": "iPad moduna geç", "uk": "Перейти в режим iPad"
+  },
+  "electron.tabbar.toPc": {
+    "zh": "切换到 PC 模式", "en": "Switch to PC mode", "zh-TW": "切換到 PC 模式",
+    "ko": "PC 모드로 전환", "ja": "PC モードに切替", "de": "Zu PC-Modus wechseln",
+    "es": "Cambiar a modo PC", "fr": "Passer en mode PC", "it": "Passa alla modalità PC",
+    "da": "Skift til PC-tilstand", "pl": "Przełącz na tryb PC", "ru": "Переключиться в режим ПК",
+    "ar": "التبديل إلى وضع PC", "no": "Bytt til PC-modus", "pt-BR": "Mudar para modo PC",
+    "th": "สลับเป็นโหมด PC", "tr": "PC moduna geç", "uk": "Перейти в режим ПК"
+  },
+  "electron.tabbar.menu": {
+    "zh": "菜单", "en": "Menu", "zh-TW": "選單",
+    "ko": "메뉴", "ja": "メニュー", "de": "Menü",
+    "es": "Menú", "fr": "Menu", "it": "Menu",
+    "da": "Menu", "pl": "Menu", "ru": "Меню",
+    "ar": "قائمة", "no": "Meny", "pt-BR": "Menu",
+    "th": "เมนู", "tr": "Menü", "uk": "Меню"
+  },
   "cli.userNameRequired": {
     "zh": "错误: --user-name 需要一个名称参数",
     "en": "Error: --user-name requires a name argument",

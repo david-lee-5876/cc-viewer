@@ -89,7 +89,7 @@ class AppHeader extends React.Component {
 
   constructor(props) {
     super(props);
-    this.state = { countdownText: '', promptModalVisible: false, promptData: [], promptViewMode: 'original', settingsDrawerVisible: false, globalSettingsVisible: false, projectStatsVisible: false, projectStats: null, projectStatsLoading: false, localUrl: '', pluginModalVisible: false, processModalVisible: false, logoDropdownOpen: false, electronMenuOpen: false, cacheHighlightIdx: null, cacheHighlightFading: false, calibrationModel: readCalibrationModel(), proxyModalVisible: false, messagingModalVisible: false, messagingInitialTool: null, imRecordVisible: false, imRecordPlatform: null, logDirDraft: null, qrPopoverOpen: false, electronQrOpen: false, _skillsModal: { open: false, loading: false, skills: [], error: null, toggling: new Set() },
+    this.state = { countdownText: '', promptModalVisible: false, promptData: [], promptViewMode: 'original', settingsDrawerVisible: false, globalSettingsVisible: false, projectStatsVisible: false, projectStats: null, projectStatsLoading: false, localUrl: '', pluginModalVisible: false, processModalVisible: false, logoDropdownOpen: false, electronMenuOpen: false, electronMenuBar: null, cacheHighlightIdx: null, cacheHighlightFading: false, calibrationModel: readCalibrationModel(), proxyModalVisible: false, messagingModalVisible: false, messagingInitialTool: null, imRecordVisible: false, imRecordPlatform: null, logDirDraft: null, qrPopoverOpen: false, electronQrOpen: false, _skillsModal: { open: false, loading: false, skills: [], error: null, toggling: new Set() },
       // 文件系统权威的 skill 列表（/api/skills 返回）；live-tail 下作为 popover chip 和管理弹窗的共享数据源。
       // null=未加载 / false=失败 / [] 或 Array=加载结果。workspace 切换由 componentDidUpdate + seq 控制。
       _fsSkills: null,
@@ -291,11 +291,27 @@ class AppHeader extends React.Component {
     this._pushHeaderModel();
   }
 
+  // 把「菜单栏下拉是否打开」回报给 tab bar(经 main 转发):打开期间 hover 相邻顶级菜单即切换。
+  _syncMenuBarState = () => {
+    try { window.tabBridge?.menuBarState?.(!!this.state.electronMenuBar); } catch {}
+  };
+
+  _closeMenuBar = () => this.setState({ electronMenuBar: null }, this._syncMenuBarState);
+
   _handleHeaderAction(payload) {
     if (!payload || !payload.type) return;
     const { themeColor, onThemeColorChange, onToggleTerminal, onToggleViewMode, onApprovalReopen } = this.props;
     switch (payload.type) {
       case 'menuOpen': this.setState((s) => ({ electronMenuOpen: !s.electronMenuOpen })); break;
+      // win32 自定义标题栏的 File/Edit/View/Window:tab bar 只放按钮,下拉在这里(全高内容视图)
+      // 渲染才能跟随皮肤且不被 50px tab bar 裁切。payload 带 main 翻译好的 menus + 按钮横坐标 x。
+      case 'menuBarOpen': this.setState((s) => {
+        const cur = s.electronMenuBar;
+        const next = (cur && cur.menuId === payload.menuId)
+          ? null // 再点同一菜单按钮 → toggle 收起
+          : { menuId: payload.menuId, x: payload.x || 0, menus: payload.menus || (cur && cur.menus) || [] };
+        return { electronMenuBar: next };
+      }, this._syncMenuBarState); break;
       case 'theme': if (onThemeColorChange) onThemeColorChange(themeColor === 'light' ? 'dark' : 'light'); break;
       case 'terminal': if (onToggleTerminal) onToggleTerminal(); break;
       case 'viewMode': if (onToggleViewMode) onToggleViewMode(); break;
@@ -1552,6 +1568,50 @@ class AppHeader extends React.Component {
               <span aria-hidden="true" style={{ position: 'fixed', top: 4, left: 74, width: 1, height: 1, pointerEvents: 'none' }} />
             </Dropdown>
           )}
+          {/* win32 自定义标题栏的 File/Edit/View/Window 下拉:按钮在 tab bar(50px view 放不下下拉),
+              下拉锚在这里跟随皮肤。x 是 tab bar 报来的窗口坐标,本视图可能被原生缩放,需除以缩放系数。 */}
+          {isElectronTab && this.state.electronMenuBar && (() => {
+            const mb = this.state.electronMenuBar;
+            const menu = (mb.menus || []).find((m) => m.id === mb.menuId);
+            if (!menu) return null;
+            let zoom = 1;
+            try {
+              // ccv_displayScale 由「显示大小」设置维护(写入见 displayScaleHelper,首屏应用见
+              // electron/tab-content-preload.js)——存储机制若重构,此处读取需同步。
+              const n = Number(localStorage.getItem('ccv_displayScale'));
+              if (Number.isFinite(n) && n >= 50 && n <= 200) zoom = n / 100;
+            } catch {}
+            const items = (menu.items || []).map((it, i) => (it.type === 'separator'
+              ? { type: 'divider', key: `sep-${i}` }
+              : {
+                key: it.id,
+                label: (
+                  <span style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 24 }}>
+                    <span>{it.label}</span>
+                    {it.accel ? <span style={{ opacity: 0.55, fontSize: 12 }}>{it.accel}</span> : null}
+                  </span>
+                ),
+              }));
+            return (
+              <Dropdown
+                menu={{
+                  items,
+                  className: 'logo-dropdown-menu',
+                  onClick: ({ key }) => {
+                    try { window.tabBridge?.menuCommand?.(key); } catch {}
+                    this._closeMenuBar();
+                  },
+                }}
+                open
+                onOpenChange={(open) => { if (!open) this._closeMenuBar(); }}
+                trigger={['click']}
+                placement="bottomLeft"
+                getPopupContainer={() => document.body}
+              >
+                <span aria-hidden="true" style={{ position: 'fixed', top: 4, left: Math.round((mb.x || 0) / zoom), width: 1, height: 1, pointerEvents: 'none' }} />
+              </Dropdown>
+            );
+          })()}
           {!isElectronTab && (() => {
             // 钉住的快捷方式：汉堡右侧的常驻入口。按描述符过滤(mode-gated 项当前不存在则跳过渲染，
             // 但保留在 localStorage，切回对应模式自动恢复)。Electron 下走原生 tab bar(见 _buildHeaderModel.pins)。

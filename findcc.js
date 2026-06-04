@@ -105,7 +105,7 @@ export const LEGACY_INJECT_IMPORTS = [
 
 export function getGlobalNodeModulesDir() {
   try {
-    return execSync('npm root -g', { encoding: 'utf-8' }).trim();
+    return execSync('npm root -g', { encoding: 'utf-8', windowsHide: true }).trim();
   } catch {
     return null;
   }
@@ -143,7 +143,7 @@ export function resolveNpmClaudePath() {
   for (const cmd of lookupCmds) {
     try {
       // Windows `where` 输出可能多行 CRLF，取第一行 trim 即可
-      const rawOut = execSync(cmd, { encoding: 'utf-8', shell: true, env: process.env });
+      const rawOut = execSync(cmd, { encoding: 'utf-8', shell: true, env: process.env, windowsHide: true });
       const result = rawOut.split(/\r?\n/)[0].trim();
       if (result && existsSync(result)) {
         // 只接受 npm 安装的符号链接（解析后指向 node_modules）
@@ -200,7 +200,7 @@ export function resolveNativePath() {
     : [`which ${BINARY_NAME}`, `command -v ${BINARY_NAME}`];
   for (const cmd of lookupCmds) {
     try {
-      const rawOut = execSync(cmd, { encoding: 'utf-8', shell: true, env: process.env });
+      const rawOut = execSync(cmd, { encoding: 'utf-8', shell: true, env: process.env, windowsHide: true });
       const result = rawOut.split(/\r?\n/)[0].trim();
       if (result && existsSync(result)) {
         // 只排除 .js 文件（老版本 npm 分发的 cli.js，需要 node 运行，
