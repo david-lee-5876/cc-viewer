@@ -2153,7 +2153,9 @@ class ChatView extends React.Component {
     try {
       // ask / sdk-ask 类消息交给 AskFlowController；返回 true 表示已处理 → 短路。
       if (this._askFlow.handleWsMessage(msg)) return;
-      if (msg.type === 'data') {
+      if (msg.type === 'data' || msg.type === 'data-resync') {
+        // data-resync(反压恢复快照)同样喂给 prompt 检测:洪泛窗口内出现的交互
+        // prompt 仍在快照末尾,_ptyBuffer 自身 4KB 滚动封顶,无内存风险
         this._appendPtyData(msg.data);
       } else if (msg.type === 'exit') {
           this._clearPtyPrompt();

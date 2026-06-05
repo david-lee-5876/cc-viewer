@@ -77,6 +77,7 @@ import { loadPlugins, runWaterfallHook, runParallelHook } from './lib/plugin-loa
 import { CONTEXT_WINDOW_FILE, readModelContextSize } from './lib/context-watcher.js';
 import { watchLogFile, startWatching, unwatchAll, sendEventToClients, sendToClients } from './lib/log-watcher.js';
 import { cleanupExtractCache } from './lib/jsonl-archive.js';
+import { createBackpressureGate } from './lib/ws-backpressure.js';
 
 
 // 动态获取 getPrefsFile()（LOG_DIR 可能在运行时被 setLogDir 修改）
@@ -1077,6 +1078,20 @@ async function setupTerminalWebSocket(httpServer) {
       }
     });
 
+    // 反压状态转换日志（observability：线上排"页面卡"时可直接判断是否触发过反压、几次、积压量）。
+    // behind/resume 在持续洪泛下以亚秒级周期振荡，5s 节流防刷屏；timeout 是终态必记。
+    const makeBpLogger = (label, ws) => {
+      let behindCount = 0;
+      let lastLogAt = 0;
+      return (event, buffered) => {
+        if (event === 'behind') behindCount++;
+        const now = Date.now();
+        if (event !== 'timeout' && now - lastLogAt < 5000) return;
+        lastLogAt = now;
+        console.warn(`[${label}] ws backpressure ${event}: client=${ws._socket?.remoteAddress || '?'} bufferedAmount=${buffered} behindTotal=${behindCount}`);
+      };
+    };
+
     // scratch 终端 WS：极简版，仅承载 input/resize/data/exit + 显式 kill；不掺杂 hook/SDK/preset
     wssScratch.on('connection', async (ws, req) => {
       const id = req.ccvScratchId;
@@ -1097,8 +1112,27 @@ async function setupTerminalWebSocket(httpServer) {
         try { ws.send(JSON.stringify({ type: 'data', data: buffer })); } catch {}
       }
 
+      // 反压闸门：写缓冲堆积时停发 data，恢复后用 outputBuffer 快照 resync 追赶
+      // （防 Windows ConPTY 洪泛把慢客户端 / server 内存拖垮，详见 lib/ws-backpressure.js）。
+      // 快照自身有界：scratch outputBuffer 50KB 滚动截断（scratch-pty-manager.js MAX_BUFFER），
+      // behind 期间继续灌也不会撑爆 resync 响应。
+      const _bpLog = makeBpLogger('scratch-ws', ws);
+      const bpGate = createBackpressureGate({
+        getBufferedAmount: () => ws.bufferedAmount,
+        onBehind: (buffered) => _bpLog('behind', buffered),
+        onResume: (buffered) => {
+          _bpLog('resume', buffered);
+          if (ws.readyState !== 1) return;
+          try { ws.send(JSON.stringify({ type: 'data-resync', data: getScratchOutputBuffer(id) })); } catch {}
+        },
+        onTimeout: (buffered) => {
+          _bpLog('timeout', buffered);
+          try { ws.terminate(); } catch {}
+        },
+      });
+
       const removeDataListener = onScratchData(id, (data) => {
-        if (ws.readyState === 1) {
+        if (ws.readyState === 1 && bpGate.offer()) {
           try { ws.send(JSON.stringify({ type: 'data', data })); } catch {}
         }
       });
@@ -1128,6 +1162,7 @@ async function setupTerminalWebSocket(httpServer) {
       });
 
       ws.on('close', () => {
+        bpGate.dispose();
         removeDataListener();
         removeExitListener();
         // pty 本身**不杀**（保留以支持刷新重连），由 kill 消息或 /api/workspaces/stop 触发；
@@ -1174,9 +1209,48 @@ async function setupTerminalWebSocket(httpServer) {
       // 注：仅 PTY 已运行时才需要兜底；shell 不在 alternate-screen 不需要。
       let _needRedrawBootstrap = state.running === true;
 
+      // 反压闸门：写缓冲堆积时停发 data，恢复后用 outputBuffer 快照 resync 追赶；
+      // resync 后强制 claude TUI 全屏重绘，避免洪泛结束于 TUI 静止态时画面停在快照
+      // （防 Windows ConPTY 洪泛拖垮慢客户端 / server 内存，详见 lib/ws-backpressure.js）。
+      // 快照自身有界：outputBuffer 200KB 滚动截断（pty-manager.js MAX_BUFFER + findSafeSliceStart
+      // ANSI 安全起点），behind 期间 PTY 继续灌也不会撑爆 resync 响应。
+      const _bpLog = makeBpLogger('terminal-ws', ws);
+      const bpGate = createBackpressureGate({
+        getBufferedAmount: () => ws.bufferedAmount,
+        onBehind: (buffered) => _bpLog('behind', buffered),
+        onResume: (buffered) => {
+          _bpLog('resume', buffered);
+          if (ws.readyState !== 1) return;
+          try { ws.send(JSON.stringify({ type: 'data-resync', data: getOutputBuffer() })); } catch {}
+          try {
+            if (process.platform !== 'win32') {
+              // POSIX：与下方 _needRedrawBootstrap 同款 SIGWINCH 兜底
+              const pid = getClaudePid();
+              if (pid && pid !== process.pid) process.kill(pid, 'SIGWINCH');
+            } else {
+              // Windows 无 SIGWINCH：resize 抖动经 ConPTY 通知重绘（恢复路径偶发，闪烁可接受）。
+              // 尺寸仲裁与 resize 消息处理一致：移动端优先，否则活跃客户端（activeWs 为 null 时
+              // 本 ws 视为所有者）——恢复的 ws 可能是非权威的慢后台 tab，用它自己的尺寸抖动会把
+              // 共享 PTY 永久改成它的尺寸、挤掉活跃/移动端画面；无权威尺寸则跳过抖动。
+              const mSize = getMobileSize();
+              const size = mSize
+                || ((activeWs === ws || activeWs === null) ? clientSizes.get(ws) : clientSizes.get(activeWs));
+              if (size) {
+                resizePty(size.cols, size.rows + 1);
+                resizePty(size.cols, size.rows);
+              }
+            }
+          } catch {}
+        },
+        onTimeout: (buffered) => {
+          _bpLog('timeout', buffered);
+          try { ws.terminate(); } catch {}
+        },
+      });
+
       // PTY 输出 → WebSocket(合并 ws 后客户端自行按 msg.type 分发,server 端不再 role 过滤)
       const removeDataListener = onPtyData((data) => {
-        if (ws.readyState === 1) {
+        if (ws.readyState === 1 && bpGate.offer()) {
           ws.send(JSON.stringify({ type: 'data', data }));
         }
       });
@@ -1555,6 +1629,7 @@ async function setupTerminalWebSocket(httpServer) {
       });
 
       ws.on('close', () => {
+        bpGate.dispose();
         removeDataListener();
         removeExitListener();
         clientSizes.delete(ws);

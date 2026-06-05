@@ -135,6 +135,12 @@ class ScratchTerminal extends React.Component {
         const msg = JSON.parse(event.data);
         if (msg.type === 'data') {
           this._throttledWrite(msg.data);
+        } else if (msg.type === 'data-resync') {
+          // 服务端反压恢复:丢弃积压、重置、写快照对齐(reset 清 scrollback 的取舍见 TerminalPanel 同分支注释)
+          this._writeQ.reset();
+          try { this.terminal?.reset(); } catch {}
+          this._writeQ.push('\x1b[33m[cc-viewer] output skipped during congestion\x1b[0m\r\n');
+          if (msg.data) this._writeQ.push(msg.data);
         } else if (msg.type === 'state') {
           // 后端首条 state 消息携带 shellBasename，给父组件渲染 tab 标签
           if (msg.shellBasename) {

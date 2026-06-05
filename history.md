@@ -18,6 +18,7 @@
 
 ## 1.6.294 (2026-06-03)
 
+- fix(terminal): Windows 大流量长程任务页面卡死修复（ConPTY 输出洪泛防护）——前端 xterm 写队列积压超 2MB（移动端 1MB）自动丢最旧数据并提示，防内存膨胀 GC 卡死；服务端按 `ws.bufferedAmount` 对慢客户端停发，恢复后发 `data-resync` 快照一步对齐并触发 TUI 全屏重绘，60s 未恢复判定死连接断开；scratch 终端同源防护
 - feat(electron/win): Windows 桌面版自定义标题栏——隐藏原生白色标题栏与菜单栏（快捷键保留），logo、标题、File/Edit/View/Window 菜单与项目 tabs 合并为一行；原生 最小化/最大化/关闭 按钮经 titleBarOverlay 保留（Win11 Snap Layouts、双击最大化不受影响）且配色随皮肤实时切换；菜单为跟随皮肤的 HTML 下拉，文案补 18 语言（macOS 原生菜单同步获得翻译）
 - feat(electron): 启动白屏闪烁修复（窗口首帧按主题底色绘制）；窗口位置/大小/最大化状态持久化，显示器拔掉/越界时安全回落默认；内容区右键菜单补齐（剪切/复制/粘贴/全选/复制链接，18 语言）；Windows 任务栏 AppUserModelId 对齐 appId；tab bar 按钮 tooltip 补 18 语言
 - fix(electron/win): 主进程防阻塞加固，针对 Windows 整窗永久冻结（渲染存活、hover 有高亮但全程无响应）——diag 日志 `appendFileSync` 改异步队列（256 条上限防错误风暴）；打包版主进程 console 输出静默、worker stdio 改 ignore（消除终端启动 + QuickEdit 点选导致的内核级写阻塞面）；审批级联（badge/flashFrame/广播）100ms 去抖合并

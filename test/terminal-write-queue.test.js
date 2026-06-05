@@ -254,3 +254,117 @@ describe('TerminalWriteQueue', { concurrency: false }, () => {
     dynQ.dispose();
   });
 });
+
+describe('TerminalWriteQueue 积压自保（trim）', { concurrency: false }, () => {
+  let term;
+  let q;
+
+  beforeEach(() => {
+    setupRAF();
+    term = makeTerminal();
+    q = new TerminalWriteQueue(() => term);
+  });
+
+  afterEach(() => {
+    q.dispose();
+    teardownRAF();
+  });
+
+  it('积压超 HIGH_WATER 时丢最旧整项，回落到 TRIM_TARGET 以下', () => {
+    // 推 3 个 1MB 项（共 3MB > 2MB 高水位）
+    const mb = 1024 * 1024;
+    q.push('a'.repeat(mb));
+    q.push('b'.repeat(mb));
+    q.push('c'.repeat(mb));
+    // 最新项永不丢 → trim 后剩恰好最新的 1MB（'a'/'b' 整项丢弃）
+    assert.equal(q._pendingBytes(), mb,
+      `pending ${q._pendingBytes()} should be exactly the newest item after trim`);
+    // 最旧的 'a'/'b' 被丢、最新的 'c' 保留（丢旧保新）
+    flushAllFrames(200);
+    const received = term.receivedString();
+    assert.ok(!received.includes('a'), 'oldest item should be dropped');
+    assert.ok(received.includes('c'), 'newest item should survive');
+  });
+
+  it('丢弃后下一帧先写 TRIM_NOTICE（以 \\x18 开头）', () => {
+    const mb = 1024 * 1024;
+    q.push('a'.repeat(mb));
+    q.push('b'.repeat(mb));
+    q.push('c'.repeat(mb));
+    flushOneFrame();
+    assert.equal(term.writes[0], TerminalWriteQueue.TRIM_NOTICE);
+    assert.ok(term.writes[0].startsWith('\x18'), 'notice must start with CAN to abort half escape seq');
+    assert.ok(term.writes[0].includes('output trimmed'));
+    // 提示只写一次
+    flushAllFrames(200);
+    const noticeCount = term.writes.filter(w => w === TerminalWriteQueue.TRIM_NOTICE).length;
+    assert.equal(noticeCount, 1);
+  });
+
+  it('1MB 单次 push 不触发 trim（防误伤 /resume 大流量）', () => {
+    const big = 'x'.repeat(1024 * 1024);
+    q.push(big);
+    flushAllFrames(200);
+    assert.equal(term.receivedString(), big, 'no data lost');
+    assert.ok(!term.receivedString().includes('output trimmed'));
+  });
+
+  it('自定义 highWaterBytes 选项生效（移动端低水位）', () => {
+    const smallQ = new TerminalWriteQueue(() => term, { highWaterBytes: 1000, trimTargetBytes: 300 });
+    smallQ.push('a'.repeat(600));
+    smallQ.push('b'.repeat(600));   // 1200 > 1000 → trim
+    assert.ok(smallQ._pendingBytes() <= 300 + 600, 'trimmed by whole items down to target');
+    flushAllFrames(200);
+    assert.ok(!term.receivedString().includes('a'), 'oldest dropped under custom watermark');
+    smallQ.dispose();
+  });
+
+  it('trim 只丢整项：消费中项（offset>0）的剩余部分按剩余字节计入', () => {
+    // 先推一个 40KB 项并消费一帧（32KB），留 offset>0 的部分项
+    q.push('p'.repeat(40 * 1024));
+    flushOneFrame();
+    // 再洪泛触发 trim
+    const mb = 1024 * 1024;
+    q.push('q'.repeat(mb));
+    q.push('r'.repeat(mb));
+    q.push('s'.repeat(mb));
+    // trim 发生在 push('r') 越线时：丢 'p' 剩余部分 + 'q' 整项、保最新 'r'；
+    // 之后 push('s') 时 pending 2MB 未再越线 → 'r'+'s' 都保留
+    assert.equal(q._pendingBytes(), 2 * mb);
+    flushAllFrames(200);
+    // 不应出现半截 surrogate 之类的撕裂：整项丢弃语义下尾部数据完整
+    assert.ok(term.receivedString().endsWith('s'), 'newest data fully delivered');
+  });
+
+  it('reset() 清空队列但保持可用', () => {
+    q.push('old-data');
+    q.reset();
+    assert.equal(q._pendingBytes(), 0);
+    flushAllFrames();
+    assert.ok(!term.receivedString().includes('old-data'), 'reset discards pending data');
+    q.push('new-data');
+    flushAllFrames();
+    assert.equal(term.receivedString(), 'new-data', 'queue still usable after reset');
+  });
+
+  it('trim 后 rAF 未跑即 drain（unmount）：提示行随排空写出', () => {
+    const mb = 1024 * 1024;
+    q.push('a'.repeat(mb));
+    q.push('b'.repeat(mb));
+    q.push('c'.repeat(mb));   // 触发 trim，rAF 尚未 flush
+    q.drain();                // unmount 同步排空
+    assert.equal(term.writes[0], TerminalWriteQueue.TRIM_NOTICE);
+    assert.ok(term.receivedString().includes('c'), 'remaining data drained');
+  });
+
+  it('reset() 清掉 trim 标记，不再写提示', () => {
+    const mb = 1024 * 1024;
+    q.push('a'.repeat(mb));
+    q.push('b'.repeat(mb));
+    q.push('c'.repeat(mb));   // 触发 trim
+    q.reset();                // resync 路径：标记一并清掉
+    q.push('fresh');
+    flushAllFrames();
+    assert.equal(term.receivedString(), 'fresh');
+  });
+});
