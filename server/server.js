@@ -293,7 +293,10 @@ const MAX_POST_BODY = 10 * 1024 * 1024;
 // 用户显式 ?limit=0 可恢复全量加载（power-user 逃生口）。
 const DEFAULT_EVENTS_LIMIT = 1000;
 // SSE 单客户端 backpressure 容忍上限：连续未排空 > 此时长则视为 dead 客户端剔除。
-const SSE_BACKPRESSURE_TIMEOUT_MS = 5000;
+// 调高至 30s：大会话首屏/重连重放时，渲染器（尤其 Windows 浏览器，大 DOM layout 更重）
+// 可能短暂忙到来不及排空 socket。过早剔除会触发「断开→EventSource 自动重连→再次重放」
+// 风暴，把瞬时卡顿放大成持续卡死。30s 仍能剔除真正死掉的连接。
+const SSE_BACKPRESSURE_TIMEOUT_MS = 30000;
 
 
 

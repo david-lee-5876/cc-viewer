@@ -24,6 +24,8 @@
 - fix(electron/win): 主进程防阻塞加固，针对 Windows 整窗永久冻结（渲染存活、hover 有高亮但全程无响应）——diag 日志 `appendFileSync` 改异步队列（256 条上限防错误风暴）；打包版主进程 console 输出静默、worker stdio 改 ignore（消除终端启动 + QuickEdit 点选导致的内核级写阻塞面）；审批级联（badge/flashFrame/广播）100ms 去抖合并
 - fix(electron/win): 全部 child_process 调用点统一补 `windowsHide: true`，修复 Windows 桌面版启动多弹一个 Node.js 控制台窗口；新增静态扫描测试防回归
 - feat(ui): 版本信息弹窗按安装渠道（electron / brew / npm）精准匹配升级命令——npm 命令补 `--registry` 指定官方源避免镜像滞后，brew 渠道提示 `brew upgrade cc-viewer`（补 18 语言）
+- fix(perf): 修复 Web 桌面端长任务中后段「整个页面卡死/偶发崩溃」（Windows 高发、Mac 不复现）——桌面端原先不做虚拟化(`useVirtuoso` 仅移动端)且不裁剪渲染窗口，长会话把整段对话全量渲染成 DOM，单次更新 reconcile/layout 成本随条目数线性增长，主线程被打满（Windows 大 DOM layout 更重、渲染器内存上限更低，先于 Mac 撞上上限）。现桌面端复用移动端的渲染窗口裁剪：默认只渲染最近 400 条 item，更早的经「加载更早」按需展开（搜索/跳转到被裁剪区域时自动展开纳入）
+- fix(perf): SSE 单客户端 backpressure 容忍上限 5s→30s——大会话首屏/重连重放时短暂忙碌的渲染器不再被误判 dead 而剔除，避免「断开→EventSource 自动重连→再次重放」风暴把瞬时卡顿放大成持续卡死
 - feat(ui): 顶栏「网络报文 / 对话模式」切换按钮文案精简为「网络 / 对话」；对话中居中的 SVG loading 动画设为不可选中（user-select:none + pointer-events:none）
 - feat(ui): 偏好设置「对话展示」多项设置追加 (?) 悬浮说明（权限自动审批 / 弹出全局审批 Modal / 审批提示音 / 展开思考过程 / 完整展示所有内容，补 18 语言）
 - feat(ui): 代理热切换的「Max 用户请勿使用」告警改为仅当 Default(内置)端点为 api.anthropic.com 时显示

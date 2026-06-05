@@ -72,6 +72,12 @@ const AUTO_ALLOW_PTY_DEDUPE_MS = 2000;
 const MOBILE_ITEM_LIMIT = 240;
 const IOS_ITEM_LIMIT = 150;
 const MOBILE_LOAD_MORE_STEP = 100;
+// 桌面端初始渲染上限。桌面不走虚拟化（useVirtuoso 仅 isMobile），长任务会把整段对话全量渲染成
+// DOM，中后段 reconcile/layout 成本随条目数线性增长 → 主线程卡死（Windows 比 Mac 先撞上上限）。
+// 与移动端一致：只渲染最近 N 条 item，更早的用「加载更早」按需展开。桌面给更大窗口。
+const DESKTOP_ITEM_LIMIT = 400;
+// 当前平台基础渲染上限。isMobile/isIOS 在模块加载时即固定（见 env.js），故可一次性求值。
+const ITEM_LIMIT = isMobile ? (isIOS ? IOS_ITEM_LIMIT : MOBILE_ITEM_LIMIT) : DESKTOP_ITEM_LIMIT;
 const useVirtuoso = isMobile && !isIOS && !isPad;
 
 // 稳定空对象引用，避免每次 render 创建新 {} 导致子组件重渲染
@@ -730,7 +736,8 @@ class ChatView extends React.Component {
         }
         this._prevSessions = this.props.mainAgentSessions;
       }
-      if (isMobile) this._mobileExtraItems = 0;
+      // 会话/工作区切换：复位「加载更早」展开量，新会话从最近窗口开始（移动端+桌面端一致）
+      this._mobileExtraItems = 0;
       this.startRender();
       if (this.state.pendingInput) {
         this.setState({ pendingInput: null });
@@ -774,26 +781,20 @@ class ChatView extends React.Component {
     }
     // scrollToTimestamp 变化时（如从 raw 模式切回 chat），重建 items 并滚动定位
     if (!prevProps.scrollToTimestamp && this.props.scrollToTimestamp) {
-      // If target is in hidden area, expand to include it
-      if (isMobile && this.props.scrollToTimestamp) {
-        const rawItems = this.buildAllItems();
-        const targetIdx = this._scrollTargetIdx;
-        if (targetIdx != null) {
-          const mobileLimit = isIOS ? IOS_ITEM_LIMIT : MOBILE_ITEM_LIMIT;
-          const limit = mobileLimit + this._mobileExtraItems;
-          const offset = rawItems.length > limit ? rawItems.length - limit : 0;
-          if (targetIdx < offset) {
-            this._mobileExtraItems = rawItems.length - targetIdx - mobileLimit;
-            if (this._mobileExtraItems < 0) this._mobileExtraItems = 0;
-          }
+      // 跳转目标若落在被裁剪（未渲染）的更早区域，先展开 _mobileExtraItems 把它纳入可见窗口，
+      // 否则跳转/搜索定位会失败。移动端与桌面端统一处理（桌面端启用渲染窗口裁剪后同样需要）。
+      const rawItems = this.buildAllItems();
+      const targetIdx = this._scrollTargetIdx;
+      if (targetIdx != null) {
+        const limit = ITEM_LIMIT + this._mobileExtraItems;
+        const offset = rawItems.length > limit ? rawItems.length - limit : 0;
+        if (targetIdx < offset) {
+          this._mobileExtraItems = rawItems.length - targetIdx - ITEM_LIMIT;
+          if (this._mobileExtraItems < 0) this._mobileExtraItems = 0;
         }
-        const allItems = this._applyMobileSlice(rawItems);
-        this.setState({ allItems, lastResponseItems: this._lastResponseItems, visibleCount: allItems.length }, () => this.scrollToBottom());
-      } else {
-        const rawItems = this.buildAllItems();
-        const allItems = this._applyMobileSlice(rawItems);
-        this.setState({ allItems, lastResponseItems: this._lastResponseItems, visibleCount: allItems.length }, () => this.scrollToBottom());
       }
+      const allItems = this._applyMobileSlice(rawItems);
+      this.setState({ allItems, lastResponseItems: this._lastResponseItems, visibleCount: allItems.length }, () => this.scrollToBottom());
     }
     // mobileChatVisible: scroll to bottom when becoming visible
     if (isMobile && this.props.mobileChatVisible && !prevProps.mobileChatVisible) {
@@ -1926,14 +1927,11 @@ class ChatView extends React.Component {
     return allItems;
   }
 
+  // 渲染窗口裁剪：只保留最近 ITEM_LIMIT(+已展开) 条 item。移动端与桌面端统一处理
+  // （桌面端启用裁剪以避免长任务全量渲染卡死，见 DESKTOP_ITEM_LIMIT 注释）。
   _applyMobileSlice(allItems) {
-    if (!isMobile) {
-      this._mobileSliceOffset = 0;
-      this._totalItemCount = allItems.length;
-      return allItems;
-    }
     this._totalItemCount = allItems.length;
-    const limit = (isIOS ? IOS_ITEM_LIMIT : MOBILE_ITEM_LIMIT) + this._mobileExtraItems;
+    const limit = ITEM_LIMIT + this._mobileExtraItems;
     if (allItems.length <= limit) {
       this._mobileSliceOffset = 0;
       return allItems;
@@ -3446,7 +3444,7 @@ class ChatView extends React.Component {
       </button>
     ) : null;
 
-    const loadMoreBtn = isMobile && this._mobileSliceOffset > 0 ? (
+    const loadMoreBtn = this._mobileSliceOffset > 0 ? (
       <div className={styles.loadMoreWrap}>
         <button className={styles.loadMoreBtn} onClick={this.handleLoadMore}>
           {t('ui.loadMoreHistory', { count: this._mobileSliceOffset })}

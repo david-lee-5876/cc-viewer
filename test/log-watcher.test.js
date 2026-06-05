@@ -122,6 +122,29 @@ describe('sendToClients', () => {
     // Should not throw
     sendToClients([], { timestamp: 1, url: '/test' });
   });
+
+  it('keeps a backpressured client until the tolerance window elapses, then drops it', () => {
+    // write 返回 false 模拟写缓冲满（backpressure）。首次推送只记录时间戳并挂 drain 监听，
+    // 不应立即剔除——否则瞬时忙碌的渲染器会被误判 dead，触发重连风暴（Windows 卡死放大器）。
+    let ended = false;
+    const client = {
+      write: () => false,
+      once: () => {},
+      end: () => { ended = true; },
+    };
+    const clients = [client];
+
+    sendToClients(clients, { timestamp: 1, url: '/test' });
+    assert.equal(clients.length, 1, 'first backpressured push must not drop the client');
+    assert.equal(ended, false);
+    assert.ok(client._sseBackpressureSince > 0, 'backpressure start timestamp recorded');
+
+    // 模拟未排空持续超过容忍窗口（不依赖具体常量值，直接把起点推到很久以前）。
+    client._sseBackpressureSince = Date.now() - 10 * 60 * 1000;
+    sendToClients(clients, { timestamp: 2, url: '/test' });
+    assert.equal(clients.length, 0, 'client is dropped after the tolerance window without draining');
+    assert.equal(ended, true, 'dropped client is end()-ed');
+  });
 });
 
 describe('watchLogFile (fs.watch migration)', () => {

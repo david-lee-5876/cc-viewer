@@ -76,17 +76,17 @@ describe('SSE backpressure: _safeSseWrite via sendToClients', () => {
     assert.equal(c.writes.length, 0);
   });
 
-  it('keeps backpressured client on first write-false (sets timestamp), then removes after >5s', () => {
+  it('keeps backpressured client on first write-false (sets timestamp), then removes after tolerance window', () => {
     const c = new FakeClient('full');
     const clients = [c];
     // 第一次 write 返 false：标记时间戳但不剔除
     sendToClients(clients, { ts: 1 });
     assert.equal(clients.length, 1, 'still in array on first backpressure');
     assert.ok(c._sseBackpressureSince, 'backpressure timestamp set');
-    // 模拟时钟前进 6s（超过 5s 上限）
-    c._sseBackpressureSince = Date.now() - 6000;
+    // 模拟未排空持续远超容忍窗口（不绑定具体常量值，直接把起点推到很久以前）
+    c._sseBackpressureSince = Date.now() - 10 * 60 * 1000;
     sendToClients(clients, { ts: 2 });
-    assert.equal(clients.length, 0, 'removed after >5s sustained backpressure');
+    assert.equal(clients.length, 0, 'removed after sustained backpressure beyond tolerance window');
     assert.ok(c.ended, 'client.end() called');
   });
 

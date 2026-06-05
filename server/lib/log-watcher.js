@@ -55,7 +55,10 @@ export function readLogFile(logFile) {
   }
 }
 
-const SSE_BACKPRESSURE_TIMEOUT_MS = 5000;
+// SSE 单客户端 backpressure 容忍上限：连续未排空 > 此时长则视为 dead 客户端剔除。
+// 与 server.js 同名常量值保持一致（避免循环依赖，此处单独 mirror）。
+// 30s：避免大会话/重连重放时把短暂忙碌的渲染器误判为 dead 并触发重连风暴，详见 server.js 注释。
+const SSE_BACKPRESSURE_TIMEOUT_MS = 30000;
 
 function _removeClient(clients, client) {
   const idx = clients.indexOf(client);
