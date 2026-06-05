@@ -389,7 +389,8 @@ async function runCliMode(extraClaudeArgs = [], cwd, noOpen = false) {
 
   // 4. 自动打开浏览器
   const protocol = serverMod.getProtocol();
-  const url = `${protocol}://127.0.0.1:${port}`;
+  const basePath = process.env.CCV_BASE_PATH || '';
+const url = `${protocol}://127.0.0.1:${port}${basePath}`;
   if (!noOpen) {
     try {
       // URL 含 & 在 cmd.exe 下会被当命令分隔符切断 query；用 spawn 数组传参避免 shell interpolation。
@@ -410,7 +411,7 @@ async function runCliMode(extraClaudeArgs = [], cwd, noOpen = false) {
   const _lanIps = serverMod.getAllLocalIps();
   const _token = serverMod.getAccessToken();
   for (const _ip of _lanIps) {
-    console.log(`  ➜ Network: ${protocol}://${_ip}:${port}?token=${_token}`);
+    console.log(`  ➜ Network: ${protocol}://${_ip}:${port}${basePath}?token=${_token}`);
   }
   // 密码登录已启用时,把当前密码打印出来 —— 否则 `ccv --usePassword`(随机密码)在 CLI 模式下
   // 用户无从得知密码(server.js 的密码打印只在非 CLI 模式生效)。空密码=无防护,给出警告。
@@ -551,7 +552,8 @@ async function runSdkMode(extraClaudeArgs = [], cwd, noOpen = false) {
 
   // 自动打开浏览器
   const protocol = serverMod.getProtocol();
-  const url = `${protocol}://127.0.0.1:${port}`;
+  const basePath = process.env.CCV_BASE_PATH || '';
+const url = `${protocol}://127.0.0.1:${port}${basePath}`;
   if (!noOpen) {
     try {
       // URL 含 & 在 cmd.exe 下会被当命令分隔符切断 query；用 spawn 数组传参避免 shell interpolation。
@@ -572,7 +574,7 @@ async function runSdkMode(extraClaudeArgs = [], cwd, noOpen = false) {
   const _lanIps = serverMod.getAllLocalIps();
   const _token = serverMod.getAccessToken();
   for (const _ip of _lanIps) {
-    console.log(`  ➜ Network: ${protocol}://${_ip}:${port}?token=${_token}`);
+    console.log(`  ➜ Network: ${protocol}://${_ip}:${port}${basePath}?token=${_token}`);
   }
   // 密码登录已启用时,把当前密码打印出来 —— 否则 `ccv --usePassword`(随机密码)在 CLI 模式下
   // 用户无从得知密码(server.js 的密码打印只在非 CLI 模式生效)。空密码=无防护,给出警告。
@@ -628,8 +630,9 @@ async function runCliModeWorkspaceSelector(extraClaudeArgs = [], noOpen = false)
   serverMod.setWorkspaceClaudePath(claudePath, isNpmVersion);
 
   // 自动打开浏览器
+  const basePath = process.env.CCV_BASE_PATH || '';
   const wsProtocol = serverMod.getProtocol();
-  const url = `${wsProtocol}://127.0.0.1:${port}`;
+  const url = `${wsProtocol}://127.0.0.1:${port}${basePath}`;
   if (!noOpen) {
     try {
       // URL 含 & 在 cmd.exe 下会被当命令分隔符切断 query；用 spawn 数组传参避免 shell interpolation。
@@ -650,7 +653,7 @@ async function runCliModeWorkspaceSelector(extraClaudeArgs = [], noOpen = false)
   const _lanIps = serverMod.getAllLocalIps();
   const _token = serverMod.getAccessToken();
   for (const _ip of _lanIps) {
-    console.log(`  ➜ Network: ${wsProtocol}://${_ip}:${port}?token=${_token}`);
+    console.log(`  ➜ Network: ${wsProtocol}://${_ip}:${port}${basePath}?token=${_token}`);
   }
 
   // 注册退出处理

@@ -15,6 +15,16 @@ const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 
 export default defineConfig(() => {
   const port = getBackendPort();
   return {
+    // CCV_BASE_PATH: 部署基础路径。
+    //   未设置 → '/' (默认，向后兼容)
+    //   '/prefix/' → 构建时硬编码前缀
+    //   '' (空字符串) → 相对路径，配合运行时 <base> 标签实现动态代理
+    base: (() => {
+      const v = process.env.CCV_BASE_PATH;
+      if (v === undefined) return '/';
+      if (v === '') return '';                 // relative paths, no trailing slash fixup
+      return v.replace(/\/?$/, '/');           // ensure trailing slash
+    })(),
     plugins: [react()],
     define: {
       __APP_VERSION__: JSON.stringify(pkg.version),

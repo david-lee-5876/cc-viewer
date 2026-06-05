@@ -12,7 +12,7 @@ import '@xterm/xterm/css/xterm.css';
 import { darkTerminalTheme, lightTerminalTheme } from './terminalThemes';
 import styles from './TerminalPanel.module.css';
 import { TerminalWriteQueue } from '../../utils/terminalWriteQueue';
-import { appendToken } from '../../utils/apiUrl';
+import { appendToken, getBasePath } from '../../utils/apiUrl';
 
 class ScratchTerminal extends React.Component {
   constructor(props) {
@@ -127,7 +127,7 @@ class ScratchTerminal extends React.Component {
     if (!id) return; // 没 id 不能连
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     // 带上 LAN token(已有 ?id= → appendToken 用 & 续接);密码登录用户走 cookie。见 TerminalWsContext。
-    const wsUrl = appendToken(`${protocol}//${window.location.host}/ws/terminal-scratch?id=${encodeURIComponent(id)}`);
+    const wsUrl = appendToken(`${protocol}//${window.location.host}${getBasePath().replace(/\/$/, '')}/ws/terminal-scratch?id=${encodeURIComponent(id)}`);
     this.ws = new WebSocket(wsUrl);
 
     this.ws.onmessage = (event) => {

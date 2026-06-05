@@ -560,7 +560,15 @@ const dispatch = createDispatcher(_routes);
 
 async function handleRequest(req, res) {
   const parsedUrl = new URL(req.url, `${serverProtocol}://${req.headers.host}`);
-  const url = parsedUrl.pathname;
+  let url = parsedUrl.pathname;
+
+  // CCV_BASE_PATH reverse proxy: strip prefix at TOP so API/WS/static/SPA
+  // all work with original unprefixed paths. basePath normalized.
+  const bpRaw = process.env.CCV_BASE_PATH || '';
+  const bp = bpRaw && bpRaw !== '/' ? bpRaw.replace(/\/?$/, '/') : '';
+  if (bp && url.startsWith(bp)) {
+    url = url.slice(bp.length) || '/';
+  }
   const method = req.method;
 
   // WebSocket 路径不处理，交给 upgrade 事件
@@ -665,7 +673,15 @@ async function handleRequest(req, res) {
 
   // 静态文件服务
   if (method === 'GET') {
-    let filePath = url === '/' ? '/index.html' : url;
+    const rawBase = process.env.CCV_BASE_PATH || '';
+    // Normalize to ensure trailing slash; prevents /proxy/ws from
+    // incorrectly matching /proxy/ws-other due to startsWith ambiguity.
+    const basePath = rawBase && rawBase !== '/' ? rawBase.replace(/\/?$/, '/') : '';
+    let filePath = url;
+    if (basePath && url.startsWith(basePath)) {
+      filePath = url.slice(basePath.length) || '/';
+    }
+    if (filePath === '/') filePath = '/index.html';
     // 去掉 query string
     filePath = filePath.split('?')[0];
 
@@ -706,6 +722,15 @@ async function handleRequest(req, res) {
           console.warn('[serveIndexHtml] dist/index.html 没有 <html data-theme="..."> 属性，SSR theme 注入将不生效。检查 index.html 模板。');
         }
         html = html.replace(/<html([^>]*?)data-theme="[^"]*"/, `<html$1data-theme="${themeColor}"`);
+        // 运行时注入 <base> 标签：当 CCV_BASE_PATH 设置为非空非根路径时，
+        // 使浏览器将所有相对 URL 解析到代理子路径下。配合 Vite base='' 输出相对路径。
+        const basePath = process.env.CCV_BASE_PATH || '';
+        if (basePath && basePath !== '/') {
+          const safeBase = basePath.replace(/\/?$/, '/');
+                  const escapedBase = safeBase.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        const jsSafeBase = safeBase.replace(/"/g, '"').replace(/<\//g, '<\/');
+        html = html.replace(/<head[^>]*>/i, m => m + `<base href="${escapedBase}"><script>window.__CCV_BASE_PATH__="${jsSafeBase}"</script>`);
+        }
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' });
         res.end(html);
         return true;
@@ -1031,7 +1056,8 @@ async function setupTerminalWebSocket(httpServer) {
 
     httpServer.on('upgrade', (req, socket, head) => {
       const wsUrl = new URL(req.url, `${serverProtocol}://${req.headers.host}`);
-      const pathname = wsUrl.pathname;
+      let pathname = wsUrl.pathname;
+const bpRaw = process.env.CCV_BASE_PATH || '';      if (bpRaw && bpRaw !== '/' && pathname.startsWith(bpRaw)) {        pathname = pathname.slice(bpRaw.length) || '/';      }
       // 与 HTTP 一致的鉴权（此前 WS upgrade 完全不校验 token，远程终端实为无门禁——本次堵洞）。
       // 在此显式计算 isLocal（与 handleRequest 同款三态判断），WS 视作非 HTML 请求。
       const wsRemoteIp = req.socket.remoteAddress;
