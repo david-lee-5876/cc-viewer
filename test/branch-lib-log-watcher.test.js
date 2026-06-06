@@ -243,6 +243,7 @@ describe('log-watcher.js FORCE_POLL / watchFile 轮询（子进程，行 314-316
       const st = getWatchedFiles().get(file);
       if (!st || st.polling !== true) { console.error('NOT_POLLING'); process.exit(2); }
       // watchFile interval=500ms；append 后等回调读到增量。
+      // 死线 25s:CI 慢机上 stat 轮询检测偶发数秒滞后(曾 9s 超窗 flake);绿路径命中即退,不耗时。
       appendFileSync(file, JSON.stringify({ timestamp: 'fp1', url: '/v1/messages' }) + '\\n---\\n');
       const t0 = Date.now();
       const timer = setInterval(() => {
@@ -251,7 +252,7 @@ describe('log-watcher.js FORCE_POLL / watchFile 轮询（子进程，行 314-316
           clearInterval(timer);
           unwatchAll();
           process.exit(0);
-        } else if (Date.now() - t0 > 9000) {
+        } else if (Date.now() - t0 > 25000) {
           console.error('POLL_TIMEOUT');
           clearInterval(timer);
           process.exit(3);
@@ -261,7 +262,7 @@ describe('log-watcher.js FORCE_POLL / watchFile 轮询（子进程，行 314-316
     const res = spawnSync(
       process.execPath,
       ['--input-type=module', '--eval', driver],
-      { env: { ...process.env, CCV_FORCE_POLL: '1' }, encoding: 'utf-8', timeout: 20000 },
+      { env: { ...process.env, CCV_FORCE_POLL: '1' }, encoding: 'utf-8', timeout: 40000 },
     );
     try { rmSync(tdir, { recursive: true, force: true }); } catch {}
     assert.equal(res.status, 0, `子进程应成功退出；stderr=${res.stderr}`);
