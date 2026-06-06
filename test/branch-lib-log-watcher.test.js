@@ -215,21 +215,25 @@ describe('log-watcher.js 分支补缺', () => {
   });
 });
 
-// ── 314-316 + 256：FORCE_POLL 分支 + watchFile 轮询回调（子进程） ────────────
+// ── 314-316 + 256：FORCE_POLL 分支 + watchFile 轮询回调（子进程 + mock 注入） ──
 // FORCE_POLL 在模块加载期冻结，必须在子进程把 CCV_FORCE_POLL=1 注入 env。
-// 子进程内：watchLogFile → _fallbackToPolling（314-315），append → watchFile 回调
-// → _readDelta（256）→ 客户端收到条目 → 打印 OK 标记后退出。
+// 零时序 mock 驱动:经 __setWatchFileImplForTests 注入假 watchFile(只捕获回调),
+// watchLogFile → _fallbackToPolling(314-315)用假实现注册 → append 落盘后【手动】调
+// 回调 → _readDelta(256)→ 客户端收到条目。真实 watchFile 的 stat 基线竞态曾在 CI
+// 上致 25s 全程静默 flake——mock 后不存在任何时序赌博,等待仅剩 _readDelta 的异步读盘。
 // spread process.env 保住 node:test 注入的 NODE_V8_COVERAGE，子进程覆盖才计入。
 describe('log-watcher.js FORCE_POLL / watchFile 轮询（子进程，行 314-316 / 256）', () => {
-  it('CCV_FORCE_POLL=1 走轮询并真正读取增量', () => {
+  it('CCV_FORCE_POLL=1 走轮询分支,注入假 watchFile 手动触发回调读取增量', () => {
     const tdir = privTmp('forcepoll');
     const file = join(tdir, 'fp.jsonl');
     writeFileSync(file, '');
-    // 子进程驱动脚本（ESM via --eval）。__TARGET__/__FILE__ 占位替换为绝对路径。
     const driver = `
-      import { watchLogFile, getWatchedFiles, unwatchAll } from ${JSON.stringify(targetUrl)};
+      import { watchLogFile, getWatchedFiles, unwatchAll, __setWatchFileImplForTests } from ${JSON.stringify(targetUrl)};
       import { appendFileSync } from 'node:fs';
       const file = ${JSON.stringify(file)};
+      // mock watchFile:不做任何真实监听,只捕获轮询回调供手动触发
+      let pollCb = null;
+      __setWatchFileImplForTests((f, opts, cb) => { pollCb = cb; });
       const data = [];
       const client = { destroyed: false, writable: true, write(p){ data.push(p); return true; }, end(){} };
       const opts = {
@@ -242,35 +246,27 @@ describe('log-watcher.js FORCE_POLL / watchFile 轮询（子进程，行 314-316
       watchLogFile(opts);
       const st = getWatchedFiles().get(file);
       if (!st || st.polling !== true) { console.error('NOT_POLLING'); process.exit(2); }
-      // watchFile interval=500ms。基线竞态:若 append 抢在 watchFile 首次 stat 基线之前,
-      // 基线已含增量 → 前后 stat 永远无差 → 回调永不触发(CI 上曾 25s 全程静默)。
-      // 修法:每 1.5s 周期性补 append 含同一 marker 的新条目,保证基线之后必有 stat 变更,
-      // 消灭时序赌博;绿路径首轮即中,不耗时。死线 25s 容忍慢机。
+      if (typeof pollCb !== 'function') { console.error('NO_POLL_CB'); process.exit(4); }
       appendFileSync(file, JSON.stringify({ timestamp: 'fp1', url: '/v1/messages' }) + '\\n---\\n');
+      pollCb(); // 手动触发轮询回调 → _readDelta 异步读增量
       const t0 = Date.now();
-      let lastAppend = Date.now();
       const timer = setInterval(() => {
         if (data.some(d => d.includes('fp1'))) {
           console.log('POLL_OK');
           clearInterval(timer);
           unwatchAll();
           process.exit(0);
-        }
-        if (Date.now() - lastAppend > 1500) {
-          lastAppend = Date.now();
-          appendFileSync(file, JSON.stringify({ timestamp: 'fp1', url: '/v1/messages' }) + '\\n---\\n');
-        }
-        if (Date.now() - t0 > 25000) {
+        } else if (Date.now() - t0 > 10000) {
           console.error('POLL_TIMEOUT');
           clearInterval(timer);
           process.exit(3);
         }
-      }, 50);
+      }, 25);
     `;
     const res = spawnSync(
       process.execPath,
       ['--input-type=module', '--eval', driver],
-      { env: { ...process.env, CCV_FORCE_POLL: '1' }, encoding: 'utf-8', timeout: 40000 },
+      { env: { ...process.env, CCV_FORCE_POLL: '1' }, encoding: 'utf-8', timeout: 30000 },
     );
     try { rmSync(tdir, { recursive: true, force: true }); } catch {}
     assert.equal(res.status, 0, `子进程应成功退出；stderr=${res.stderr}`);

@@ -249,10 +249,16 @@ function _scheduleDebouncedRead(fileState) {
   }, FSWATCH_DEBOUNCE_MS);
 }
 
+// 测试注入缝(仿 updater fetchImpl 惯例):替换轮询分支的 watchFile 实现。
+// 真实 watchFile 的 stat 基线与 500ms 间隔在 CI 慢机上不可确定性驱动(基线竞态曾致
+// 25s 全程静默 flake),单测注入假实现手动触发回调即可零时序覆盖。生产恒为 node:fs 原版。
+let _watchFileImpl = watchFile;
+export function __setWatchFileImplForTests(fn) { _watchFileImpl = fn || watchFile; }
+
 function _fallbackToPolling(fileState) {
   if (fileState.polling) return;
   fileState.polling = true;
-  watchFile(fileState.logFile, { interval: 500 }, () => {
+  _watchFileImpl(fileState.logFile, { interval: 500 }, () => {
     _readDelta(fileState);
   });
 }
