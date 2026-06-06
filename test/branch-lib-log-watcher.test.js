@@ -242,17 +242,25 @@ describe('log-watcher.js FORCE_POLL / watchFile 轮询（子进程，行 314-316
       watchLogFile(opts);
       const st = getWatchedFiles().get(file);
       if (!st || st.polling !== true) { console.error('NOT_POLLING'); process.exit(2); }
-      // watchFile interval=500ms；append 后等回调读到增量。
-      // 死线 25s:CI 慢机上 stat 轮询检测偶发数秒滞后(曾 9s 超窗 flake);绿路径命中即退,不耗时。
+      // watchFile interval=500ms。基线竞态:若 append 抢在 watchFile 首次 stat 基线之前,
+      // 基线已含增量 → 前后 stat 永远无差 → 回调永不触发(CI 上曾 25s 全程静默)。
+      // 修法:每 1.5s 周期性补 append 含同一 marker 的新条目,保证基线之后必有 stat 变更,
+      // 消灭时序赌博;绿路径首轮即中,不耗时。死线 25s 容忍慢机。
       appendFileSync(file, JSON.stringify({ timestamp: 'fp1', url: '/v1/messages' }) + '\\n---\\n');
       const t0 = Date.now();
+      let lastAppend = Date.now();
       const timer = setInterval(() => {
         if (data.some(d => d.includes('fp1'))) {
           console.log('POLL_OK');
           clearInterval(timer);
           unwatchAll();
           process.exit(0);
-        } else if (Date.now() - t0 > 25000) {
+        }
+        if (Date.now() - lastAppend > 1500) {
+          lastAppend = Date.now();
+          appendFileSync(file, JSON.stringify({ timestamp: 'fp1', url: '/v1/messages' }) + '\\n---\\n');
+        }
+        if (Date.now() - t0 > 25000) {
           console.error('POLL_TIMEOUT');
           clearInterval(timer);
           process.exit(3);
