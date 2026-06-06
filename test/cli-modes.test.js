@@ -385,13 +385,20 @@ describe('cli-modes: -logger npm 安装路径', { concurrency: false }, () => {
 });
 
 // ════════════════════ -logger：native 模式 hook 写失败分支 ════════════════════
-// 本机有 native claude（无 cli.js）→ 裸 -logger 走 native 分支。把 fakeHOME 的 .zshrc +
-// home 目录设只读 → installShellHook(true) 的 writeFileSync 抛 → catch 返回 {status:'error'}
-// → cli.js 报 hook.fail（904-905）。同时覆盖 installShellHook 的 try/catch（179-180）。
+// 自洽 fixture:在 fakeHOME 下种假 native claude(~/.claude/local/claude,findcc 首位
+// 候选)→ 裸 -logger 确定性走 native 分支,不依赖宿主真装 Claude Code(CI 裸机曾 exit 1)。
+// 把 fakeHOME 的 .zshrc + home 目录设只读 → installShellHook(true) 的 writeFileSync 抛
+// → catch 返回 {status:'error'} → cli.js 报 hook.fail(904-905)。同时覆盖 installShellHook
+// 的 try/catch(179-180)。注意:种桩必须在 chmod 0555 之前(只读后 home 下不能再建子目录)。
 
 describe('cli-modes: -logger native 模式 hook 写失败', { concurrency: false }, () => {
   it('只读 .zshrc → 写 hook 失败，报 hook fail 文案，整体 exit 0', () => {
     const home = mkTmp('ccv-g2-native-ro-');
+    // 种假 native claude(在 chmod 只读之前)
+    const localBin = join(home, '.claude', 'local');
+    mkdirSync(localBin, { recursive: true });
+    writeFileSync(join(localBin, 'claude'), '#!/bin/sh\necho "claude (fake-native) 2.0.0"\n');
+    chmodSync(join(localBin, 'claude'), 0o755);
     const zshrc = join(home, '.zshrc');
     writeFileSync(zshrc, '# ro zshrc\n');
     chmodSync(zshrc, 0o444);

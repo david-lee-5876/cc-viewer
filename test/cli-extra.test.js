@@ -316,15 +316,26 @@ describe('cli: --uninstall settings.json 清理块', () => {
 });
 
 // ════════════════════ -logger：native 模式安装/幂等/差异重装 ════════════════════
-// 本机 Claude Code 是 2.x native（无 cli.js）→ -logger 走 native 分支，只动 fakeHome 的 .zshrc。
-// 若某些环境 cli.js 存在（npm 模式），injectCliJs 会改真实 cli.js —— 这里只断言"退出 0 且
-// 输出非空"，不强求 native 字样，避免对环境过度耦合。
+// 自洽 fixture：在 fakeHome 下种假 native claude（~/.claude/local/claude，findcc
+// NATIVE_CANDIDATES 首位、existsSync 即认），-logger 必走 native 分支、只动 fakeHome 的
+// .zshrc —— 不再依赖宿主机真装 Claude Code（CI 裸机曾因此 exit 1）。
+
+/** 在假 home 下种 findcc 可发现的假 native claude，使 -logger 确定性走 native 分支。 */
+function seedNativeClaude(home) {
+  const localBin = join(home, '.claude', 'local');
+  mkdirSync(localBin, { recursive: true });
+  const bin = join(localBin, 'claude');
+  writeFileSync(bin, '#!/bin/sh\necho "claude (fake-native) 2.0.0"\n');
+  chmodSync(bin, 0o755);
+  return bin;
+}
 
 describe('cli: -logger（native 安装路径）', () => {
   const HOOK_MARK = 'CC-Viewer Auto-Inject';
 
   it('全新 .zshrc：安装 hook，退出 0', () => {
     const home = mkTmp('ccv-logger-fresh-');
+    seedNativeClaude(home);
     writeFileSync(join(home, '.zshrc'), '# my config\n');
     const r = runCli(['-logger'], { env: { HOME: home, SHELL: '/bin/zsh' } });
     assert.equal(r.exitCode, 0);
@@ -335,6 +346,7 @@ describe('cli: -logger（native 安装路径）', () => {
 
   it('重复 -logger（hook 已存在且一致）→ 幂等，字节稳定', () => {
     const home = mkTmp('ccv-logger-idem-');
+    seedNativeClaude(home);
     writeFileSync(join(home, '.zshrc'), '# cfg\n');
     const r1 = runCli(['-logger'], { env: { HOME: home, SHELL: '/bin/zsh' } });
     assert.equal(r1.exitCode, 0);
@@ -350,6 +362,7 @@ describe('cli: -logger（native 安装路径）', () => {
 
   it('已有一个内容不同的旧 hook → 移除旧的并重装，最终仍只有一个区块', () => {
     const home = mkTmp('ccv-logger-differ-');
+    seedNativeClaude(home);
     const stale = [
       '# user before',
       '',
