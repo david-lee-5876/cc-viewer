@@ -13,6 +13,15 @@
 - feat(workflow): 右下角悬浮 HUD（WorkflowLiveHud）——运行中的工作流常驻视口右下角实时展示（绿点脉冲 + 完成/总数 + token + 运行中 agent 行），不被聊天滚动挤走；完成后自动消失，内联卡片继续作历史记录。数据来自 workflowStore 新增的「活跃工作流」集合（subscribeActive/getActiveWorkflows，按 canonical runId 去重、终态自动移出），由 AppBase 的 SSE 持续喂养，与内联面板是否挂载无关。共享格式化抽到 src/utils/workflowFormat.js（WorkflowPanel 与 HUD 共用）
 - test: 新增 server 单测覆盖 lookupToolUseResult / enrich-workflow / workflow-journal / workflow-watcher / workflow-live（逐帧推导 + 逐帧 watcher 广播）
 
+## 1.6.303 (2026-06-07)
+
+- fix(win): 启动报 "Cannot create process, error code: 193" 修复——`where claude` 首行常是 npm 无扩展名 sh shim/.cmd（非 PE），win32 改为只接受 .exe 行；原生安装器路径候选补查 .exe 变体（~/.local/bin/claude.exe 等）
+- fix(render): 终端渲染器按平台分流——PC 从 WebGL 切回 xterm 内置 DOM 渲染器（更稳定），仅 Android 保留 WebGL；PC/iPad scrollback 3000→2000
+- fix(ui): 套餐用量悬浮详情血条暗色下填充对比度过低——填充改 --text-secondary × 0.35
+- fix(files): HTML 预览(coverage 等静态报告)样式不加载渲染成裸 HTML——file-raw 补 css/js/json/字体 MIME 映射(CSP sandbox 跨源下 octet-stream 样式表被浏览器严格 MIME 校验拒用)
+- fix(win): /plugins 菜单卡死——直通态 ws 消息风暴限流（leading-edge 立即发 + 16ms 微合并 trailing，上限 ≈125 msg/s，CCV_FLOOD_PT_COALESCE_MS 可调）+ resync 重绘 nudge 冷却门（server/lib/resync-nudge-gate.js，防 behind→resume 死循环，CCV_RESYNC_NUDGE_COOLDOWN_MS 可调）+ 直通消息率/resync 计数日志
+- fix(render): DOM 渲染器适配调优——写队列 trim 提示补 \x1b[?2026l 防 DEC 2026 配对撕裂渲染停顿；mac/iOS 字体栈补 PingFang SC 确定性承接 CJK；定时刷新分流（Android 60s L2 / PC·iPad 120s 仅全行重绘，去掉定时 fit+resize 的滚动跳动）；清理遗留 WebGL sticky key
+
 ## 1.6.302 (2026-06-07)
 
 - fix(win): PTY→WS 洪泛限流器（server/lib/pty-flood-coalescer.js）——字节率超阈值合并 + last-wins 截断（速率上限 ≈1.9MB/s，DEC 2026 配平，CCV_FLOOD_* 可调参），根治切主题/大流量场景 ConPTY 重绘洪泛卡死客户端

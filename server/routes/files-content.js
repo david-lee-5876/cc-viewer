@@ -7,6 +7,21 @@ import { discoverClaudeMdCandidates, readCandidateById } from '../lib/claude-md-
 import { getClaudeConfigDir } from '../../findcc.js';
 import { _projectName } from '../interceptor.js';
 
+// file-raw 扩展名 → MIME 映射。图片走 <img> 预览;html 走 iframe 预览(带下方 CSP sandbox);
+// 其余为 HTML 预览的同目录子资源(c8/nyc/lcov-genhtml 等静态报告):CSP sandbox 使文档
+// 处于 opaque origin,对一切子资源都是跨源——跨源样式表受浏览器严格 MIME 校验,
+// octet-stream 的 CSS 会被直接拒用(报告渲染成裸 HTML)。js 虽为 classic script 不受
+// MIME 门禁,配正确类型属卫生项 + 为未来 nosniff 铺路。
+// 注意:值不带 charset 后缀——fileRaw 内 CSP 判等依赖 mime === 'text/html'。
+const FILE_RAW_MIME = {
+  '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif', '.svg': 'image/svg+xml', '.ico': 'image/x-icon',
+  '.webp': 'image/webp', '.html': 'text/html', '.htm': 'text/html',
+  '.css': 'text/css', '.js': 'text/javascript', '.mjs': 'text/javascript',
+  '.json': 'application/json', '.map': 'application/json', '.txt': 'text/plain',
+  '.woff': 'font/woff', '.woff2': 'font/woff2', '.ttf': 'font/ttf',
+};
+
 function planFile(req, res, parsedUrl) {
   try {
     const raw = parsedUrl.searchParams.get('path') || '';
@@ -290,13 +305,8 @@ function fileRaw(req, res, parsedUrl) {
       res.end(JSON.stringify({ error: 'File too large' }));
       return;
     }
-    const extMime = {
-      '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
-      '.gif': 'image/gif', '.svg': 'image/svg+xml', '.ico': 'image/x-icon',
-      '.webp': 'image/webp', '.html': 'text/html', '.htm': 'text/html',
-    };
     const ext = (targetFile.match(/\.[^.]+$/) || [''])[0].toLowerCase();
-    const mime = extMime[ext] || 'application/octet-stream';
+    const mime = FILE_RAW_MIME[ext] || 'application/octet-stream';
     const data = method === 'HEAD' ? null : readFileSync(targetFile);
     const size = method === 'HEAD' ? stat.size : data.length;
     const headers = { 'Content-Type': mime, 'Content-Length': size };

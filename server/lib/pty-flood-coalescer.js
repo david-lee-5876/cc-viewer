@@ -7,9 +7,14 @@
  * （bufferedAmount > 1MB）介入，快 LAN 上洪泛字节全量到达前端，xterm 逐帧解析渲染
  * 稠密 SGR+CJK 重绘把主线程打满。本器在发送侧限流：
  *
- *   - 直通态：chunk 立即 send（零延迟，不起 timer）。字节率按固定 flushMs 桶统计，
- *     当前桶累计超 floodThresholdBytesPerWin → 进入限流态。打字回显 / 正常 token
- *     流远低于阈值（≈256KB/s），不受影响。
+ *   - 直通态：leading-edge 微合并——空窗期首 chunk 立即 send（回显零延迟）并开
+ *     ptCoalesceMs（默认 16ms）窗，同窗后续 chunk 并入 ptBuffer、到点合为一条 send
+ *     （上限 2 条/窗 = 1000ms÷16ms×2 ≈125 msg/s）。低于洪泛阈值的持续小 chunk 流（/plugins 菜单导航
+ *     等 ConPTY 重绘）每 chunk 单发会打出数百条 ws 消息/秒，客户端逐条 MessageEvent
+ *     分发 + JSON.parse + xterm 主线程解析，**消息数风暴**即可锁死页面——字节率
+ *     限流（下方限流态）封不住这个维度。字节率仍按固定 flushMs 桶统计，
+ *     当前桶累计超 floodThresholdBytesPerWin → 进入限流态（ptBuffer 按序折入 pending）。
+ *     打字回显 / 正常 token 流是稀疏 chunk，每条都走 leading 立即发，不受影响。
  *   - 限流态：chunk 剥掉自带的 DEC 2026 标记后追加进 pending（pending 内部因此
  *     **绝无 2026 标记**，截断永不切坏配对）；每 flushMs 把 pending 用单对
  *     SYNC_BEGIN/END 重新包裹成**一条** send 发出并清空（无论下游是否跳发，
@@ -37,10 +42,23 @@ const SYNC_END = '\x1b[?2026l';
 const SYNC_MARKS_RE = /\x1b\[\?2026[hl]/g;
 
 // 默认常量可经 CCV_FLOOD_* 环境变量覆盖（仿 CCV_FORCE_POLL 先例），便于 Windows
-// 实机排障时调参而不改源码。非法/非正整数值回落默认。
-function envInt(name, fallback) {
-  const v = parseInt(process.env[name], 10);
-  return Number.isFinite(v) && v > 0 ? v : fallback;
+// 实机排障时调参而不改源码。严格十进制白名单：parseInt 遇非数字字符即截停——
+// '1e9' 解析成 1、'0x10' 解析成 0，静默生效远比回落默认值危险，非纯数字一律回落。
+// 位数上限 15（< Number.MAX_SAFE_INTEGER）：超长数字串 parseInt 溢出为 Infinity 会
+// 穿透 v>0 判断，setTimeout(fn, Infinity) 被 Node 钳到 1ms——33ms 桶宽静默变 1ms。
+// 导出供 server.js 等复用（knob 解析逻辑收敛在此，不再各处内联）。
+export function envInt(name, fallback) {
+  const s = (process.env[name] ?? '').trim();
+  if (!/^\d{1,15}$/.test(s)) return fallback;
+  const v = parseInt(s, 10);
+  return v > 0 ? v : fallback;
+}
+
+// 同 envInt 但接受 0（0 = 关闭该功能的逃生口，envInt 的 v>0 会把 0 误回落默认值）。
+export function envIntAllowZero(name, fallback) {
+  const s = (process.env[name] ?? '').trim();
+  if (!/^\d{1,15}$/.test(s)) return fallback;
+  return parseInt(s, 10);
 }
 
 const DEFAULT_FLUSH_MS = envInt('CCV_FLOOD_FLUSH_MS', 33);                       // 限流态合并窗口 = 字节率统计桶宽
@@ -50,6 +68,12 @@ const DEFAULT_PENDING_CAP = envInt('CCV_FLOOD_PENDING_CAP', 256 * 1024);        
 const DEFAULT_TRIM_TO = envInt('CCV_FLOOD_TRIM_TO', 128 * 1024);                 // pendingCap 截断后保留的尾部量
 // 单次 flush 发送预算 = 真速率上限：64KB / 33ms ≈ 1.9MB/s，与前端 32KB/帧消化速率同量级
 const DEFAULT_FLUSH_BUDGET = envInt('CCV_FLOOD_FLUSH_BUDGET', 64 * 1024);
+// 直通态微合并窗口：低于洪泛阈值的持续小 chunk 流（如 /plugins 菜单导航的 ConPTY 重绘）
+// 每 chunk 单发会打出每秒数百条 ws 消息——客户端每条都付 MessageEvent 分发 + JSON.parse +
+// xterm 主线程同步解析，**消息数风暴**（非字节率）即可锁死页面（xterm.js#3368）。
+// leading-edge 立即发（回显零延迟）+ 同窗后续合并 trailing 一条
+// → 上限 2 条/窗 ≈125 msg/s（1000ms ÷ 16ms × 2 条）。0 = 禁用。
+const DEFAULT_PT_COALESCE_MS = envIntAllowZero('CCV_FLOOD_PT_COALESCE_MS', 16);
 
 /**
  * @param {object} opts
@@ -63,6 +87,7 @@ const DEFAULT_FLUSH_BUDGET = envInt('CCV_FLOOD_FLUSH_BUDGET', 64 * 1024);
  * @param {number} [opts.pendingCap]
  * @param {number} [opts.trimTo]
  * @param {number} [opts.flushBudgetBytes]
+ * @param {number} [opts.ptCoalesceMs] - 直通态微合并窗口（0 = 禁用，每 chunk 单发）
  * @param {(fn: Function, ms: number) => any} [opts.setTimer] - 测试注入
  * @param {(t: any) => void} [opts.clearTimer] - 测试注入
  * @returns {{ offer: (chunk: string) => void, reset: () => void, dispose: () => void, isFlooding: () => boolean }}
@@ -78,6 +103,7 @@ export function createFloodCoalescer({
   pendingCap = DEFAULT_PENDING_CAP,
   trimTo = DEFAULT_TRIM_TO,
   flushBudgetBytes = DEFAULT_FLUSH_BUDGET,
+  ptCoalesceMs = DEFAULT_PT_COALESCE_MS,
   setTimer = setTimeout,
   clearTimer = clearTimeout,
 }) {
@@ -86,6 +112,8 @@ export function createFloodCoalescer({
   let winBytes = 0;       // 当前桶累计字节（直通态由 offer 累计，限流态由 flush 结算）
   let calmWins = 0;       // 连续低于阈值的桶数
   let flushTimer = null;  // 限流态周期 flush；直通态下亦作为桶边界 timer（见 offer）
+  let ptBuffer = '';      // 直通态微合并缓冲（窗口开启期间到达的后续 chunk）
+  let ptTimer = null;     // 直通态微合并窗口 timer（16ms），与 flushTimer（33ms 字节桶）并存、职责正交
   let disposed = false;
 
   const stopTimer = () => {
@@ -93,6 +121,24 @@ export function createFloodCoalescer({
       clearTimer(flushTimer);
       flushTimer = null;
     }
+  };
+
+  const stopPtTimer = () => {
+    if (ptTimer) {
+      clearTimer(ptTimer);
+      ptTimer = null;
+    }
+  };
+
+  // 微合并窗口到点：缓冲非空则一条发出，窗口关闭（不自动续约——下一 chunk 重新 leading 立即发）。
+  // ptBuffer 不剥 SYNC 标记：terminal 路径每 chunk 经 pty-manager flushBatch 已自配平（拼接守恒），
+  // scratch 路径 chunk 本就无标记（拼接平凡守恒）；只有洪泛路径（有截断）才需要剥。
+  const onPtFlush = () => {
+    ptTimer = null;
+    if (disposed || flooding || !ptBuffer) return;
+    const out = ptBuffer;
+    ptBuffer = '';
+    try { send(out); } catch { }
   };
 
   // 直通态的桶边界：到点清零计数。无流量时 timer 不存在，零常驻开销。
@@ -143,21 +189,35 @@ export function createFloodCoalescer({
     /** 每条 PTY chunk 调用。直通态立即 send；限流态进 pending 等周期 flush。 */
     offer(chunk) {
       if (disposed || !chunk) return;
-      winBytes += chunk.length;
+      winBytes += chunk.length;   // 缓冲与直发都全量计账：微合并不致盲洪泛判定
       if (!flooding) {
         if (winBytes > floodThresholdBytesPerWin) {
-          // 进入限流态：当前 chunk 是压垮桶的那条，一并纳入 pending（含它之前
-          // 本桶已直通的部分不回收——它们已发出，量级在阈值内）。
+          // 进入限流态：当前 chunk 是压垮桶的那条，连同微合并缓冲中未发的旧 chunk
+          // 按序一并纳入 pending（已 leading 发出的部分不回收——量级在阈值内）。
+          // 注意 stopTimer 只清 flushTimer，ptTimer 须显式清，否则残留窗口会在洪泛
+          // 期间触发 onPtFlush（虽有 flooding 守卫兜底，仍以显式清为准）。
           flooding = true;
           calmWins = 0;
           stopTimer();
-          pending = chunk.replace(SYNC_MARKS_RE, '');
+          stopPtTimer();
+          pending = (ptBuffer + chunk).replace(SYNC_MARKS_RE, '');
+          ptBuffer = '';
           flushTimer = setTimer(onFloodTick, flushMs);
           flushTimer.unref?.();
           try { onFloodStart?.(winBytes); } catch { }
           return;
         }
         armPassthroughWindow();
+        if (ptCoalesceMs > 0) {
+          // 微合并：窗口开启（ptTimer 在跑）→ 追加缓冲不发；窗口关闭 → leading 立即发
+          // （单次回显零延迟）并开窗。上限 2 条/窗（leading + trailing flush）。
+          if (ptTimer) {
+            ptBuffer += chunk;
+            return;
+          }
+          ptTimer = setTimer(onPtFlush, ptCoalesceMs);
+          ptTimer.unref?.();
+        }
         try { send(chunk); } catch { }
         return;
       }
@@ -170,10 +230,12 @@ export function createFloodCoalescer({
         pending = pending.slice(safeStart);
       }
     },
-    /** bpGate onBehind/onResume 时调用：resync 快照是唯一真相源，清掉旧 pending 防回灌。 */
+    /** bpGate onBehind/onResume 时调用：resync 快照是唯一真相源，清掉旧 pending/ptBuffer 防回灌。 */
     reset() {
       stopTimer();
+      stopPtTimer();
       pending = '';
+      ptBuffer = '';
       winBytes = 0;
       calmWins = 0;
       flooding = false;
@@ -185,7 +247,9 @@ export function createFloodCoalescer({
     dispose() {
       disposed = true;
       stopTimer();
+      stopPtTimer();
       pending = '';
+      ptBuffer = '';
     },
   };
 }

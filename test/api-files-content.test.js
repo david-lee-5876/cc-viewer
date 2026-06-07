@@ -449,6 +449,29 @@ describe('GET|HEAD /api/file-raw', { concurrency: false }, () => {
     assert.equal(r.headers['Content-Type'], 'application/octet-stream');
   });
 
+  it('css/js → 正确 MIME 且无 CSP 头（HTML 预览同目录子资源：opaque origin 下 octet-stream 的 CSS 被浏览器严格 MIME 校验拒用）', () => {
+    const cases = [
+      ['report.css', 'body{color:red}', 'text/css'],
+      ['sorter.js', 'void 0;', 'text/javascript'],
+      ['mod.mjs', 'export {};', 'text/javascript'],
+      ['data.json', '{}', 'application/json'],
+      ['bundle.js.map', '{"version":3}', 'application/json'],
+      ['readme.txt', 'plain', 'text/plain'],
+      ['f.woff', 'wOFF', 'font/woff'],
+      ['f.woff2', 'wOF2', 'font/woff2'],
+      ['f.ttf', 'ttf0', 'font/ttf'],
+    ];
+    for (const [name, content, mime] of cases) {
+      const p = join(PROJECT, name);
+      writeFileSync(p, content);
+      const r = callGet(fileRaw, '/api/file-raw', 'path=' + encodeURIComponent(p));
+      assert.equal(r.status, 200, `${name} should be 200`);
+      assert.equal(r.headers['Content-Type'], mime, `${name} mime`);
+      assert.equal(r.headers['Content-Security-Policy'], undefined,
+        `${name}: CSP 仅对 text/html 文档下发，非文档资源不带`);
+    }
+  });
+
   it('HTML → 带 CSP sandbox header', () => {
     const p = join(PROJECT, 'page.html');
     writeFileSync(p, '<h1>hi</h1>');

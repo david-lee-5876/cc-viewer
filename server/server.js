@@ -83,7 +83,8 @@ import { backupConfigs } from './lib/config-backup.js';
 import { normalizeBasePath, validateBasePath, stripBasePath } from './lib/base-path.js';
 import { createHardenedCleanup } from './lib/term-signals.js';
 import { createBackpressureGate } from './lib/ws-backpressure.js';
-import { createFloodCoalescer } from './lib/pty-flood-coalescer.js';
+import { createFloodCoalescer, envIntAllowZero } from './lib/pty-flood-coalescer.js';
+import { createResyncNudgeGate } from './lib/resync-nudge-gate.js';
 
 
 // 动态获取 getPrefsFile()（LOG_DIR 可能在运行时被 setLogDir 修改）
@@ -1124,20 +1125,30 @@ async function setupTerminalWebSocket(httpServer) {
 
     // 反压状态转换日志（observability：线上排"页面卡"时可直接判断是否触发过反压、几次、积压量）。
     // behind/resume 在持续洪泛下以亚秒级周期振荡，5s 节流防刷屏；timeout 是终态必记。
+    // resyncTotal/nudgeSkipped 判别 resync 循环：resync 涨 + skipped 同涨 = nudge 冷却在救；
+    // resync 涨 + skipped≈0 = resume 间隔超过冷却期的慢振荡，需更激进策略（如洪泛期禁 nudge）。
     const makeBpLogger = (label, ws) => {
       let behindCount = 0;
+      let resyncCount = 0;
+      let nudgeSkipped = 0;
       let lastLogAt = 0;
       return (event, buffered) => {
         if (event === 'behind') behindCount++;
+        if (event === 'resume') resyncCount++;
+        if (event === 'nudge-skip') { nudgeSkipped++; return; }   // 只计数，随下一条节流日志带出
         const now = Date.now();
         if (event !== 'timeout' && now - lastLogAt < 5000) return;
         lastLogAt = now;
-        console.warn(`[${label}] ws backpressure ${event}: client=${ws._socket?.remoteAddress || '?'} bufferedAmount=${buffered} behindTotal=${behindCount}`);
+        console.warn(`[${label}] ws backpressure ${event}: client=${ws._socket?.remoteAddress || '?'} bufferedAmount=${buffered} behindTotal=${behindCount} resyncTotal=${resyncCount} nudgeSkipped=${nudgeSkipped}`);
       };
     };
 
+    // resync nudge 冷却（CCV_RESYNC_NUDGE_COOLDOWN_MS，0 = 不冷却；详见 lib/resync-nudge-gate.js）
+    const RESYNC_NUDGE_COOLDOWN_MS = envIntAllowZero('CCV_RESYNC_NUDGE_COOLDOWN_MS', 3000);
+
     // 洪泛限流器状态日志（与 makeBpLogger 同款 5s 节流，独立实例不共享计数）。
     // Windows 实机排"切主题/大流量卡死"时据此确认 ConPTY 洪泛是否触发、几次、量级。
+    // 'rate' 事件 = 直通态 ws 消息率告警（msgsPerSec，计数在 send 闭包），判别消息数风暴。
     const makeFloodLogger = (label, ws) => {
       let floodCount = 0;
       let lastLogAt = 0;
@@ -1146,7 +1157,23 @@ async function setupTerminalWebSocket(httpServer) {
         const now = Date.now();
         if (now - lastLogAt < 5000) return;
         lastLogAt = now;
-        console.warn(`[${label}] pty flood ${event}: client=${ws._socket?.remoteAddress || '?'} winBytes=${bytes} floodTotal=${floodCount}`);
+        const metric = event === 'rate' ? 'msgsPerSec' : 'winBytes';
+        console.warn(`[${label}] pty flood ${event}: client=${ws._socket?.remoteAddress || '?'} ${metric}=${bytes} floodTotal=${floodCount}`);
+      };
+    };
+
+    // 直通态消息率计数器工厂：1s 整数桶，桶滚动时超过阈值经 floodLog('rate') 告警（5s 节流兜底）。
+    const makeMsgRateCounter = (floodLog, warnAbove = 60) => {
+      let count = 0;
+      let winStart = 0;
+      return () => {
+        const now = Date.now();
+        if (now - winStart >= 1000) {
+          if (count > warnAbove) floodLog('rate', count);
+          count = 0;
+          winStart = now;
+        }
+        count++;
       };
     };
 
@@ -1199,10 +1226,12 @@ async function setupTerminalWebSocket(httpServer) {
       // 洪泛限流器：字节率超阈值时按窗口合并 + last-wins 截断（ConPTY 全屏重绘洪泛防卡死，
       // 与 bpGate 互补——bpGate 管慢网络写缓冲，floodGate 管快 LAN 字节率，详见 lib/pty-flood-coalescer.js）
       const _floodLog = makeFloodLogger('scratch-ws', ws);
+      const _countMsg = makeMsgRateCounter(_floodLog);
       floodGate = createFloodCoalescer({
         send: (data) => {
           if (ws.readyState === 1 && bpGate.offer()) {
             try { ws.send(JSON.stringify({ type: 'data', data })); } catch {}
+            _countMsg();
           }
         },
         findSafeSliceStart,
@@ -1296,6 +1325,10 @@ async function setupTerminalWebSocket(httpServer) {
       // floodGate 前向引用（构造顺序同 scratch 路径）：onBehind/onResume 必清 coalescer
       // pending——resync 快照是唯一真相源，旧 pending 回灌会导致画面回退。
       let floodGate = null;
+      // nudge 冷却门：快照每次 resume 无条件发（修复 behind 期间跳发的数据），但重绘 nudge
+      // 走冷却——nudge 让 ConPTY 再吐全屏重绘 = 新洪泛燃料，紧 behind→resume 循环里反复
+      // nudge 会自我维持（客户端每轮 reset+重放快照 = 永久冻结表象）。详见 lib/resync-nudge-gate.js。
+      const nudgeGate = createResyncNudgeGate({ cooldownMs: RESYNC_NUDGE_COOLDOWN_MS });
       const bpGate = createBackpressureGate({
         getBufferedAmount: () => ws.bufferedAmount,
         onBehind: (buffered) => {
@@ -1307,6 +1340,7 @@ async function setupTerminalWebSocket(httpServer) {
           floodGate?.reset();
           if (ws.readyState !== 1) return;
           try { ws.send(JSON.stringify({ type: 'data-resync', data: getOutputBuffer() })); } catch {}
+          if (!nudgeGate.shouldNudge()) { _bpLog('nudge-skip', buffered); return; }
           try {
             if (process.platform !== 'win32') {
               // POSIX：与下方 _needRedrawBootstrap 同款 SIGWINCH 兜底
@@ -1336,10 +1370,12 @@ async function setupTerminalWebSocket(httpServer) {
       // 洪泛限流器：字节率超阈值时按窗口合并 + last-wins 截断（ConPTY 全屏重绘洪泛防卡死，
       // 与 bpGate 互补——bpGate 管慢网络写缓冲，floodGate 管快 LAN 字节率，详见 lib/pty-flood-coalescer.js）
       const _floodLog = makeFloodLogger('terminal-ws', ws);
+      const _countMsg = makeMsgRateCounter(_floodLog);
       floodGate = createFloodCoalescer({
         send: (data) => {
           if (ws.readyState === 1 && bpGate.offer()) {
             try { ws.send(JSON.stringify({ type: 'data', data })); } catch {}
+            _countMsg();
           }
         },
         findSafeSliceStart,

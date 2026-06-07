@@ -301,6 +301,34 @@ describe('TerminalWriteQueue 积压自保（trim）', { concurrency: false }, ()
     assert.equal(noticeCount, 1);
   });
 
+  it('TRIM_NOTICE 形状:CAN 开头,?2026l 先于可见提示(防 DEC 2026 配对撕裂)', () => {
+    const n = TerminalWriteQueue.TRIM_NOTICE;
+    assert.ok(n.startsWith('\x18'), 'CAN first to abort half escape seq');
+    const idx2026 = n.indexOf('\x1b[?2026l');
+    assert.ok(idx2026 !== -1, 'notice must contain DEC 2026 exit sequence');
+    assert.ok(idx2026 < n.indexOf('output trimmed'), '?2026l must precede visible text');
+  });
+
+  it('配对撕裂:?2026h 已写出、含 ?2026l 的项被 trim 丢弃 → 交付流在后续内容前补 ?2026l(免 1s 超时停顿)', () => {
+    const mb = 1024 * 1024;
+    // h 项:首帧 32KB 已把 ?2026h 写给 xterm
+    q.push('\x1b[?2026h' + 'a'.repeat(mb));
+    flushOneFrame();
+    assert.ok(term.receivedString().includes('\x1b[?2026h'), 'precondition: h delivered');
+    // l 项随后被洪泛 trim 丢弃(丢旧保新):h/l 配对撕裂
+    q.push('b'.repeat(mb) + '\x1b[?2026l');
+    q.push('c'.repeat(mb));
+    q.push('d'.repeat(mb));
+    flushAllFrames(400);
+    const received = term.receivedString();
+    const hIdx = received.indexOf('\x1b[?2026h');
+    const lIdx = received.indexOf('\x1b[?2026l');
+    const tailIdx = received.indexOf('ddd');   // 'd'/'b' 单字符会误匹配 NOTICE 文本(trimmed/behind)
+    assert.ok(!received.includes('bbb'), 'item carrying the original ?2026l was dropped');
+    assert.ok(lIdx !== -1 && lIdx > hIdx, 'notice supplies a ?2026l after the orphan h');
+    assert.ok(tailIdx !== -1 && lIdx < tailIdx, '?2026l must arrive before post-trim content renders');
+  });
+
   it('1MB 单次 push 不触发 trim（防误伤 /resume 大流量）', () => {
     const big = 'x'.repeat(1024 * 1024);
     q.push(big);

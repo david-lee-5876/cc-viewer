@@ -30,7 +30,8 @@
  *   - 积压超 highWaterBytes（默认 2MB ≈ 1 秒待写量）时从 head「整项」丢弃回落到
  *     trimTargetBytes（默认 512KB），只动 head/offset 指针、绝不从项中间切 →
  *     不破坏 ANSI/surrogate 既有语义。丢弃后下一帧先写黄字提示（前缀 \x18 CAN
- *     中止可能被拦腰截断的半截转义序列），依赖洪泛流自带的全屏重绘自愈，
+ *     中止半截转义 + \x1b[?2026l 退出可能被撕裂配对的同步输出模式），依赖洪泛流
+ *     自带的全屏重绘自愈，
  *     不调 term.reset()（保 scrollback、避免 WebGL 重建抖动）。
  *   - 单次 /resume 1MB+ push 低于水位不会误触；仍不引入 callback/Promise
  *     （不踩 dispose 死锁坑）、每帧节奏不变（不踩 tab 切回暴吃 / /resume 跳顿坑）。
@@ -42,8 +43,10 @@ const GC_THRESHOLD_HEAD = 64;        // queue 头部消费指针超 64 项触发
 const GC_RATIO_NUM = 2;              // 已消费 / 剩余 > 2 也触发（防长尾占内存）
 const HIGH_WATER_BYTES = 2 * 1024 * 1024;  // 积压上限：超过即丢最旧整项
 const TRIM_TARGET_BYTES = 512 * 1024;      // 丢弃后回落的目标水位（留迟滞带防抖）
-// 丢弃提示：\x18 (CAN) 中止 xterm 解析器中可能残留的半截转义序列
-const TRIM_NOTICE = '\x18\r\n\x1b[33m[cc-viewer] output trimmed (renderer behind)\x1b[0m\r\n';
+// 丢弃提示：\x18 (CAN) 中止 xterm 解析器中可能残留的半截转义序列；随后 \x1b[?2026l
+// 幂等退出 DEC 2026 同步输出模式——直通态下 Claude Code 自发的 ?2026h/?2026l 可能分属
+// 不同队列项，trim 撕裂配对会让渲染停到 xterm 内置 1s 超时（静默尾部场景更久）才自愈。
+const TRIM_NOTICE = '\x18\x1b[?2026l\r\n\x1b[33m[cc-viewer] output trimmed (renderer behind)\x1b[0m\r\n';
 
 export class TerminalWriteQueue {
   /**

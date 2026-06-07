@@ -26,6 +26,12 @@ function makeFakeClock() {
       timers.clear();
       for (const [, t] of due) t.fn();
     },
+    /** 仅触发指定 ms 的 timer——直通态 ptTimer(16) 与桶边界 timer(33) 并存时选择性触发 */
+    fireByMs(ms) {
+      const due = [...timers.entries()].filter(([, t]) => t.ms === ms);
+      for (const [id] of due) timers.delete(id);
+      for (const [, t] of due) t.fn();
+    },
     count() { return timers.size; },
   };
 }
@@ -44,6 +50,7 @@ function makeHarness(opts = {}) {
     fallbackWins: 3,
     pendingCap: 400,
     trimTo: 200,
+    ptCoalesceMs: 0,   // 既有用例锁定"每 chunk 单发"旧语义；微合并用例显式覆盖为 16
     setTimer: clock.setTimer,
     clearTimer: clock.clearTimer,
     ...opts.overrides,
@@ -201,6 +208,198 @@ describe('pty-flood-coalescer', () => {
     h.c.offer(null);
     assert.deepEqual(h.sent, []);
     assert.equal(h.c.isFlooding(), false);
+  });
+
+  describe('直通态微合并（ptCoalesceMs，/plugins 消息风暴防卡死）', () => {
+    const PT = 16;
+    let m;
+    beforeEach(() => { m = makeHarness({ overrides: { ptCoalesceMs: PT } }); });
+
+    it('leading：空窗期首 chunk 立即发出并开窗（ptTimer 与桶边界 timer 并存）', () => {
+      m.c.offer('k');
+      assert.deepEqual(m.sent, ['k'], 'leading 零延迟');
+      assert.equal(m.clock.count(), 2, 'ptTimer(16) + 桶边界 timer(33) 两个 timer 并存');
+    });
+
+    it('trailing：同窗后续 chunk 合并为一条发出，不添 SYNC 标记', () => {
+      m.c.offer('a');                 // leading
+      m.c.offer('b');
+      m.c.offer('c');                 // 同窗缓冲
+      assert.deepEqual(m.sent, ['a'], '窗口开启期间不发');
+      m.clock.fireByMs(PT);           // 仅触发 ptTimer
+      assert.deepEqual(m.sent, ['a', 'bc'], 'trailing 合并为一条');
+      assert.ok(!m.sent[1].includes(SYNC_BEGIN), '直通合并不添加 SYNC 标记');
+    });
+
+    it('窗口重开：trailing flush 后下一 chunk 重新 leading 立即发', () => {
+      m.c.offer('a');
+      m.c.offer('b');
+      m.clock.fireByMs(PT);           // flush 'b'，窗口关闭
+      m.c.offer('c');                 // 新窗 leading
+      assert.deepEqual(m.sent, ['a', 'b', 'c']);
+    });
+
+    it('直通拼接 SYNC 配平守恒（chunk 预配平，合并后 begin 数 === end 数）', () => {
+      m.c.offer(SYNC_BEGIN + '1' + SYNC_END);   // leading
+      m.c.offer(SYNC_BEGIN + '2' + SYNC_END);
+      m.c.offer(SYNC_BEGIN + '3' + SYNC_END);
+      m.clock.fireByMs(PT);
+      const merged = m.sent[1];
+      assert.equal(merged, SYNC_BEGIN + '2' + SYNC_END + SYNC_BEGIN + '3' + SYNC_END,
+        'merge preserves per-chunk SYNC pairs verbatim');
+      assert.equal(merged.split(SYNC_BEGIN).length, merged.split(SYNC_END).length,
+        'begin/end balanced');
+    });
+
+    it('洪泛转换折叠非空 ptBuffer：序保持、标记剥净、单对 SYNC、leading 不召回', () => {
+      m.c.offer('a'.repeat(30));                            // leading 发出（winBytes=30）
+      m.c.offer(SYNC_BEGIN + 'b'.repeat(30) + SYNC_END);    // 缓冲（winBytes=76）
+      m.c.offer('c'.repeat(40));                            // winBytes=116 > 100 → 洪泛
+      assert.equal(m.c.isFlooding(), true);
+      assert.deepEqual(m.sent, ['a'.repeat(30)], 'leading 不召回，ptBuffer 未单独发出');
+      assert.equal(m.clock.count(), 1, 'ptTimer 已清，仅剩洪泛 flush timer');
+      m.clock.fireByMs(33);                                 // 洪泛 flush
+      assert.equal(m.sent.length, 2);
+      assert.equal(m.sent[1], SYNC_BEGIN + 'b'.repeat(30) + 'c'.repeat(40) + SYNC_END,
+        'ptBuffer 序在触发 chunk 之前，标记剥净后单对重包裹');
+    });
+
+    it('winBytes 计账不被合并致盲：缓冲中的 chunk 仍触发洪泛阈值', () => {
+      m.c.offer('a'.repeat(50));   // leading（winBytes=50）
+      m.c.offer('b'.repeat(40));   // 缓冲（winBytes=90）
+      m.c.offer('c'.repeat(20));   // winBytes=110 > 100 → 洪泛（即便只实际发出了一条）
+      assert.equal(m.c.isFlooding(), true);
+    });
+
+    it('reset 清 ptBuffer + 双 timer：缓冲 chunk 永不发出，reset 后恢复 leading', () => {
+      m.c.offer('a');              // leading
+      m.c.offer('b');              // 缓冲
+      m.c.reset();
+      assert.equal(m.clock.count(), 0, 'ptTimer 与桶边界 timer 均已清');
+      m.clock.tick();
+      assert.deepEqual(m.sent, ['a'], '缓冲的 b 永不发出（防 pre-snapshot 回灌）');
+      m.c.offer('c');
+      assert.deepEqual(m.sent, ['a', 'c'], 'reset 后正常 leading');
+    });
+
+    it('dispose 清 ptBuffer + ptTimer，终态不再发送', () => {
+      m.c.offer('a');
+      m.c.offer('b');
+      m.c.dispose();
+      assert.equal(m.clock.count(), 0);
+      m.clock.tick();
+      assert.deepEqual(m.sent, ['a']);
+    });
+
+    it('ptCoalesceMs=0 禁用：回旧行为每 chunk 单发', () => {
+      const z = makeHarness({ overrides: { ptCoalesceMs: 0 } });
+      z.c.offer('a');
+      z.c.offer('b');
+      assert.deepEqual(z.sent, ['a', 'b']);
+    });
+  });
+
+  it('CCV_FLOOD_PT_COALESCE_MS=0 经 env 禁用（envIntAllowZero 接受 0）', async () => {
+    process.env.CCV_FLOOD_PT_COALESCE_MS = '0';
+    try {
+      const { createFloodCoalescer: cfc } = await import('../server/lib/pty-flood-coalescer.js?ccv-pt-env-zero');
+      const clock = makeFakeClock();
+      const sent = [];
+      const c = cfc({
+        send: (d) => sent.push(d), findSafeSliceStart,
+        floodThresholdBytesPerWin: 1000,
+        setTimer: clock.setTimer, clearTimer: clock.clearTimer,
+      });
+      c.offer('a');
+      c.offer('b');
+      assert.deepEqual(sent, ['a', 'b'], 'env=0 关闭微合并，逐条直发');
+      c.dispose();
+    } finally {
+      delete process.env.CCV_FLOOD_PT_COALESCE_MS;
+    }
+  });
+
+  it('CCV_FLOOD_PT_COALESCE_MS 非法/负值回落默认 16（envIntAllowZero）', async () => {
+    process.env.CCV_FLOOD_PT_COALESCE_MS = '-5';
+    try {
+      const { createFloodCoalescer: cfc } = await import('../server/lib/pty-flood-coalescer.js?ccv-pt-env-neg');
+      const clock = makeFakeClock();
+      const sent = [];
+      const c = cfc({
+        send: (d) => sent.push(d), findSafeSliceStart,
+        floodThresholdBytesPerWin: 1000,
+        setTimer: clock.setTimer, clearTimer: clock.clearTimer,
+      });
+      c.offer('a');
+      c.offer('b');
+      assert.deepEqual(sent, ['a'], '回落默认 16ms，第二条进缓冲');
+      clock.fireByMs(16);
+      assert.deepEqual(sent, ['a', 'b']);
+      c.dispose();
+    } finally {
+      delete process.env.CCV_FLOOD_PT_COALESCE_MS;
+    }
+  });
+
+  it('envInt/envIntAllowZero 严格十进制白名单：科学计数法/十六进制回落默认（parseInt 截断陷阱）', async () => {
+    process.env.CCV_TEST_DEC = '42';
+    process.env.CCV_TEST_SCI = '1e9';    // parseInt → 1，须拒绝
+    process.env.CCV_TEST_HEX = '0x10';   // parseInt(,10) → 0，须拒绝
+    process.env.CCV_TEST_ZERO = '0';
+    try {
+      const { envInt, envIntAllowZero } = await import('../server/lib/pty-flood-coalescer.js?ccv-env-helpers');
+      assert.equal(envInt('CCV_TEST_DEC', 7), 42, '纯十进制通过');
+      assert.equal(envInt('CCV_TEST_SCI', 7), 7, "'1e9' 拒绝回落而非截断成 1");
+      assert.equal(envInt('CCV_TEST_HEX', 7), 7, "'0x10' 拒绝回落而非截断成 0");
+      assert.equal(envInt('CCV_TEST_ZERO', 7), 7, 'envInt 拒 0');
+      assert.equal(envIntAllowZero('CCV_TEST_ZERO', 7), 0, 'allowZero 接受 0');
+      assert.equal(envIntAllowZero('CCV_TEST_SCI', 7), 7, "allowZero 同样拒 '1e9'");
+      assert.equal(envIntAllowZero('CCV_TEST_HEX', 7), 7, "allowZero 同样拒 '0x10'（否则误关功能）");
+      assert.equal(envIntAllowZero('CCV_TEST_MISSING', 7), 7, '缺失回落');
+    } finally {
+      delete process.env.CCV_TEST_DEC;
+      delete process.env.CCV_TEST_SCI;
+      delete process.env.CCV_TEST_HEX;
+      delete process.env.CCV_TEST_ZERO;
+    }
+  });
+
+  it('超长数字串拒绝回落（parseInt 溢出 Infinity 会穿透 v>0，钳坏 setTimeout）', async () => {
+    process.env.CCV_TEST_HUGE = '9'.repeat(400);   // parseInt → Infinity
+    process.env.CCV_TEST_16D = '9'.repeat(16);     // 16 位 > 15 位上限，同拒
+    process.env.CCV_TEST_15D = '9'.repeat(15);     // 15 位边界，应通过
+    try {
+      const { envInt, envIntAllowZero } = await import('../server/lib/pty-flood-coalescer.js?ccv-env-huge');
+      assert.equal(envInt('CCV_TEST_HUGE', 7), 7, '400 位拒绝（否则返回 Infinity）');
+      assert.equal(envIntAllowZero('CCV_TEST_HUGE', 7), 7, 'allowZero 同拒');
+      assert.equal(envInt('CCV_TEST_16D', 7), 7, '16 位超上限拒绝');
+      assert.equal(envInt('CCV_TEST_15D', 7), 999999999999999, '15 位边界通过');
+    } finally {
+      delete process.env.CCV_TEST_HUGE;
+      delete process.env.CCV_TEST_16D;
+      delete process.env.CCV_TEST_15D;
+    }
+  });
+
+  it('knob 级防截断：CCV_FLOOD_FLUSH_MS=1e9 / CCV_FLOOD_PT_COALESCE_MS=0x10 均回落默认', async () => {
+    process.env.CCV_FLOOD_FLUSH_MS = '1e9';        // 若被截成 1ms 桶宽，洪泛判定频度爆炸
+    process.env.CCV_FLOOD_PT_COALESCE_MS = '0x10'; // 若被截成 0，微合并被误关
+    try {
+      const { createFloodCoalescer: cfc } = await import('../server/lib/pty-flood-coalescer.js?ccv-env-strict');
+      const timerMs = [];
+      const c = cfc({
+        send: () => {}, findSafeSliceStart,
+        setTimer: (fn, ms) => { timerMs.push(ms); return 0; },
+        clearTimer: () => {},
+      });
+      c.offer('x');   // 直通 leading：桶边界 timer(默认 33) + ptTimer(默认 16) 均应按默认值排程
+      assert.deepEqual(timerMs.sort((a, b) => a - b), [16, 33],
+        'both knobs rejected, defaults 33/16 in effect');
+      c.dispose();
+    } finally {
+      delete process.env.CCV_FLOOD_FLUSH_MS;
+      delete process.env.CCV_FLOOD_PT_COALESCE_MS;
+    }
   });
 
   it('CCV_FLOOD_* 环境变量覆盖默认常量（非法值回落默认）', async () => {

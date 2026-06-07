@@ -16,6 +16,8 @@ export const isPad = _forcePad || _savedMode === 'pad' || _autoNarrow;
 export const isMobile = _forcePad || _forceMobile || _savedMode === 'pad' || _autoNarrow
   || (_savedMode !== 'pc' && (/Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) || _isIPadOS));
 export const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent) || _isIPadOS;
+// Android——目前仅用于终端渲染器选择:Android 上 WebGL 更流畅,PC/iOS 上 DOM 渲染器更稳定。
+export const isAndroid = /Android/i.test(navigator.userAgent);
 // Electron preload 在页面加载前注入 window.electronAPI，模块初始化时计算即可。
 export const isElectron = typeof window !== 'undefined' && !!window.electronAPI;
 

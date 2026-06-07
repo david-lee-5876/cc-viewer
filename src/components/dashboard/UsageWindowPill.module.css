@@ -8,8 +8,8 @@
   justify-content: flex-start;
   border-radius: 999px;
   border: 1px solid;
-  /* 文字 / 边框 / 填充条都取 footer 右侧文字同色(--text-disabled),低调不抢眼,
-     不再按阈值红/黄/绿配色。 */
+  /* 文字 / 边框取 footer 右侧文字同色(--text-disabled),低调不抢眼,
+     不再按阈值红/黄/绿配色;填充条见 .usageFill(为对比度取更亮的 --text-secondary)。 */
   border-color: var(--text-disabled);
   color: var(--text-disabled);
   padding: 0 7px;
@@ -28,8 +28,10 @@
   top: 0;
   bottom: 0;
   width: var(--usage-percent, 0);
-  background-color: var(--text-disabled);
-  opacity: 0.25;
+  /* 暗色下 --text-disabled×0.25 几乎不可见,改亮色填充保对比度;
+     比 popover 血条(0.35)更淡——pill 文字是暗灰(--text-disabled),填充太亮会压字 */
+  background-color: var(--text-secondary);
+  opacity: 0.22;
   transition: width 0.5s ease;
   pointer-events: none;
 }
@@ -94,7 +96,9 @@
   white-space: nowrap;
 }
 
-/* 100px 血条:沿用 footer pill 的低调灰(边框/填充取 --text-disabled)，数字叠在条上。 */
+/* 100px 血条:边框沿用 footer pill 的低调灰(--text-disabled),数字叠在条上。
+   填充用更亮的 --text-secondary——popover 是详情视图,需要一眼读出进度;
+   暗色下 --text-disabled(#555)×0.25 叠近黑背景几乎不可见。 */
 .bar {
   position: relative;
   display: inline-flex;
@@ -114,8 +118,8 @@
   left: 0;
   top: 0;
   bottom: 0;
-  background-color: var(--text-disabled);
-  opacity: 0.25;
+  background-color: var(--text-secondary);
+  opacity: 0.35;
   pointer-events: none;
 }
 
