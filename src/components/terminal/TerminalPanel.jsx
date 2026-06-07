@@ -15,7 +15,7 @@ import { t } from '../../i18n';
 import { tc, getClaudeConfigDir } from '../../utils/tClaude';
 import { TerminalWsContext } from './TerminalWsContext';
 import { apiUrl } from '../../utils/apiUrl';
-import { isMobile, isIOS, isAndroid, isPad, isWindows } from '../../env';
+import { isMobile, isIOS, isAndroid, isPad, isWindows, isMac } from '../../env';
 import styles from './TerminalPanel.module.css';
 import { BUILTIN_PRESETS } from '../../utils/builtinPresets.js';
 import { buildLocalUltraplan } from '../../utils/ultraplanTemplates';
@@ -42,6 +42,15 @@ const WEBGL_STALL_WINDOW_MS = 30000; // 滑动窗口 (ms)
 const WEBGL_GRACE_MS = 5000;         // 初始化宽限期 (ms)
 const WEBGL_STICKY_KEY = 'ccv_webgl_disabled_until';
 const WEBGL_STICKY_TTL_MS = 7 * 24 * 3600 * 1000; // 7 天后自动重试
+
+// 渲染器平台策略:Android(移动端 DOM 卡顿明显)无条件 WebGL;macOS 桌面在 longtask 守卫
+// 可用时启用 WebGL(能力门:Safari 无 'longtask' PerformanceObserver,守卫失效则不冒险,
+// 留 DOM;Chrome/Edge/Electron 带完整降级安全网)。Windows/Linux 维持 DOM(GPU 长任务/
+// 花屏实测多发)。isIOS 排除 iPadOS(iPad 桌面 UA 的 navigator.platform 是 MacIntel,
+// 会误命中 isMac)。
+const WEBGL_RENDERER = isAndroid || (isMac && !isIOS
+  && typeof PerformanceObserver !== 'undefined'
+  && !!PerformanceObserver.supportedEntryTypes?.includes('longtask'));
 
 // UltraPlan popover 拖拽尺寸持久化:与 UltraPlanModal 共享语义但 key 分开,因为
 // popover 几何/位置约束不同(浮锚 trigger 按钮、最大约 70vh,modal 居中可到 90vh)。
@@ -485,10 +494,11 @@ class TerminalPanel extends React.Component {
     // - Android(WebGL):纹理脏真实存在,保留 60s L2(clearTextureAtlas + refresh + fit;
     //   phone 上 canFit=false 自动退化为 atlas+refresh,轻量)。L3(dispose+reload
     //   WebglAddon)留给用户手动判定"画面真的坏了"时升级,避免长期 GPU 抖动。
-    // - PC/iPad(DOM 渲染器):无纹理概念,但全行 refresh 仍是残影/脏行的被动自愈手段;
-    //   去掉 fit/sendResize(定时 fit 重算 scrollTop 是滚动跳动来源,且每分钟一次
-    //   PTY resize 徒增抖动),间隔放宽到 120s。iPhone 维持无定时器(内存/电量预算)。
-    // tab 隐藏时跳过(无渲染需求)。
+    // - mac(WebGL)/Windows·Linux·iPad(DOM):120s 轻量分支——atlas 清理(mac WebGL 防
+    //   sleep-wake/GPU 切换的纹理脏累积,DOM 渲染器下为 no-op)+ 全行 refresh 被动自愈;
+    //   不走 _executeRefresh(其尾部 sendResize 会复活每分钟 PTY resize 抖动),也不并入
+    //   60s L2(定时 fit 重算 scrollTop 是 PC 滚动跳动来源)。iPhone 维持无定时器(内存/
+    //   电量预算)。tab 隐藏时跳过(无渲染需求)。
     if (isAndroid) {
       this._autoRefreshInterval = setInterval(() => {
         if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
@@ -497,7 +507,9 @@ class TerminalPanel extends React.Component {
     } else if (!isMobile || isPad) {
       this._autoRefreshInterval = setInterval(() => {
         if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
-        if (this.terminal) this.terminal.refresh(0, this.terminal.rows - 1);
+        if (!this.terminal) return;
+        try { this.terminal.clearTextureAtlas?.(); } catch {}
+        this.terminal.refresh(0, this.terminal.rows - 1);
       }, 120000);
     }
     // claude-settings 由 SettingsContext 集中提供;通过 props 派生 agentTeamEnabled,
@@ -676,10 +688,10 @@ class TerminalPanel extends React.Component {
       termTextarea.addEventListener('blur', this._handleTermBlur);
     }
 
-    // 渲染器选择：仅 Android 启用 WebGL（GPU 加速，移动端 DOM 渲染卡顿明显）；
-    // PC/iOS 走 xterm.js 6.0 内置 DOM 渲染器——PC 上实测 DOM 比 WebGL 更稳定
-    // （无纹理脏花屏 / context loss / GPU 长任务降级等问题）。
-    if (isAndroid) {
+    // 渲染器选择：Android + macOS 桌面(Chromium 系)启用 WebGL,详见 WEBGL_RENDERER 常量；
+    // Windows/Linux/iOS/Safari 走 xterm.js 6.0 内置 DOM 渲染器——Windows 上实测 DOM 比
+    // WebGL 更稳定（无纹理脏花屏 / context loss / GPU 长任务降级等问题）。
+    if (WEBGL_RENDERER) {
       this._loadWebglAddon(false);
     } else {
       // WebGL 时代 longtask 降级留下的 sticky key 在 DOM 平台已是死状态,一次性清理
@@ -996,9 +1008,10 @@ class TerminalPanel extends React.Component {
   //   L1: clearTextureAtlas + refresh —— 纹理脏 / sleep-wake 后小花屏(DOM 下 atlas 为 no-op,refresh 仍是全行重绘)
   //   L2: L1 + fitAddon.fit() —— 维度漂移叠加纹理脏
   //   L3: dispose+reload WebglAddon (onContextLoss 同款配方) + fit + 纹理重画 —— 整片白屏 / WebGL 失同步
-  //       注:仅 Android 有 WebGL,_rebuildWebglAddon 在 DOM 平台早退,故 DOM 下 L3 实效 = L2。
+  //       注:仅 WebGL 平台(Android / macOS Chromium)有 WebGL,_rebuildWebglAddon 在 DOM 平台早退,
+  //       故 DOM 下 L3 实效 = L2。
   // 两条调用路径:handleForceRefresh(用户点击,连击窗口推进级别),自动定时器
-  // (Android 60s 走 L2 预防性维护;PC/iPad DOM 下 120s 仅轻量全行重绘,不经此函数)。
+  // (Android 60s 走 L2 预防性维护;mac/PC/iPad 120s 仅轻量 atlas 清理+全行重绘,不经此函数)。
   _executeRefresh = (level) => {
     const term = this.terminal;
     if (!term) return;
@@ -1099,6 +1112,12 @@ class TerminalPanel extends React.Component {
   }
 
   _disposeWebgl() {
+    // 清掉 pending 的 onContextLoss 恢复重试:longtask 降级(写 sticky)与 1s 恢复 timer
+    // 交错时,不再依赖 sticky 检查巧合拦截重载已判废的 addon(mac 上 context loss 更频繁)。
+    if (this._webglRecoveryTimer) {
+      clearTimeout(this._webglRecoveryTimer);
+      this._webglRecoveryTimer = null;
+    }
     if (this._webglLongtaskObserver) {
       this._webglLongtaskObserver.disconnect();
       this._webglLongtaskObserver = null;
@@ -1146,7 +1165,7 @@ class TerminalPanel extends React.Component {
   // 配方)。保留 cols/rows/scrollback,不动 DOM 高度,不影响其他 addon。
   _rebuildWebglAddon = () => {
     if (!this.terminal) return;
-    if (!isAndroid) return; // 仅 Android 使用 WebGL，PC/iOS 始终走 DOM 渲染器
+    if (!WEBGL_RENDERER) return; // 仅 WebGL 平台（Android / macOS Chromium），其余始终走 DOM 渲染器
     // 抢在 onContextLoss recovery 之前清 timer,否则 1s 后醒来会把刚 rebuild 的 addon 再 load 一次
     if (this._webglRecoveryTimer) {
       clearTimeout(this._webglRecoveryTimer);
