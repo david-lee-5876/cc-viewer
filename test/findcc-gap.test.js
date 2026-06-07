@@ -19,6 +19,8 @@ import {
   resolveCliPath,
   resolveNpmClaudePath,
   getGlobalNodeModulesDir,
+  pickSpawnableLookupResult,
+  resolveNativePath,
 } from '../findcc.js';
 
 // ─── 环境快照：所有改写 process.env 的用例跑完后必须还原 ───
@@ -206,5 +208,67 @@ describe('findcc: resolveNpmClaudePath', () => {
       `应从 fake npm 报告的全局 node_modules 兜底找到 cli.js，实得: ${got}`);
     // 顺带验证 getGlobalNodeModulesDir 也走通 fake npm
     assert.equal(getGlobalNodeModulesDir(), gnm);
+  });
+});
+
+// ════════════════ pickSpawnableLookupResult（error 193 修复） ════════════════
+// Windows `where claude` 输出首行常是 npm 的无扩展名 sh shim（#!/bin/sh 文本），
+// 其后是 .cmd/.ps1 —— 都不是 PE，ConPTY 直接 spawn 报 "error code: 193"。
+// win32 必须只挑 .exe 行；POSIX 维持取首行的旧语义。
+
+describe('findcc: pickSpawnableLookupResult win32 只接受 .exe', () => {
+  it('win32：跳过 sh shim / .cmd / .ps1，选中 .exe 行', () => {
+    const out = 'C:\\Users\\x\\AppData\\Roaming\\npm\\claude\r\n'
+      + 'C:\\Users\\x\\AppData\\Roaming\\npm\\claude.cmd\r\n'
+      + 'C:\\Users\\x\\AppData\\Roaming\\npm\\claude.ps1\r\n'
+      + 'C:\\Users\\x\\.local\\bin\\claude.exe\r\n';
+    assert.equal(pickSpawnableLookupResult(out, 'win32'), 'C:\\Users\\x\\.local\\bin\\claude.exe');
+  });
+
+  it('win32：扩展名大小写不敏感（CLAUDE.EXE 也接受）', () => {
+    assert.equal(pickSpawnableLookupResult('C:\\bin\\CLAUDE.EXE\r\n', 'win32'), 'C:\\bin\\CLAUDE.EXE');
+  });
+
+  it('win32：全是非 PE shim 时返回 null（让后续候选路径兜底，而不是抱回 193）', () => {
+    const out = 'C:\\npm\\claude\r\nC:\\npm\\claude.cmd\r\n';
+    assert.equal(pickSpawnableLookupResult(out, 'win32'), null);
+  });
+
+  it('POSIX：维持取首行旧语义', () => {
+    assert.equal(pickSpawnableLookupResult('/usr/local/bin/claude\n', 'darwin'), '/usr/local/bin/claude');
+  });
+
+  it('空/空白输出返回 null', () => {
+    assert.equal(pickSpawnableLookupResult('', 'win32'), null);
+    assert.equal(pickSpawnableLookupResult('\r\n\r\n', 'win32'), null);
+    assert.equal(pickSpawnableLookupResult(null, 'darwin'), null);
+  });
+});
+
+// ═══════════ resolveNativePath win32 候选路径 .exe 变体（原生安装器布局） ═══════════
+// Windows 原生安装器（install.ps1）落 ~/.local/bin/claude.exe；无扩展名候选在 win32
+// 上永远 miss。用 CLAUDE_CONFIG_DIR 重定向 ~/.claude/local 候选到临时目录验证 .exe 补查。
+
+describe('findcc: resolveNativePath win32 候选 .exe 变体', () => {
+  const origPlatform = process.platform;
+  function setPlatform(p) { Object.defineProperty(process, 'platform', { value: p, configurable: true }); }
+
+  it('win32 下 ~/.claude/local/claude.exe（仅 .exe 存在）可被发现', () => {
+    const root = mkdtempSync(join(tmpdir(), 'findcc-exe-variant-'));
+    mkdirSync(join(root, 'local'), { recursive: true });
+    writeFileSync(join(root, 'local', 'claude.exe'), 'MZ-fake');
+    // 隔离：PATH 砍空让 npm root -g 与 where/which 全失败 → step1/2 miss；
+    // CLAUDE_CONFIG_DIR 指到临时目录让 ~/.claude/local 候选落进我们的 fixture。
+    process.env.PATH = '';
+    delete process.env.NPM_CONFIG_PREFIX;
+    process.env.CLAUDE_CONFIG_DIR = root;
+    setPlatform('win32');
+    try {
+      assert.equal(resolveNativePath(), join(root, 'local', 'claude.exe'));
+    } finally {
+      setPlatform(origPlatform);
+      restoreEnv();
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

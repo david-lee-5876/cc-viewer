@@ -201,6 +201,20 @@ export function resolveNpmClaudePath() {
   return null;
 }
 
+/**
+ * 从 which/where 的原始输出中挑出能直接 CreateProcess/exec 的候选行。
+ * Windows 的 `where` 会列出 PATH 中全部同名匹配——npm 全局安装时第一行往往是给
+ * git-bash 用的**无扩展名 sh shim**（#!/bin/sh 文本文件），其后是 .cmd/.ps1，都不是
+ * PE：node-pty/ConPTY 直接 spawn 会抛 "Cannot create process, error code: 193"
+ * (ERROR_BAD_EXE_FORMAT)。win32 只接受 .exe 行；POSIX 取第一行。
+ * 导出供单测；生产代码经 resolveNativePath 调用。
+ */
+export function pickSpawnableLookupResult(rawOut, platform = process.platform) {
+  const lines = String(rawOut || '').split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+  if (platform === 'win32') return lines.find((l) => l.toLowerCase().endsWith('.exe')) || null;
+  return lines[0] || null;
+}
+
 export function resolveNativePath() {
   const globalRoot = getGlobalNodeModulesDir();
 
@@ -220,7 +234,8 @@ export function resolveNativePath() {
   for (const cmd of lookupCmds) {
     try {
       const rawOut = execSync(cmd, { encoding: 'utf-8', shell: true, env: process.env, windowsHide: true });
-      const result = rawOut.split(/\r?\n/)[0].trim();
+      // win32 过滤掉 sh shim / .cmd / .ps1，只取 .exe（否则 ConPTY spawn 报 error 193）
+      const result = pickSpawnableLookupResult(rawOut);
       if (result && existsSync(result)) {
         // 只排除 .js 文件（老版本 npm 分发的 cli.js，需要 node 运行，
         // 由 resolveNpmClaudePath 处理）。Claude Code 2.x+ 的 npm 包内
@@ -248,6 +263,11 @@ export function resolveNativePath() {
   for (const p of candidates) {
     if (existsSync(p)) {
       return p;
+    }
+    // Windows 原生安装器（install.ps1）落的是 claude.exe（如 ~/.local/bin/claude.exe），
+    // 无扩展名候选在 win32 上永远 miss，这里补查 .exe 变体。
+    if (process.platform === 'win32' && existsSync(p + '.exe')) {
+      return p + '.exe';
     }
   }
 
