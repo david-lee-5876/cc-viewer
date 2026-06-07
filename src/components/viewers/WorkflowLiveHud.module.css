@@ -41,7 +41,36 @@
 .actions {
   flex: 0 0 auto;
   display: flex;
-  gap: 2px;
+  align-items: center;
+  gap: 4px;
+}
+
+.viewToggle {
+  display: inline-flex;
+  gap: 0;
+  padding: 2px;
+  background: var(--bg-sub-avatar, rgba(127, 127, 127, 0.12));
+  border-radius: 6px;
+}
+
+.viewBtn {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.5;
+  padding: 1px 10px;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: color 0.12s ease, background 0.12s ease;
+}
+
+.viewBtn:hover { color: var(--color-primary); }
+
+.viewBtnActive,
+.viewBtnActive:hover {
+  color: rgba(255, 255, 255, 0.96);
+  background: var(--color-primary);
 }
 
 .iconBtn {
@@ -61,7 +90,7 @@
 }
 
 .rows {
-  max-height: 168px;
+  max-height: 60vh;
   overflow-y: auto;
   padding: 4px 0;
 }
@@ -117,20 +146,6 @@
 }
 
 .dur { color: var(--text-gray); }
-
-.more {
-  display: block;
-  width: 100%;
-  text-align: left;
-  padding: 3px 10px;
-  color: var(--color-primary);
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  font-size: 12px;
-}
-
-.more:hover { text-decoration: underline; }
 
 .liveDot {
   flex: 0 0 auto;

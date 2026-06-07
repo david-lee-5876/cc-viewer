@@ -3,9 +3,8 @@ import { t } from '../../i18n';
 import { getModelShort } from '../../utils/helpers';
 import { subscribeActive, getActiveWorkflows } from '../../utils/workflowStore';
 import { TERMINAL_STATES, STATUS_KEYS, fmtTokens, fmtDuration, stateGlyph } from '../../utils/workflowFormat';
+import WorkflowTimeline from './WorkflowTimeline';
 import styles from './WorkflowLiveHud.module.css';
-
-const MAX_ROWS = 8;
 
 function stateClass(state) {
   if (state === 'done' || state === 'completed') return styles.stateDone;
@@ -40,7 +39,7 @@ function Row({ agent }) {
 export default function WorkflowLiveHud() {
   const [active, setActive] = useState(getActiveWorkflows);
   const [collapsed, setCollapsed] = useState(false);
-  const [showAll, setShowAll] = useState(false);
+  const [view, setView] = useState('list');  // 'list' | 'timeline'
   const [dismissed, setDismissed] = useState({});
   const [, setTick] = useState(0);
 
@@ -69,10 +68,9 @@ export default function WorkflowLiveHud() {
     : '';
   const elapsed = data.startTime ? fmtDuration(Date.now() - data.startTime) : '';
 
+  // 运行中的排前面（倒序最近完成的紧随其后），全部展示、可滚动；折叠用顶部按钮
   const running = agents.filter(a => !TERMINAL_STATES.has(a.state));
-  const ordered = running.length ? running.concat(agents.filter(a => TERMINAL_STATES.has(a.state)).reverse()) : agents;
-  const rows = showAll ? ordered : ordered.slice(0, MAX_ROWS);
-  const moreCount = ordered.length - rows.length;
+  const rows = running.length ? running.concat(agents.filter(a => TERMINAL_STATES.has(a.state)).reverse()) : agents;
 
   return (
     <div className={styles.bar} role="status" aria-live="polite">
@@ -88,6 +86,20 @@ export default function WorkflowLiveHud() {
           {visible.length > 1 ? ` · +${visible.length - 1}` : ''}
         </span>
         <span className={styles.actions}>
+          {!collapsed && (
+            <span className={styles.viewToggle} onClick={(e) => e.stopPropagation()}>
+              <button
+                type="button"
+                className={`${styles.viewBtn} ${view === 'list' ? styles.viewBtnActive : ''}`}
+                onClick={() => setView('list')}
+              >{t('ui.workflow.viewList')}</button>
+              <button
+                type="button"
+                className={`${styles.viewBtn} ${view === 'timeline' ? styles.viewBtnActive : ''}`}
+                onClick={() => setView('timeline')}
+              >{t('ui.workflow.viewTimeline')}</button>
+            </span>
+          )}
           <button type="button" className={styles.iconBtn} onClick={(e) => { e.stopPropagation(); setCollapsed(c => !c); }} title={collapsed ? t('ui.expand') : t('ui.collapse')}>
             {collapsed ? '▸' : '▾'}
           </button>
@@ -96,14 +108,14 @@ export default function WorkflowLiveHud() {
           </button>
         </span>
       </div>
-      {!collapsed && (
+      {!collapsed && view === 'timeline' && (
+        <div className={styles.rows}>
+          <WorkflowTimeline data={data} now={Date.now()} compact />
+        </div>
+      )}
+      {!collapsed && view === 'list' && (
         <div className={styles.rows}>
           {rows.map((a, i) => <Row key={a.agentId || i} agent={a} />)}
-          {(moreCount > 0 || showAll) && (
-            <button type="button" className={styles.more} onClick={() => setShowAll(s => !s)}>
-              {showAll ? t('ui.collapse') : `+${moreCount}…`}
-            </button>
-          )}
         </div>
       )}
     </div>

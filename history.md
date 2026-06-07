@@ -9,6 +9,7 @@
 - feat(workflow): 新增只读路由 `GET /api/workflow-journal`（按 runId/taskId 定位、归一化面板模型、路径穿越守卫 + 惰性 arm watch）
 - fix(workflow): 面板在 ccv 默认「简化工具」模式下不渲染——Workflow 加入完整渲染白名单（ChatMessage isFullDisplayTool），且其 tool_result 不随简化模式被 _renderToolResultTrailing 隐藏（始终完整渲染面板）
 - feat(workflow): 可视化增强——① HUD/面板 agent 行显示 lastTool（运行中"在干嘛",hover 看摘要）；② 面板新增「列表/时间轴」切换,时间轴为甘特图（每 agent 一条 startedAt→duration 横条,运行中延伸到 now 每秒走,按状态着色,直观看并行与长尾）；③ HUD `+N` 可点展开全部 agent（再点收起）
+- feat(workflow): 甘特配色与复用——完成条改为「按阶段着色」（src/utils/workflowFormat.js 新增 phaseColor 柔和循环色相,失败/运行中/排队仍走语义色:红/主色脉冲/灰）,告别整屏同色荧光绿;甘特抽成共享组件 src/components/viewers/WorkflowTimeline.jsx（+ .module.css,含 compact 紧凑版）,WorkflowPanel 与 HUD 共用;HUD 头部亦加「列表/时间轴」切换,运行中可在常驻条里看横条实时生长
 - feat(workflow): 右下角悬浮 HUD（WorkflowLiveHud）——运行中的工作流常驻视口右下角实时展示（绿点脉冲 + 完成/总数 + token + 运行中 agent 行），不被聊天滚动挤走；完成后自动消失，内联卡片继续作历史记录。数据来自 workflowStore 新增的「活跃工作流」集合（subscribeActive/getActiveWorkflows，按 canonical runId 去重、终态自动移出），由 AppBase 的 SSE 持续喂养，与内联面板是否挂载无关。共享格式化抽到 src/utils/workflowFormat.js（WorkflowPanel 与 HUD 共用）
 - test: 新增 server 单测覆盖 lookupToolUseResult / enrich-workflow / workflow-journal / workflow-watcher / workflow-live（逐帧推导 + 逐帧 watcher 广播）
 

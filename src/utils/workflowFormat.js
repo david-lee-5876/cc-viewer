@@ -39,3 +39,14 @@ export function stateGlyph(state) {
   if (state === 'queued') return '○';
   return '●';
 }
+
+// 甘特完成条按阶段着色：柔和、明暗主题皆可读的循环色相调色板。
+// 失败/运行中/排队仍走语义色（红/主色脉冲/灰），不取这里的值。
+const PHASE_HUES = [206, 265, 150, 32, 322, 188, 96, 0];
+
+export function phaseColor(phaseIndex) {
+  const n = PHASE_HUES.length;
+  const i = typeof phaseIndex === 'number' && phaseIndex >= 0 ? phaseIndex : 0;
+  const h = PHASE_HUES[i % n];
+  return `hsl(${h}, 48%, 50%)`;
+}

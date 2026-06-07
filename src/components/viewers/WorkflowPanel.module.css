@@ -193,87 +193,35 @@
   font-size: 11px;
 }
 
-/* 视图切换（列表 / 时间轴） */
+/* 视图切换（列表 / 时间轴）—— 分段控件：统一轨道，选中段填实色反白 */
 .viewToggle {
   flex: 0 0 auto;
   display: inline-flex;
-  gap: 2px;
+  gap: 0;
+  padding: 2px;
+  background: var(--bg-sub-avatar, rgba(127, 127, 127, 0.12));
+  border-radius: 6px;
 }
 
 .viewBtn {
   background: transparent;
-  border: 1px solid var(--border-secondary);
+  border: none;
   color: var(--text-secondary);
   font-size: 11px;
-  padding: 1px 8px;
+  line-height: 1.5;
+  padding: 1px 10px;
   cursor: pointer;
   border-radius: 4px;
+  transition: color 0.12s ease, background 0.12s ease;
 }
 
 .viewBtn:hover { color: var(--color-primary); }
 
-.viewBtnActive {
-  color: var(--color-primary);
-  border-color: var(--color-primary);
-  background: var(--color-primary-pale);
+.viewBtnActive,
+.viewBtnActive:hover {
+  color: rgba(255, 255, 255, 0.96);
+  background: var(--color-primary);
 }
-
-/* 时间轴 / 甘特 */
-.timeline {
-  padding: 8px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.ganttRow {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.ganttLabel {
-  flex: 0 0 auto;
-  width: 180px;
-  min-width: 120px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  color: var(--color-primary);
-  font-size: 12px;
-}
-
-.ganttTrack {
-  flex: 1 1 auto;
-  position: relative;
-  height: 16px;
-  background: var(--bg-sub-avatar, rgba(127, 127, 127, 0.12));
-  border-radius: 4px;
-}
-
-.ganttBar {
-  position: absolute;
-  top: 1px;
-  bottom: 1px;
-  border-radius: 3px;
-  min-width: 3px;
-  display: flex;
-  align-items: center;
-  overflow: hidden;
-}
-
-.ganttDur {
-  font-size: 10px;
-  color: var(--bg-container);
-  padding: 0 4px;
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
-}
-
-.barDone { background: var(--color-success, #3fb950); }
-.barFailed { background: var(--color-error, #f85149); }
-.barRunning { background: var(--color-primary); }
-.barQueued { background: var(--text-gray); }
 
 .agentMeta {
   flex: 0 0 auto;
@@ -303,5 +251,4 @@
   .agentMeta { gap: 8px; }
   .agentModel { display: none; }
   .agentDoing { display: none; }
-  .ganttLabel { width: 110px; min-width: 90px; }
 }
