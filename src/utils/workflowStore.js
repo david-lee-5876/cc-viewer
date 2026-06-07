@@ -14,12 +14,27 @@ const _subs = new Map();          // key(runId|taskId) → Set<cb>
 const _latest = new Map();        // key → normalized journal data
 const _authoritative = new Set(); // keys that已收到 live===false 的权威完成快照
 
+// 「活跃工作流」追踪：供右下角悬浮 HUD 常驻展示运行中的工作流。
+const _active = new Map();         // runId → 最新 data（仅运行中/收尾中）
+const _activeSubs = new Set();     // Set<cb(list)>
+
 function _emit(key, data) {
   const set = _subs.get(key);
   if (!set) return;
   for (const cb of set) {
     try { cb(data); } catch {}
   }
+}
+
+function _emitActive() {
+  const list = [..._active.values()];
+  for (const cb of _activeSubs) {
+    try { cb(list); } catch {}
+  }
+}
+
+function _isActive(data) {
+  return data.live === true || data.status === 'running' || data.status === 'finishing';
 }
 
 export function publish(payload) {
@@ -40,6 +55,25 @@ export function publish(payload) {
     _latest.set(k, data);
     _emit(k, data);
   }
+
+  // 维护活跃工作流集合（按 canonical runId 去重，避免 taskId 重复计数）
+  const rk = data.runId || payload.runId;
+  if (rk && !(isLive && _authoritative.has(rk))) {
+    if (_isActive(data)) { _active.set(rk, data); _emitActive(); }
+    else if (_active.delete(rk)) { _emitActive(); }
+  }
+}
+
+/** 订阅活跃（运行中/收尾中）工作流列表变化；立即不回调，调用 getActiveWorkflows 取初值。 */
+export function subscribeActive(cb) {
+  if (typeof cb !== 'function') return () => {};
+  _activeSubs.add(cb);
+  return () => { _activeSubs.delete(cb); };
+}
+
+/** 取当前活跃工作流列表（最新 data 数组）。 */
+export function getActiveWorkflows() {
+  return [..._active.values()];
 }
 
 export function subscribe(key, cb) {

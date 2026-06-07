@@ -27,6 +27,7 @@ import { TeamButton, TeamModal } from '../dashboard/TeamSessionPanel';
 import SnapLineOverlay from '../common/SnapLineOverlay';
 import RoleFilterBar from './RoleFilterBar';
 import ChatInputBar from './ChatInputBar';
+import WorkflowLiveHud from '../viewers/WorkflowLiveHud';
 import PresetModal from '../terminal/PresetModal';
 import UltraPlanModal from '../terminal/UltraPlanModal';
 import { TerminalWsContext } from '../terminal/TerminalWsContext';
@@ -3739,6 +3740,7 @@ class ChatView extends React.Component {
                 visible={true}
               />
             )}
+            <WorkflowLiveHud />
             <ChatInputBar
               inputRef={this._inputRef}
               inputEmpty={this.state.inputEmpty}

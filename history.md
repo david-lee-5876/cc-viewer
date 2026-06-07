@@ -8,6 +8,7 @@
 - feat(workflow): runId 出口补全——server/lib/enrich-workflow.js 仿 enrich-plan-input，在出 SSE/REST 前给 Workflow tool_result 注入 `_ccvWorkflow={runId,taskId,sessionId}`（runId 经 session-transcript-reader 新增的 lookupToolUseResult 按 tool_use.id 反查 CC transcript 顶层 toolUseResult）
 - feat(workflow): 新增只读路由 `GET /api/workflow-journal`（按 runId/taskId 定位、归一化面板模型、路径穿越守卫 + 惰性 arm watch）
 - fix(workflow): 面板在 ccv 默认「简化工具」模式下不渲染——Workflow 加入完整渲染白名单（ChatMessage isFullDisplayTool），且其 tool_result 不随简化模式被 _renderToolResultTrailing 隐藏（始终完整渲染面板）
+- feat(workflow): 右下角悬浮 HUD（WorkflowLiveHud）——运行中的工作流常驻视口右下角实时展示（绿点脉冲 + 完成/总数 + token + 运行中 agent 行），不被聊天滚动挤走；完成后自动消失，内联卡片继续作历史记录。数据来自 workflowStore 新增的「活跃工作流」集合（subscribeActive/getActiveWorkflows，按 canonical runId 去重、终态自动移出），由 AppBase 的 SSE 持续喂养，与内联面板是否挂载无关。共享格式化抽到 src/utils/workflowFormat.js（WorkflowPanel 与 HUD 共用）
 - test: 新增 server 单测覆盖 lookupToolUseResult / enrich-workflow / workflow-journal / workflow-watcher / workflow-live（逐帧推导 + 逐帧 watcher 广播）
 
 ## 1.6.302 (2026-06-07)

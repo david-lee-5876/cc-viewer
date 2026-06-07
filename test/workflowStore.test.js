@@ -4,7 +4,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
-const { publish, subscribe, getLatest } = await import('../src/utils/workflowStore.js');
+const { publish, subscribe, getLatest, subscribeActive, getActiveWorkflows } = await import('../src/utils/workflowStore.js');
 
 describe('workflowStore', () => {
   it('按 runId 与 taskId 双键分发', () => {
@@ -35,5 +35,24 @@ describe('workflowStore', () => {
     off();
     publish({ runId: 'wf_k3', data: { runId: 'wf_k3', live: true } });
     assert.equal(n, 1);
+  });
+
+  it('活跃集合：运行中加入，完成后移除', () => {
+    const seen = [];
+    const off = subscribeActive(list => seen.push(list.map(d => d.runId)));
+    publish({ runId: 'wf_act1', data: { runId: 'wf_act1', status: 'running', live: true } });
+    assert.ok(getActiveWorkflows().some(d => d.runId === 'wf_act1'));
+    publish({ runId: 'wf_act1', data: { runId: 'wf_act1', status: 'completed', live: false } });
+    assert.ok(!getActiveWorkflows().some(d => d.runId === 'wf_act1'));
+    off();
+    // 至少发生过「加入」和「移除」两次广播
+    assert.ok(seen.length >= 2);
+  });
+
+  it('活跃集合：finishing 视为活跃', () => {
+    publish({ runId: 'wf_act2', data: { runId: 'wf_act2', status: 'finishing', live: true } });
+    assert.ok(getActiveWorkflows().some(d => d.runId === 'wf_act2'));
+    publish({ runId: 'wf_act2', data: { runId: 'wf_act2', status: 'completed', live: false } });
+    assert.ok(!getActiveWorkflows().some(d => d.runId === 'wf_act2'));
   });
 });

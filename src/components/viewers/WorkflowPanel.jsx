@@ -3,46 +3,14 @@ import { t } from '../../i18n';
 import { apiUrl } from '../../utils/apiUrl';
 import { getModelShort, getModelMaxTokens } from '../../utils/helpers';
 import { subscribe, getLatest } from '../../utils/workflowStore';
+import { TERMINAL_STATES, STATUS_KEYS, fmtDuration, fmtTokens, stateGlyph } from '../../utils/workflowFormat';
 import styles from './WorkflowPanel.module.css';
-
-const TERMINAL_STATES = new Set(['done', 'completed', 'failed', 'error', 'cancelled', 'skipped']);
-
-const STATUS_KEYS = {
-  running: 'ui.workflow.status.running',
-  finishing: 'ui.workflow.status.finishing',
-  completed: 'ui.workflow.status.completed',
-  failed: 'ui.workflow.status.failed',
-  paused: 'ui.workflow.status.paused',
-  cancelled: 'ui.workflow.status.cancelled',
-};
-
-function fmtDuration(ms) {
-  if (typeof ms !== 'number' || ms < 0) return '';
-  const s = Math.round(ms / 1000);
-  if (s < 60) return `${s}s`;
-  const m = Math.floor(s / 60);
-  const rem = s % 60;
-  return rem ? `${m}m ${rem}s` : `${m}m`;
-}
-
-function fmtTokens(n) {
-  if (typeof n !== 'number' || n <= 0) return '0';
-  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
-  return String(n);
-}
 
 function stateClass(state) {
   if (state === 'done' || state === 'completed') return styles.stateDone;
   if (state === 'failed' || state === 'error') return styles.stateFailed;
   if (state === 'queued') return styles.stateQueued;
   return styles.stateRunning;
-}
-
-function stateGlyph(state) {
-  if (state === 'done' || state === 'completed') return '✓';
-  if (state === 'failed' || state === 'error') return '✗';
-  if (state === 'queued') return '○';
-  return '●';
 }
 
 function AgentRow({ agent }) {
