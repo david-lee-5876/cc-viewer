@@ -70,6 +70,7 @@ describe('normalizeWorkflowJournal', () => {
     assert.equal(n.agents[0].state, 'done');
     assert.equal(n.agents[1].state, 'running');
     assert.equal(n.agents[1].durationMs, null);
+    assert.equal(n.live, false);   // 权威完成快照显式标记，供前端防 live 帧回退
   });
 
   it('坏输入 → null', () => {

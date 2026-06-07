@@ -139,8 +139,9 @@ export default function WorkflowPanel({ workflow, resultText, defaultCollapsed }
       .then(j => {
         if (!alive) return;
         if (j && j.ok && j.data) {
-          // 若 SSE 已先送达权威完成快照（live!==true），别用可能滞后的 REST（含运行中）覆盖回退
-          setData(prev => (prev && prev.live === false && j.data.live) ? prev : j.data);
+          // 若 SSE 已先送达权威完成快照（live!==true），别用可能滞后的 REST（含运行中）覆盖回退。
+          // 用 `prev.live !== true` 判权威，不依赖完成快照是否显式带 live:false。
+          setData(prev => (prev && prev.live !== true && j.data.live) ? prev : j.data);
         } else setError(true);
       })
       .catch(() => { if (alive) setError(true); })

@@ -11,7 +11,8 @@
 - feat(workflow): 可视化增强——① HUD/面板 agent 行显示 lastTool（运行中"在干嘛",hover 看摘要）；② 面板新增「列表/时间轴」切换,时间轴为甘特图（每 agent 一条 startedAt→duration 横条,运行中延伸到 now 每秒走,按状态着色,直观看并行与长尾）；③ HUD `+N` 可点展开全部 agent（再点收起）
 - feat(workflow): 甘特配色与复用——完成条改为「按阶段着色」（src/utils/workflowFormat.js 新增 phaseColor 柔和循环色相,失败/运行中/排队仍走语义色:红/主色脉冲/灰）,告别整屏同色荧光绿;甘特抽成共享组件 src/components/viewers/WorkflowTimeline.jsx（+ .module.css,含 compact 紧凑版）,WorkflowPanel 与 HUD 共用;HUD 头部亦加「列表/时间轴」切换,运行中可在常驻条里看横条实时生长
 - feat(workflow): 输入框上方常驻 HUD（WorkflowLiveHud，docked 在 ChatView inputStack 内、消息滚动区之外）——运行中的工作流实时展示（绿点脉冲 + 完成/总数 + token + 工具数 + 已用时 + agent 行），不被聊天滚动挤走；完成后自动消失，内联卡片继续作历史记录。数据来自 workflowStore 新增的「活跃工作流」集合（subscribeActive/getActiveWorkflows，按 canonical runId 去重、终态自动移出），由 AppBase 的 SSE 持续喂养，与内联面板是否挂载无关。共享格式化抽到 src/utils/workflowFormat.js（WorkflowPanel 与 HUD 共用）
-- test: 新增 server 单测覆盖 lookupToolUseResult / enrich-workflow / workflow-journal / workflow-watcher / workflow-live（逐帧推导 + 逐帧 watcher 广播）
+- fix(workflow): 代码审查两处加固——① 路径穿越:运行中 fallback 的 `resolveRunDir()` 现复用完成态 journal 同一 `RUN_ID_RE`(`^wf_[A-Za-z0-9_-]+$`)校验,拒绝含 `../`/路径分隔符的 runId 跳出 run 目录;② 回退竞态:`normalizeWorkflowJournal()` 显式写 `live:false`(权威完成快照标记),WorkflowPanel REST 防回退判断从 `prev.live===false` 改为 `prev.live!==true`,即使完成快照未显式带 live 也不会被乱序到达的 live REST 退回「运行中」
+- test: 新增 server 单测覆盖 lookupToolUseResult / enrich-workflow / workflow-journal / workflow-watcher / workflow-live（逐帧推导 + 逐帧 watcher 广播 + resolveRunDir 穿越防御 + 完成快照 live:false）
 
 ## 1.6.303 (2026-06-07)
 

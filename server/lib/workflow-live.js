@@ -19,6 +19,7 @@ import { existsSync, readFileSync, statSync, readdirSync, realpathSync } from 'n
 import { join, dirname, sep } from 'node:path';
 import { getClaudeConfigDir } from '../../findcc.js';
 import { findTranscriptPath } from './session-transcript-reader.js';
+import { _RUN_ID_RE as RUN_ID_RE } from './workflow-journal.js';
 
 const MAX_AGENT_BYTES = 64 * 1024 * 1024;
 const LABEL_MAX = 80;
@@ -30,6 +31,8 @@ function projectsDir() {
 /** sessionId(+hint) → <sessionDir>/subagents/workflows/<runId>（可能不存在）。 */
 export function resolveRunDir(sessionId, projectHint, runId) {
   if (!sessionId || !runId) return null;
+  // 与完成态 journal 同一 runId 校验：拒绝含路径分隔符/`..` 的 runId，防穿越到其他 run/session 目录。
+  if (!RUN_ID_RE.test(runId)) return null;
   const transcript = findTranscriptPath(sessionId, projectHint);
   if (!transcript) return null;
   return join(dirname(transcript), sessionId, 'subagents', 'workflows', runId);

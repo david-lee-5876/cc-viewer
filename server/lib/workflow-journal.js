@@ -129,6 +129,10 @@ export function normalizeWorkflowJournal(j) {
     startTime: typeof j.startTime === 'number' ? j.startTime : null,
     phases,
     agents,
+    // 权威完成快照显式标记 live:false（与 deriveLiveJournal 的 live:true 对称）：
+    // 让前端「乱序到达的 live REST 不得覆盖已完成快照」的判断可靠，且 workflowStore
+    // 据此把该 run 移出活跃集合。
+    live: false,
   };
 }
 

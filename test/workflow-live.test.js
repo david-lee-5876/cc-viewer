@@ -15,7 +15,7 @@ const SAVED = process.env.CCV_PROJECTS_DIR;
 const TMP = mkdtempSync(join(tmpdir(), 'ccv-live-'));
 process.env.CCV_PROJECTS_DIR = TMP;
 
-const { deriveLiveJournal } = await import('../server/lib/workflow-live.js');
+const { deriveLiveJournal, resolveRunDir } = await import('../server/lib/workflow-live.js');
 const { armWorkflowLiveWatch, unwatchAllWorkflows, __setWatchImplForTests, __triggerLiveScanForTests } =
   await import('../server/lib/workflow-watcher.js');
 
@@ -107,6 +107,20 @@ describe('deriveLiveJournal', () => {
     const empty = join(TMP, ENC, 'sid-empty', 'subagents', 'workflows', 'wf_x');
     mkdirSync(empty, { recursive: true });
     assert.equal(deriveLiveJournal(empty, 'wf_x'), null);
+  });
+});
+
+describe('resolveRunDir 路径穿越防御', () => {
+  it('合法 wf_ runId 拼出 run 目录；穿越/非法 runId 一律 null', () => {
+    const SID2 = 'sid-guard';
+    writeFileSync(join(TMP, ENC, `${SID2}.jsonl`), '{}\n');  // 让 findTranscriptPath 命中
+    const good = resolveRunDir(SID2, undefined, 'wf_good-1');
+    assert.ok(good && good.endsWith(join(SID2, 'subagents', 'workflows', 'wf_good-1')));
+    // 复用与完成态 journal 相同的 RUN_ID_RE：含 ../ 或路径分隔符/无 wf_ 前缀 → null（不拼路径）
+    assert.equal(resolveRunDir(SID2, undefined, '../evil'), null);
+    assert.equal(resolveRunDir(SID2, undefined, 'wf_../escape'), null);
+    assert.equal(resolveRunDir(SID2, undefined, 'no-prefix'), null);
+    assert.equal(resolveRunDir(SID2, undefined, ''), null);
   });
 });
 
