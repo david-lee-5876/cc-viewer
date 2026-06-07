@@ -2,19 +2,13 @@
 
 ## Unreleased
 
-- feat(workflow): 聊天里内联渲染 Workflow 工具的「工作流面板」——phases 左列 + 按阶段分组的 agents 行（label / model / 状态 / token / 工具数 / 耗时），数据源为落盘的 workflow run journal（`<sessionDir>/workflows/<runId>.json`）
-- feat(workflow): 运行中逐帧动画——`<runId>.json` 仅完成时落盘，故运行中改从 `subagents/workflows/<runId>/` 实时推导（server/lib/workflow-live.js：agent-*.jsonl 累计 token/工具数/model/prompt→label + journal.jsonl 的 started/result 判 running·done + scripts/*.js 反推 workflowName，带每文件 mtime:size 解析缓存）；server/lib/workflow-watcher.js 新增 armWorkflowLiveWatch 监视该目录、签名去重后经 SSE `workflow_update` 逐帧广播；REST 路由完成快照缺失时回退逐帧推导并武装运行中监视；前端面板运行中走扁平 agent 列表 + 脉冲指示，完成时由权威快照接管 phase 分组
-- feat(workflow): 完成跟随——server/lib/workflow-watcher.js 监视 workflows 目录（复用 log-watcher 的 dir fs.watch + 防抖 + 安全网慢轮询 + 测试缝），journal 覆写经 SSE `workflow_update` 推送，前端 src/utils/workflowStore.js 按 runId 分发，面板随工作流进度实时刷新
-- feat(workflow): runId 出口补全——server/lib/enrich-workflow.js 仿 enrich-plan-input，在出 SSE/REST 前给 Workflow tool_result 注入 `_ccvWorkflow={runId,taskId,sessionId}`（runId 经 session-transcript-reader 新增的 lookupToolUseResult 按 tool_use.id 反查 CC transcript 顶层 toolUseResult）
-- feat(workflow): 新增只读路由 `GET /api/workflow-journal`（按 runId/taskId 定位、归一化面板模型、路径穿越守卫 + 惰性 arm watch）
-- fix(workflow): 面板在 ccv 默认「简化工具」模式下不渲染——Workflow 加入完整渲染白名单（ChatMessage isFullDisplayTool），且其 tool_result 不随简化模式被 _renderToolResultTrailing 隐藏（始终完整渲染面板）
-- feat(workflow): 可视化增强——① HUD/面板 agent 行显示 lastTool（运行中"在干嘛",hover 看摘要）；② 面板新增「列表/时间轴」切换,时间轴为甘特图（每 agent 一条 startedAt→duration 横条,运行中延伸到 now 每秒走,按状态着色,直观看并行与长尾）；③ HUD `+N` 可点展开全部 agent（再点收起）
-- feat(workflow): 甘特配色与复用——完成条改为「按阶段着色」（src/utils/workflowFormat.js 新增 phaseColor 柔和循环色相,失败/运行中/排队仍走语义色:红/主色脉冲/灰）,告别整屏同色荧光绿;甘特抽成共享组件 src/components/viewers/WorkflowTimeline.jsx（+ .module.css,含 compact 紧凑版）,WorkflowPanel 与 HUD 共用;HUD 头部亦加「列表/时间轴」切换,运行中可在常驻条里看横条实时生长
-- feat(workflow): 输入框上方常驻 HUD（WorkflowLiveHud，docked 在 ChatView inputStack 内、消息滚动区之外）——运行中的工作流实时展示（绿点脉冲 + 完成/总数 + token + 工具数 + 已用时 + agent 行），不被聊天滚动挤走；完成后自动消失，内联卡片继续作历史记录。数据来自 workflowStore 新增的「活跃工作流」集合（subscribeActive/getActiveWorkflows，按 canonical runId 去重、终态自动移出），由 AppBase 的 SSE 持续喂养，与内联面板是否挂载无关。共享格式化抽到 src/utils/workflowFormat.js（WorkflowPanel 与 HUD 共用）
-- fix(workflow): 代码审查两处加固——① 路径穿越:运行中 fallback 的 `resolveRunDir()` 现复用完成态 journal 同一 `RUN_ID_RE`(`^wf_[A-Za-z0-9_-]+$`)校验,拒绝含 `../`/路径分隔符的 runId 跳出 run 目录;② 回退竞态:`normalizeWorkflowJournal()` 显式写 `live:false`(权威完成快照标记),WorkflowPanel REST 防回退判断从 `prev.live===false` 改为 `prev.live!==true`,即使完成快照未显式带 live 也不会被乱序到达的 live REST 退回「运行中」
-- perf/fix(workflow): 审查三处再加固——① 运行中逐帧 watch 在权威 `<runId>.json` 落盘后**自我拆除**(`workflow-watcher.js`),避免完成后 safetyTimer 每 5s 永久空转重读 agent 文件;② `parseAgentFile` 改**增量续读**(`workflow-live.js`:按 mtime/size 判变,仅从上次 offset 续读新增字节、字节级 partial buffer 不切坏跨块多字节字符/不完整行),不再对活跃 agent 文件每帧 O(size) 全量重读;③ `/api/workflow-journal` 路由对 `session` 加 `^[A-Za-z0-9_-]+$` 早校验,纵深防御(底层 realpath 容器校验之外再挡一层穿越 + 省非法输入的全目录扫描)
-- chore(workflow): 从 PR 移除误提交的 AGENTS.md(CLAUDE.md 本地镜像)并加入 .gitignore
-- test: 新增 server 单测覆盖 lookupToolUseResult / enrich-workflow / workflow-journal / workflow-watcher / workflow-live（逐帧推导 + 逐帧 watcher 广播 + resolveRunDir 穿越防御 + 完成快照 live:false + 增量续读 + 完成后 watch 自拆 + 路由 session 校验）
+- feat(workflow): 聊天内联渲染 Workflow 工作流面板——phases 左列 + 按阶段分组的 agent 行（label / model / 状态 / token / 工具数 / 耗时），完成态读 workflow run journal，运行中从 `subagents/workflows/<runId>/` 实时推导逐帧动画，目录变化经 SSE `workflow_update` 实时推送，完成后权威快照接管
+- feat(workflow): 「列表 / 时间轴」切换——时间轴为甘特图（横条按 startedAt 错峰、宽度=耗时、运行中延伸到 now 每秒走），完成条按阶段着色、失败/运行中/排队走语义色；甘特抽成共享组件 WorkflowTimeline（含 compact 版）
+- feat(workflow): 输入框上方常驻实时 HUD（WorkflowLiveHud）——运行中工作流的进度 / token / 工具数 / 已用时 + 全部 agent 行（运行中显示 lastTool），支持列表/时间轴切换与折叠，完成后自动消失，内联卡片作历史记录
+- feat(workflow): 新增只读路由 `GET /api/workflow-journal`（按 runId/taskId 定位、归一化面板模型、路径穿越防御、惰性 arm watch）；出口为 Workflow tool_result 注入 `_ccvWorkflow={runId,taskId,sessionId,project}`
+- fix(workflow): Workflow 加入完整渲染白名单，简化工具模式下面板正常渲染
+- fix(workflow): WorkflowPanel 补 `.metaTok`/`.metaTool` 样式定义；路由补 200 快照 / live 回退 / runId 优先用例
+- test: 新增 server 单测覆盖 lookupToolUseResult / enrich-workflow / workflow-journal / workflow-watcher / workflow-live / workflowStore
 
 ## 1.6.303 (2026-06-07)
 

@@ -190,7 +190,7 @@ export function deriveLiveJournal(runDir, runId) {
   const agentFiles = files.filter(f => f.startsWith('agent-') && f.endsWith('.jsonl'));
   if (agentFiles.length === 0) return null;
 
-  const { started, done } = readResumeJournal(runDir);
+  const { done } = readResumeJournal(runDir);
   // sessionDir = runDir 上溯三级（runId → workflows → subagents → sessionDir）
   const sessionDir = dirname(dirname(dirname(runDir)));
   const workflowName = deriveWorkflowName(sessionDir, runId);
@@ -203,7 +203,8 @@ export function deriveLiveJournal(runDir, runId) {
     if (!parsed) continue;
     let agentType = '';
     try { agentType = JSON.parse(readFileSync(join(runDir, `agent-${agentId}.meta.json`), 'utf-8')).agentType || ''; } catch {}
-    const state = done.has(agentId) ? 'done' : (started.has(agentId) ? 'running' : 'running');
+    // agent 文件存在即已启动（排队中尚无文件），故非 done 一律 running
+    const state = done.has(agentId) ? 'done' : 'running';
     totalTokens += parsed.tokens;
     totalToolCalls += parsed.toolCalls;
     agents.push({

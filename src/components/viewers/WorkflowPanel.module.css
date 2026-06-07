@@ -232,6 +232,7 @@
   white-space: nowrap;
 }
 
+.metaTok, .metaTool { color: var(--text-secondary); }
 .metaDur { color: var(--text-gray); }
 
 .fallback {

@@ -18,6 +18,10 @@ const { normalizeWorkflowJournal, resolveJournalPath, readNormalizedJournal, res
   await import('../server/lib/workflow-journal.js');
 const { clearCache } = await import('../server/lib/session-transcript-reader.js');
 const { workflowJournalRoutes } = await import('../server/routes/workflow-journal.js');
+const { __setWatchImplForTests, unwatchAllWorkflows } = await import('../server/lib/workflow-watcher.js');
+
+// 路由 happy path 会惰性 arm watch：注入假 fs.watch，规避真实 watch 的平台时序
+__setWatchImplForTests(() => ({ close() {}, on() {} }));
 
 function fakeRes() {
   return {
@@ -59,6 +63,8 @@ function setupSession(dir, sid) {
 }
 
 after(() => {
+  unwatchAllWorkflows();
+  __setWatchImplForTests(null);
   rmSync(TMP, { recursive: true, force: true });
   if (SAVED_PROJECTS_DIR === undefined) delete process.env.CCV_PROJECTS_DIR;
   else process.env.CCV_PROJECTS_DIR = SAVED_PROJECTS_DIR;
@@ -155,5 +161,62 @@ describe('GET /api/workflow-journal session 校验', () => {
   it('合法 session 但无数据 → 404（通过校验，进入定位逻辑）', () => {
     const res = call('session=sid-nope-xyz&runId=wf_none');
     assert.equal(res.statusCode, 404);
+  });
+});
+
+describe('GET /api/workflow-journal 数据路径', () => {
+  const handler = workflowJournalRoutes[0].handler;
+  const call = (qs) => {
+    const res = fakeRes();
+    handler({}, res, new URL('http://x/api/workflow-journal?' + qs), true, { clients: [] });
+    return res;
+  };
+
+  it('runId 命中完成快照 → 200 归一化数据（live:false）', () => {
+    const wfDir = setupSession('-proj-f', 'sid-f');
+    writeFileSync(join(wfDir, 'wf_run-f.json'), JSON.stringify({ ...RAW_JOURNAL, runId: 'wf_run-f' }));
+    const res = call('session=sid-f&runId=wf_run-f&project=f');
+    assert.equal(res.statusCode, 200);
+    const j = JSON.parse(res.body);
+    assert.equal(j.ok, true);
+    assert.equal(j.data.workflowName, 'demo-flow');
+    assert.equal(j.data.live, false);
+    assert.equal(j.data.agents.length, 2);
+  });
+
+  it('taskId 扫描命中 → 200', () => {
+    const wfDir = setupSession('-proj-g', 'sid-g');
+    writeFileSync(join(wfDir, 'wf_run-g.json'), JSON.stringify({ ...RAW_JOURNAL, runId: 'wf_run-g', taskId: 'wtG' }));
+    const res = call('session=sid-g&taskId=wtG&project=g');
+    assert.equal(res.statusCode, 200);
+    assert.equal(JSON.parse(res.body).data.runId, 'wf_run-g');
+  });
+
+  it('runId 与 taskId 同传 → runId 优先（不走 taskId 扫描）', () => {
+    const wfDir = setupSession('-proj-h', 'sid-h');
+    writeFileSync(join(wfDir, 'wf_run-h1.json'), JSON.stringify({ ...RAW_JOURNAL, runId: 'wf_run-h1', taskId: 'wtH1', workflowName: 'by-run' }));
+    writeFileSync(join(wfDir, 'wf_run-h2.json'), JSON.stringify({ ...RAW_JOURNAL, runId: 'wf_run-h2', taskId: 'wtH2', workflowName: 'by-task' }));
+    const res = call('session=sid-h&runId=wf_run-h1&taskId=wtH2&project=h');
+    assert.equal(res.statusCode, 200);
+    assert.equal(JSON.parse(res.body).data.workflowName, 'by-run');
+  });
+
+  it('快照缺失但 runDir 有 agent 文件 → 200 live 推导（live:true）', () => {
+    setupSession('-proj-i', 'sid-i');
+    const rd = join(TMP, '-proj-i', 'sid-i', 'subagents', 'workflows', 'wf_run-i');
+    mkdirSync(rd, { recursive: true });
+    writeFileSync(join(rd, 'agent-A.jsonl'), [
+      JSON.stringify({ type: 'user', timestamp: '2026-06-07T09:00:00.000Z', message: { role: 'user', content: 'do x' } }),
+      JSON.stringify({ type: 'assistant', timestamp: '2026-06-07T09:00:05.000Z', message: { role: 'assistant', model: 'claude-haiku-4-5-20251001', content: [{ type: 'tool_use', name: 'Read' }], usage: { input_tokens: 10, output_tokens: 20 } } }),
+    ].join('\n') + '\n');
+    writeFileSync(join(rd, 'journal.jsonl'), JSON.stringify({ type: 'started', agentId: 'A' }) + '\n');
+    const res = call('session=sid-i&runId=wf_run-i&project=i');
+    assert.equal(res.statusCode, 200);
+    const j = JSON.parse(res.body);
+    assert.equal(j.ok, true);
+    assert.equal(j.data.live, true);
+    assert.equal(j.data.status, 'running');
+    assert.equal(j.data.agents.length, 1);
+    assert.equal(j.data.agents[0].tokens, 30);
   });
 });
