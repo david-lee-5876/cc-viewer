@@ -1245,7 +1245,10 @@ class ChatMessage extends React.Component {
         )}
       </React.Fragment>
     );
-    if (simplify) {
+    // Workflow 工具的结果是工作流面板（phases/agents，含运行中逐帧），始终完整渲染，
+    // 不随简化模式隐藏。
+    const alwaysFullResult = tu.name === 'Workflow';
+    if (simplify && !alwaysFullResult) {
       // 简化模式：仅显示权限拒绝，隐藏其他 tool_result
       return tr.isPermissionDenied ? deniedNode : null;
     }
@@ -1292,7 +1295,7 @@ class ChatMessage extends React.Component {
     const simplify = !this.props.showFullToolContent;
     let simplifiedLabelAdded = false;
     toolUseBlocks.forEach((tu, tuIdx) => {
-      const isFullDisplayTool = tu.name === 'Edit' || tu.name === 'Write' || tu.name === 'EnterPlanMode' || tu.name === 'ExitPlanMode' || tu.name === 'AskUserQuestion' || tu.name === 'Agent' || tu.name === 'TaskCreate' || tu.name === 'SendMessage';
+      const isFullDisplayTool = tu.name === 'Edit' || tu.name === 'Write' || tu.name === 'EnterPlanMode' || tu.name === 'ExitPlanMode' || tu.name === 'AskUserQuestion' || tu.name === 'Agent' || tu.name === 'TaskCreate' || tu.name === 'SendMessage' || tu.name === 'Workflow';
       const tr = toolResultMap[tu.id];
       if (simplify && !isFullDisplayTool) {
         // 简化模式：首个标签前加 "使用工具: " 标签
@@ -1392,7 +1395,7 @@ class ChatMessage extends React.Component {
       if (block.type === 'tool_use') {
         const tu = block;
         const tuIdxInList = toolUseGlobalIndices.indexOf(i);
-        const isFullDisplayTool = tu.name === 'Edit' || tu.name === 'Write' || tu.name === 'EnterPlanMode' || tu.name === 'ExitPlanMode' || tu.name === 'AskUserQuestion' || tu.name === 'Agent' || tu.name === 'TaskCreate' || tu.name === 'SendMessage';
+        const isFullDisplayTool = tu.name === 'Edit' || tu.name === 'Write' || tu.name === 'EnterPlanMode' || tu.name === 'ExitPlanMode' || tu.name === 'AskUserQuestion' || tu.name === 'Agent' || tu.name === 'TaskCreate' || tu.name === 'SendMessage' || tu.name === 'Workflow';
         const tr = toolResultMap[tu.id];
         if (simplify && !isFullDisplayTool) {
           if (!simplifiedLabelAdded) {

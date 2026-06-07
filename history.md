@@ -7,6 +7,7 @@
 - feat(workflow): 完成跟随——server/lib/workflow-watcher.js 监视 workflows 目录（复用 log-watcher 的 dir fs.watch + 防抖 + 安全网慢轮询 + 测试缝），journal 覆写经 SSE `workflow_update` 推送，前端 src/utils/workflowStore.js 按 runId 分发，面板随工作流进度实时刷新
 - feat(workflow): runId 出口补全——server/lib/enrich-workflow.js 仿 enrich-plan-input，在出 SSE/REST 前给 Workflow tool_result 注入 `_ccvWorkflow={runId,taskId,sessionId}`（runId 经 session-transcript-reader 新增的 lookupToolUseResult 按 tool_use.id 反查 CC transcript 顶层 toolUseResult）
 - feat(workflow): 新增只读路由 `GET /api/workflow-journal`（按 runId/taskId 定位、归一化面板模型、路径穿越守卫 + 惰性 arm watch）
+- fix(workflow): 面板在 ccv 默认「简化工具」模式下不渲染——Workflow 加入完整渲染白名单（ChatMessage isFullDisplayTool），且其 tool_result 不随简化模式被 _renderToolResultTrailing 隐藏（始终完整渲染面板）
 - test: 新增 server 单测覆盖 lookupToolUseResult / enrich-workflow / workflow-journal / workflow-watcher / workflow-live（逐帧推导 + 逐帧 watcher 广播）
 
 ## 1.6.302 (2026-06-07)
