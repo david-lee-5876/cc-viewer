@@ -47,8 +47,11 @@ async function getPty() {
  * 在 outputBuffer 截断时，找到安全的截断位置，
  * 避免从 ANSI 转义序列中间开始导致终端状态紊乱。
  * 策略：从截断点向后扫描，跳过可能被截断的不完整转义序列。
+ * 注意：只保 ANSI 序列边界，不保 DEC 2026 同步标记的配对——
+ * 跨 2026 块截断的配平由调用方负责（见 lib/pty-flood-coalescer.js）。
+ * export 供洪泛限流器复用同一截断语义。
  */
-function findSafeSliceStart(buf, rawStart) {
+export function findSafeSliceStart(buf, rawStart) {
   // 从 rawStart 开始，向后最多扫描 64 字节寻找安全起点
   const scanLimit = Math.min(rawStart + 64, buf.length);
   let i = rawStart;

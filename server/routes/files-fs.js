@@ -560,8 +560,12 @@ function revealFile(req, res, parsedUrl, isLocal, deps) {
       if (plat === 'darwin') {
         execFile('open', ['-R', fullPath], () => {});
       } else if (plat === 'win32') {
-        // explorer /select,<path> 必须合到一个 arg；分两个会让含空格/中文路径 escape 失败。
-        spawn('explorer.exe', [`/select,${fullPath}`], { shell: false, windowsHide: true });
+        // explorer /select 的规范形式是 /select,"<path>"（仅路径部分加引号、整体一个 arg）。
+        // 必须 windowsVerbatimArguments 透传：否则 Node 对含空格 arg 整体加引号生成
+        // explorer.exe "/select,C:\My Proj\x.txt"，explorer 解析不了 → 功能失效。
+        // Windows 文件名不允许 "，且不经 cmd.exe，无元字符注入面。
+        const child = spawn('explorer.exe', [`/select,"${fullPath}"`], { windowsVerbatimArguments: true, windowsHide: true });
+        child.on('error', () => {}); // 防 async ENOENT 变 uncaughtException 砸进程
       } else {
         execFile('xdg-open', [dirname(fullPath)], () => {});
       }

@@ -32,7 +32,7 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import {
   mkdtempSync, rmSync, writeFileSync, mkdirSync, readdirSync,
-  chmodSync, lstatSync,
+  chmodSync, lstatSync, existsSync, readFileSync,
 } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
@@ -111,11 +111,29 @@ const fakeBin = join(tmpDir, 'fakebin');
 const origPath = process.env.PATH;
 const STUB_NAMES = ['open', 'explorer.exe', 'cmd.exe', 'gnome-terminal', 'konsole', 'xterm', 'xdg-open'];
 
+// explorer.exe 单独用捕获 stub：把 argv 写进文件供断言 /select,"<path>" 规范形式
+// （POSIX 下 windowsVerbatimArguments 被忽略，argv 即字面值，含字面双引号）。
+// 其余 stub 保持纯 exit 0，不动既有用例语义。
+const explorerCapture = join(tmpDir, 'explorer-args.txt');
+
+// 轮询等待 detached spawn 的捕获文件落地（固定 settle 有 race）
+async function waitForFile(p, timeoutMs = 3000) {
+  const start = Date.now();
+  while (!existsSync(p)) {
+    if (Date.now() - start > timeoutMs) throw new Error(`capture file not written: ${p}`);
+    await new Promise((r) => setTimeout(r, 20));
+  }
+}
+
 before(async () => {
   mkdirSync(fakeBin, { recursive: true });
   for (const n of STUB_NAMES) {
     const p = join(fakeBin, n);
-    writeFileSync(p, '#!/bin/sh\nexit 0\n');
+    if (n === 'explorer.exe') {
+      writeFileSync(p, `#!/bin/sh\nprintf '%s\\n' "$@" > '${explorerCapture}'\nexit 0\n`);
+    } else {
+      writeFileSync(p, '#!/bin/sh\nexit 0\n');
+    }
     try { chmodSync(p, 0o755); } catch {}
   }
   process.env.PATH = fakeBin + ':' + origPath;
@@ -187,13 +205,48 @@ describe('files-fs 分支补强', { concurrency: false }, () => {
       } finally { restorePlatform(); }
     });
 
-    it('200 success on win32 branch (spawn explorer.exe /select via PATH stub)', async () => {
+    it('200 success on win32 branch, argv 为规范形式 /select,"<path>"（verbatim + 仅路径加引号）', async () => {
       setPlatform('win32');
       try {
+        rmSync(explorerCapture, { force: true });
         writeFileSync(join(projectDir, 'rv-w.txt'), 'x');
         const res = await callBody(handlerFor('/api/reveal-file', 'POST'), { path: 'rv-w.txt' });
         assert.equal(res.status, 200);
         assert.equal(res.data.ok, true);
+        await waitForFile(explorerCapture);
+        const argv = readFileSync(explorerCapture, 'utf-8').trimEnd();
+        // POSIX 下 windowsVerbatimArguments 被忽略，stub 收到的 argv[1] 即字面值（含字面双引号）
+        assert.equal(argv, `/select,"${join(projectDir, 'rv-w.txt')}"`);
+        await settle();
+      } finally { restorePlatform(); }
+    });
+
+    it('win32 含空格路径同样走规范形式（整体单 arg，路径带引号）', async () => {
+      setPlatform('win32');
+      try {
+        rmSync(explorerCapture, { force: true });
+        mkdirSync(join(projectDir, 'My Proj'), { recursive: true });
+        writeFileSync(join(projectDir, 'My Proj', 'a b.txt'), 'x');
+        const res = await callBody(handlerFor('/api/reveal-file', 'POST'), { path: 'My Proj/a b.txt' });
+        assert.equal(res.status, 200);
+        await waitForFile(explorerCapture);
+        const argv = readFileSync(explorerCapture, 'utf-8').trimEnd();
+        assert.equal(argv, `/select,"${join(projectDir, 'My Proj', 'a b.txt')}"`);
+        await settle();
+      } finally { restorePlatform(); }
+    });
+
+    it('win32 中文路径（含空格）同样走规范形式', async () => {
+      setPlatform('win32');
+      try {
+        rmSync(explorerCapture, { force: true });
+        mkdirSync(join(projectDir, '中文目录'), { recursive: true });
+        writeFileSync(join(projectDir, '中文目录', '文件 名.txt'), 'x');
+        const res = await callBody(handlerFor('/api/reveal-file', 'POST'), { path: '中文目录/文件 名.txt' });
+        assert.equal(res.status, 200);
+        await waitForFile(explorerCapture);
+        const argv = readFileSync(explorerCapture, 'utf-8').trimEnd();
+        assert.equal(argv, `/select,"${join(projectDir, '中文目录', '文件 名.txt')}"`);
         await settle();
       } finally { restorePlatform(); }
     });

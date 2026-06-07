@@ -81,6 +81,7 @@ import { backupConfigs } from './lib/config-backup.js';
 import { normalizeBasePath, validateBasePath, stripBasePath } from './lib/base-path.js';
 import { createHardenedCleanup } from './lib/term-signals.js';
 import { createBackpressureGate } from './lib/ws-backpressure.js';
+import { createFloodCoalescer } from './lib/pty-flood-coalescer.js';
 
 
 // 动态获取 getPrefsFile()（LOG_DIR 可能在运行时被 setLogDir 修改）
@@ -1027,7 +1028,7 @@ export async function startViewer() {
 async function setupTerminalWebSocket(httpServer) {
   try {
     const { WebSocketServer } = await import('ws');
-    const { writeToPty, writeToPtySequential, resizePty, onPtyData, onPtyExit, getPtyState, getOutputBuffer, getCurrentWorkspace, spawnShell } = await import('./pty-manager.js');
+    const { writeToPty, writeToPtySequential, resizePty, onPtyData, onPtyExit, getPtyState, getOutputBuffer, getCurrentWorkspace, spawnShell, findSafeSliceStart } = await import('./pty-manager.js');
     const {
       spawnScratch,
       writeScratch,
@@ -1132,6 +1133,20 @@ async function setupTerminalWebSocket(httpServer) {
       };
     };
 
+    // 洪泛限流器状态日志（与 makeBpLogger 同款 5s 节流，独立实例不共享计数）。
+    // Windows 实机排"切主题/大流量卡死"时据此确认 ConPTY 洪泛是否触发、几次、量级。
+    const makeFloodLogger = (label, ws) => {
+      let floodCount = 0;
+      let lastLogAt = 0;
+      return (event, bytes) => {
+        if (event === 'start') floodCount++;
+        const now = Date.now();
+        if (now - lastLogAt < 5000) return;
+        lastLogAt = now;
+        console.warn(`[${label}] pty flood ${event}: client=${ws._socket?.remoteAddress || '?'} winBytes=${bytes} floodTotal=${floodCount}`);
+      };
+    };
+
     // scratch 终端 WS：极简版，仅承载 input/resize/data/exit + 显式 kill；不掺杂 hook/SDK/preset
     wssScratch.on('connection', async (ws, req) => {
       const id = req.ccvScratchId;
@@ -1157,11 +1172,18 @@ async function setupTerminalWebSocket(httpServer) {
       // 快照自身有界：scratch outputBuffer 50KB 滚动截断（scratch-pty-manager.js MAX_BUFFER），
       // behind 期间继续灌也不会撑爆 resync 响应。
       const _bpLog = makeBpLogger('scratch-ws', ws);
+      // floodGate 在 bpGate 之后构造（send 闭包依赖 bpGate），onBehind/onResume 经 let 前向引用 reset：
+      // resync 快照是唯一真相源，coalescer 残留 pending 不清会把早于快照的旧字节回灌导致画面回退。
+      let floodGate = null;
       const bpGate = createBackpressureGate({
         getBufferedAmount: () => ws.bufferedAmount,
-        onBehind: (buffered) => _bpLog('behind', buffered),
+        onBehind: (buffered) => {
+          _bpLog('behind', buffered);
+          floodGate?.reset();
+        },
         onResume: (buffered) => {
           _bpLog('resume', buffered);
+          floodGate?.reset();
           if (ws.readyState !== 1) return;
           try { ws.send(JSON.stringify({ type: 'data-resync', data: getScratchOutputBuffer(id) })); } catch {}
         },
@@ -1171,10 +1193,22 @@ async function setupTerminalWebSocket(httpServer) {
         },
       });
 
+      // 洪泛限流器：字节率超阈值时按窗口合并 + last-wins 截断（ConPTY 全屏重绘洪泛防卡死，
+      // 与 bpGate 互补——bpGate 管慢网络写缓冲，floodGate 管快 LAN 字节率，详见 lib/pty-flood-coalescer.js）
+      const _floodLog = makeFloodLogger('scratch-ws', ws);
+      floodGate = createFloodCoalescer({
+        send: (data) => {
+          if (ws.readyState === 1 && bpGate.offer()) {
+            try { ws.send(JSON.stringify({ type: 'data', data })); } catch {}
+          }
+        },
+        findSafeSliceStart,
+        onFloodStart: (bytes) => _floodLog('start', bytes),
+        onFloodEnd: () => _floodLog('end', 0),
+      });
+
       const removeDataListener = onScratchData(id, (data) => {
-        if (ws.readyState === 1 && bpGate.offer()) {
-          try { ws.send(JSON.stringify({ type: 'data', data })); } catch {}
-        }
+        floodGate.offer(data);
       });
 
       const removeExitListener = onScratchExit(id, (exitCode) => {
@@ -1203,6 +1237,7 @@ async function setupTerminalWebSocket(httpServer) {
 
       ws.on('close', () => {
         bpGate.dispose();
+        floodGate.dispose();
         removeDataListener();
         removeExitListener();
         // pty 本身**不杀**（保留以支持刷新重连），由 kill 消息或 /api/workspaces/stop 触发；
@@ -1255,11 +1290,18 @@ async function setupTerminalWebSocket(httpServer) {
       // 快照自身有界：outputBuffer 200KB 滚动截断（pty-manager.js MAX_BUFFER + findSafeSliceStart
       // ANSI 安全起点），behind 期间 PTY 继续灌也不会撑爆 resync 响应。
       const _bpLog = makeBpLogger('terminal-ws', ws);
+      // floodGate 前向引用（构造顺序同 scratch 路径）：onBehind/onResume 必清 coalescer
+      // pending——resync 快照是唯一真相源，旧 pending 回灌会导致画面回退。
+      let floodGate = null;
       const bpGate = createBackpressureGate({
         getBufferedAmount: () => ws.bufferedAmount,
-        onBehind: (buffered) => _bpLog('behind', buffered),
+        onBehind: (buffered) => {
+          _bpLog('behind', buffered);
+          floodGate?.reset();
+        },
         onResume: (buffered) => {
           _bpLog('resume', buffered);
+          floodGate?.reset();
           if (ws.readyState !== 1) return;
           try { ws.send(JSON.stringify({ type: 'data-resync', data: getOutputBuffer() })); } catch {}
           try {
@@ -1288,11 +1330,23 @@ async function setupTerminalWebSocket(httpServer) {
         },
       });
 
+      // 洪泛限流器：字节率超阈值时按窗口合并 + last-wins 截断（ConPTY 全屏重绘洪泛防卡死，
+      // 与 bpGate 互补——bpGate 管慢网络写缓冲，floodGate 管快 LAN 字节率，详见 lib/pty-flood-coalescer.js）
+      const _floodLog = makeFloodLogger('terminal-ws', ws);
+      floodGate = createFloodCoalescer({
+        send: (data) => {
+          if (ws.readyState === 1 && bpGate.offer()) {
+            try { ws.send(JSON.stringify({ type: 'data', data })); } catch {}
+          }
+        },
+        findSafeSliceStart,
+        onFloodStart: (bytes) => _floodLog('start', bytes),
+        onFloodEnd: () => _floodLog('end', 0),
+      });
+
       // PTY 输出 → WebSocket(合并 ws 后客户端自行按 msg.type 分发,server 端不再 role 过滤)
       const removeDataListener = onPtyData((data) => {
-        if (ws.readyState === 1 && bpGate.offer()) {
-          ws.send(JSON.stringify({ type: 'data', data }));
-        }
+        floodGate.offer(data);
       });
 
       // PTY 退出 → WebSocket
@@ -1670,6 +1724,7 @@ async function setupTerminalWebSocket(httpServer) {
 
       ws.on('close', () => {
         bpGate.dispose();
+        floodGate.dispose();
         removeDataListener();
         removeExitListener();
         clientSizes.delete(ws);

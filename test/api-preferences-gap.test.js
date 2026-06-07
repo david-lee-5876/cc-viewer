@@ -66,8 +66,10 @@ function callPost(handler, body, deps = baseDeps, isLocal = true, parsedUrl = { 
 }
 
 let preferencesGet, preferencesPost, claudeSettingsGet, claudeSettingsPost, proxyProfilesGet, proxyProfilesPost;
+let resetThemeSync;
 before(async () => {
-  const { preferencesRoutes } = await import('../server/routes/preferences.js');
+  const { preferencesRoutes, _resetThemeSyncForTests } = await import('../server/routes/preferences.js');
+  resetThemeSync = _resetThemeSyncForTests;
   const find = (p, m) => preferencesRoutes.find((r) => r.path === p && r.method === m).handler;
   preferencesGet = find('/api/preferences', 'GET');
   preferencesPost = find('/api/preferences', 'POST');
@@ -125,7 +127,7 @@ describe('GET /api/preferences (gap)', () => {
 });
 
 describe('POST /api/preferences (gap)', () => {
-  beforeEach(cleanPrefs);
+  beforeEach(() => { cleanPrefs(); resetThemeSync(); });
 
   it('strips incoming auth/authByProject before persisting', async () => {
     const res = await callPost(preferencesPost, { theme: 'light', auth: { password: 'leak' }, authByProject: { a: 1 } });
@@ -161,7 +163,7 @@ describe('POST /api/preferences (gap)', () => {
     }
   });
 
-  it('themeColor triggers a /theme PTY write and retries on mismatch', async () => {
+  it('themeColor triggers a /theme PTY write and never retries on mismatch', async () => {
     const writes = [];
     let ptyCb = null;
     const deps = {
@@ -173,10 +175,10 @@ describe('POST /api/preferences (gap)', () => {
     assert.equal(res.statusCode, 200);
     assert.deepEqual(writes, ['/theme\r'], 'first /theme write issued');
     assert.ok(ptyCb, 'pty listener registered');
-    // 模拟 CLI 输出与目标不一致（dark）→ 应再 toggle 一次
+    // 模拟 CLI 输出与目标不一致（dark）→ 现代 /theme 是交互式选择器，
+    // retry 只会重开对话框（Windows ConPTY 下每轮全屏重绘洪泛）→ 仅 warn 不重发
     ptyCb('Theme set to dark');
-    assert.equal(writes.length, 2, 'retry /theme issued on mismatch');
-    assert.equal(writes[1], '/theme\r');
+    assert.equal(writes.length, 1, 'no retry /theme on mismatch');
   });
 
   it('themeColor does not retry when CLI confirms the target theme', async () => {

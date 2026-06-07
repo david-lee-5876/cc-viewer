@@ -18,6 +18,14 @@ function stripImConfigs(obj) {
   if (obj) for (const id of listPlatforms()) delete obj[id];
 }
 
+// /theme 选择器特征：选项文案高特异、不太可能出现在普通生成输出里（ESC 兜底的门控签名）
+const THEME_PICKER_RE = /Auto \(match terminal\)|colorblind-friendly/;
+
+// 并发切主题防重入：双端同时 POST themeColor 时只允许一条 /theme 同步链路在途，
+// 防止双监听器 + 双 /theme 注入 + 双 ESC（后到的 POST 仅落盘偏好，跳过 PTY 同步）。
+let _themeSyncInFlight = false;
+export function _resetThemeSyncForTests() { _themeSyncInFlight = false; }
+
 function preferencesGet(req, res, parsedUrl, isLocal, deps) {
   let prefs = {};
   try { if (existsSync(deps.getPrefsFile())) prefs = JSON.parse(readFileSync(deps.getPrefsFile(), 'utf-8')); } catch { }
@@ -84,11 +92,18 @@ function preferencesPost(req, res, parsedUrl, isLocal, deps) {
       // preferences.json 可能携带 auth 的 base64 密码 —— 与 lib/auth.js writePrefs 一致地
       // 重申 0600,避免该路径(无 mode/不 chmod)把密码文件留成默认 umask 的可读权限。
       try { chmodSync(prefsFile, 0o600); } catch { /* best-effort; non-POSIX or race */ }
-      // 主题切换时同步到 Claude Code CLI：发 /theme，监听输出验证结果，不对就再发一次
-      if (incoming.themeColor && deps.writeToPty && deps.onPtyData) {
+      // 主题切换时同步到 Claude Code CLI：发 /theme，监听输出验证结果。
+      // 现代 CLI（≥2.x）的 /theme 是交互式选择器（args 被忽略），注入后对话框可能
+      // 残留在终端：
+      //   - mismatch 时**不再重发** /theme —— toggle 语义已不存在，重发只会把选择器
+      //     再次打开，把终端困进"确认-重开"循环（Windows ConPTY 下每轮全屏重绘洪泛）。
+      //   - 5s 超时若 buf 检出选择器特征（选项文案，见 THEME_PICKER_RE），补发一次
+      //     ESC 关闭残留对话框。无特征绝不发 ESC —— CLI 正在流式生成时 /theme 只是被
+      //     排队、对话框未开，误发 ESC 会 interrupt 用户正在跑的任务（宁漏关不误发）。
+      if (incoming.themeColor && deps.writeToPty && deps.onPtyData && !_themeSyncInFlight) {
+        _themeSyncInFlight = true;
         const target = incoming.themeColor === 'light' ? 'light' : 'dark';
         let buf = '';
-        let retried = false;
         const removeListener = deps.onPtyData((data) => {
           buf += data;
           if (buf.length > 4096) buf = buf.slice(-2048); // 限制 buf 大小
@@ -97,15 +112,20 @@ function preferencesPost(req, res, parsedUrl, isLocal, deps) {
           if (match) {
             removeListener();
             clearTimeout(timeout);
-            if (match[1] !== target && !retried) {
-              // 结果与目标不一致，再 toggle 一次
-              retried = true;
-              try { deps.writeToPty('/theme\r'); } catch {}
+            _themeSyncInFlight = false;
+            if (match[1] !== target) {
+              console.warn(`[preferences] CLI theme sync mismatch: got ${match[1]}, wanted ${target} (no retry; modern /theme is an interactive picker)`);
             }
           }
         });
-        // 5 秒超时，避免监听器泄漏
-        const timeout = setTimeout(() => { removeListener(); }, 5000);
+        // 5 秒超时，避免监听器泄漏；检出选择器残留时 ESC 兜底关闭
+        const timeout = setTimeout(() => {
+          removeListener();
+          _themeSyncInFlight = false;
+          if (THEME_PICKER_RE.test(buf)) {
+            try { deps.writeToPty('\x1b'); } catch {}
+          }
+        }, 5000);
         try { deps.writeToPty('/theme\r'); } catch {}
       }
       // 回显里也剥离 auth/authByProject(含 base64 密码) —— GET 已剥离,POST 回显同样不能漏给

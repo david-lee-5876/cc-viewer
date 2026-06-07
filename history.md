@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.6.302 (2026-06-07)
+
+- fix(win): PTY→WS 洪泛限流器（server/lib/pty-flood-coalescer.js）——字节率超阈值合并 + last-wins 截断（速率上限 ≈1.9MB/s，DEC 2026 配平，CCV_FLOOD_* 可调参），根治切主题/大流量场景 ConPTY 重绘洪泛卡死客户端
+- fix(win): /theme 注入修正——mismatch 不再重发（现代 CLI 为交互式选择器），超时检出选择器残留时 ESC 兜底关闭，并发切主题防重入
+- fix(win): 文件浏览器「在系统中展示」失效修复——explorer.exe /select 改 verbatim 规范形式（仅路径加引号），含空格/中文路径可用
+
 ## 1.6.301 (2026-06-06)
 
 - fix(base-path): 修复反代子路径下 API/SSE/file-raw 路由失效（剥前缀写回 parsedUrl.pathname）；CCV_BASE_PATH normalize 收敛到 server/lib/base-path.js + 启动校验告警 + index.html 注入转义修复

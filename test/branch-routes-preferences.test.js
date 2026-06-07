@@ -91,9 +91,11 @@ async function waitUntil(pred, { timeout = 3000, interval = 10 } = {}) {
 }
 
 let preferencesGet, preferencesPost, claudeSettingsGet, claudeSettingsPost, proxyProfilesGet, proxyProfilesPost;
+let resetThemeSync;
 
 before(async () => {
-  const { preferencesRoutes } = await import('../server/routes/preferences.js');
+  const { preferencesRoutes, _resetThemeSyncForTests } = await import('../server/routes/preferences.js');
+  resetThemeSync = _resetThemeSyncForTests;
   const find = (p, m) => preferencesRoutes.find((r) => r.path === p && r.method === m).handler;
   preferencesGet = find('/api/preferences', 'GET');
   preferencesPost = find('/api/preferences', 'POST');
@@ -128,7 +130,7 @@ describe('preferencesGet 分支', () => {
 });
 
 describe('preferencesPost 分支', () => {
-  beforeEach(() => { ensureTmpDir(); cleanPrefs(); });
+  beforeEach(() => { ensureTmpDir(); cleanPrefs(); resetThemeSync(); });
 
   it('body 超过 MAX_POST_BODY 时 req.destroy()（L49）', async () => {
     const deps = { getPrefsFile: () => prefsFile, MAX_POST_BODY: 8 };
@@ -192,29 +194,56 @@ describe('preferencesPost 分支', () => {
     assert.equal(res.statusCode, 200, 'initial writeToPty throw is swallowed');
   });
 
-  it('writeToPty 在 retry 时抛错被 catch 吞掉（L103）', async () => {
-    let calls = 0;
+  it('并发 themeColor POST 防重入：在途时第二条仅落盘偏好、跳过 PTY 同步', async () => {
+    const writes = [];
     let ptyCb = null;
     const deps = {
       ...baseDeps,
-      // 首次成功（push），retry 时抛错 → 命中 L103 catch
-      writeToPty: () => { calls++; if (calls >= 2) throw new Error('retry pty broken'); },
+      writeToPty: (s) => writes.push(s),
+      onPtyData: (cb) => { ptyCb = cb; return () => { ptyCb = null; }; },
+    };
+    // 第一条 POST：注入 /theme 并占住在途标志
+    const res1 = await callPost(preferencesPost, { themeColor: 'light' }, deps);
+    assert.equal(res1.statusCode, 200);
+    assert.deepEqual(writes, ['/theme\r']);
+    // 第二条 POST（双端同时切主题）：偏好正常落盘，但不再注入第二个 /theme
+    const res2 = await callPost(preferencesPost, { themeColor: 'dark' }, deps);
+    assert.equal(res2.statusCode, 200);
+    assert.deepEqual(writes, ['/theme\r'], 'in-flight guard skips second PTY sync');
+    const written = JSON.parse(readFileSync(prefsFile, 'utf-8'));
+    assert.equal(written.themeColor, 'dark', 'second POST still persisted');
+    // 第一条链路完成（match）→ 释放在途标志，后续 POST 恢复注入
+    ptyCb('Theme set to light');
+    const res3 = await callPost(preferencesPost, { themeColor: 'dark' }, deps);
+    assert.equal(res3.statusCode, 200);
+    assert.equal(writes.length, 2, 'sync resumes after in-flight released');
+    ptyCb('Theme set to dark'); // 收尾释放
+  });
+
+  it('mismatch 时不再 retry 重注入（现代 /theme 是交互式选择器，重发只会重开对话框）', async () => {
+    const writes = [];
+    let ptyCb = null;
+    const deps = {
+      ...baseDeps,
+      writeToPty: (s) => writes.push(s),
       onPtyData: (cb) => { ptyCb = cb; return () => { ptyCb = null; }; },
     };
     const res = await callPost(preferencesPost, { themeColor: 'light' }, deps);
     assert.equal(res.statusCode, 200);
     await waitUntil(() => !!ptyCb);
-    // 输出与目标(light)不一致 → 触发 retry，retry 的 writeToPty 抛错被吞
+    // 输出与目标(light)不一致 → 仅 warn，不再写第二个 /theme
     ptyCb('Theme set to dark');
-    assert.equal(calls, 2, 'retry attempted (and its throw was caught)');
+    assert.equal(writes.length, 1, 'no retry injection on mismatch');
+    assert.equal(writes[0], '/theme\r');
   });
 
-  it('5 秒超时回调移除监听器（L108，用真定时器+缩短超时不可控，改用直接断言超时分支可达性）', async () => {
-    // setTimeout(removeListener,5000) 的回调在无任何 PTY 输出时触发。为不真等 5s，
-    // 这里 patch 全局 setTimeout：捕获 5000ms 的那个回调并立即手动调用，验证 removeListener 被执行。
+  it('5 秒超时：buf 无选择器特征 → 仅移除监听器，绝不发 ESC（防误 interrupt 生成中任务）', async () => {
+    // setTimeout(...,5000) 的回调在无匹配输出时触发。为不真等 5s，
+    // patch 全局 setTimeout：捕获 5000ms 的那个回调并立即手动调用。
     const realSetTimeout = globalThis.setTimeout;
     let captured = null;
     let removeCalled = false;
+    const writes = [];
     globalThis.setTimeout = function (fn, ms, ...rest) {
       if (ms === 5000) { captured = fn; return { _fake: true }; } // 不真正排程
       return realSetTimeout(fn, ms, ...rest);
@@ -222,14 +251,43 @@ describe('preferencesPost 分支', () => {
     try {
       const deps = {
         ...baseDeps,
-        writeToPty: () => {},
+        writeToPty: (s) => writes.push(s),
         onPtyData: () => { return () => { removeCalled = true; }; },
       };
       const res = await callPost(preferencesPost, { themeColor: 'light' }, deps);
       assert.equal(res.statusCode, 200);
       assert.ok(captured, '5s timeout scheduled');
-      captured(); // 模拟超时触发 → removeListener()
+      captured(); // 模拟超时触发
       assert.equal(removeCalled, true, 'timeout callback removed the PTY listener');
+      assert.deepEqual(writes, ['/theme\r'], 'no ESC sent when picker signature absent');
+    } finally {
+      globalThis.setTimeout = realSetTimeout;
+    }
+  });
+
+  it('5 秒超时：buf 检出选择器特征 → 补发一次 ESC 关闭残留对话框', async () => {
+    const realSetTimeout = globalThis.setTimeout;
+    let captured = null;
+    let ptyCb = null;
+    const writes = [];
+    globalThis.setTimeout = function (fn, ms, ...rest) {
+      if (ms === 5000) { captured = fn; return { _fake: true }; }
+      return realSetTimeout(fn, ms, ...rest);
+    };
+    try {
+      const deps = {
+        ...baseDeps,
+        writeToPty: (s) => writes.push(s),
+        onPtyData: (cb) => { ptyCb = cb; return () => { ptyCb = null; }; },
+      };
+      const res = await callPost(preferencesPost, { themeColor: 'light' }, deps);
+      assert.equal(res.statusCode, 200);
+      await waitUntil(() => !!ptyCb);
+      // 选择器打开但无人确认：选项文案出现在 PTY 输出里，无 "Theme set to"
+      ptyCb('❯ Dark mode\n  Light mode\n  Auto (match terminal)');
+      assert.ok(captured, '5s timeout scheduled');
+      captured(); // 模拟超时触发 → 检出特征 → ESC
+      assert.deepEqual(writes, ['/theme\r', '\x1b'], 'ESC sent exactly once to dismiss the leftover picker');
     } finally {
       globalThis.setTimeout = realSetTimeout;
     }
