@@ -32,7 +32,7 @@ const SUPPORTS_DIRECTORY_UPLOAD = typeof document !== 'undefined'
 // (b) 提供 fsSkills / memory 数据 props（父级 fetch + state 三态契约 null/false/数据）；
 // (c) 透传 onOpenMemoryDetail（父级 mount 一份 MemoryDetailModal 处理）和 onOpenSkillsModal；
 // (d) calibrationModel 受控（父级要用同一份值做 contextPercent 计算 / 校准）。
-// 解析缓存（_lastTools*/_lastSkills/_lastChosen*）通过 useRef 保留在组件实例内，与 AppHeader 旧版同语义。
+// 解析缓存（lastToolsRef/lastParsedTools/lastSkillsRef/lastChosenForSkills）通过 useRef 保留在组件实例内，与 AppHeader 旧版同语义。
 export default function CachePopoverContent({
   requests = [],
   serverCachedContent,
@@ -415,14 +415,30 @@ export default function CachePopoverContent({
             {builtinBody}
           </div>
         )}
-        {hasMcp && (
-          <div className={`${styles.cacheSection} ${styles.cacheSectionBordered}`}>
-            <div className={styles.cacheSectionLabel}>
-              {t('ui.mcpTools')} ({Array.from(mcpByServer.values()).reduce((n, arr) => n + arr.length, 0)})
+        {hasMcp && (() => {
+          // MCP 过载告警：编组 >4 且子工具 >50 时，在标题位提示初始上下文占用 + 污染风险
+          const mcpToolCount = Array.from(mcpByServer.values()).reduce((n, arr) => n + arr.length, 0);
+          const mcpOverloaded = mcpByServer.size > 4 && mcpToolCount > 50;
+          return (
+            <div className={`${styles.cacheSection} ${styles.cacheSectionBordered}`}>
+              <div className={styles.cacheSectionHeader}>
+                <div className={styles.cacheSectionLabel}>
+                  {t('ui.mcpTools')} ({mcpToolCount})
+                </div>
+                {mcpOverloaded && (
+                  <Alert
+                    type="warning"
+                    showIcon
+                    banner
+                    message={t('ui.mcpWarnOverload')}
+                    style={{ marginRight: 'auto', padding: '2px 8px', fontSize: 11 }}
+                  />
+                )}
+              </div>
+              {mcpBody}
             </div>
-            {mcpBody}
-          </div>
-        )}
+          );
+        })()}
         {hasSkills && (
           <div className={`${styles.cacheSection} ${styles.cacheSectionBordered}`}>
             <div className={styles.cacheSectionHeader}>

@@ -2,7 +2,7 @@
 //
 // Layout:
 //   <LOG_DIR>/voice-packs/<id>.<ext>     ← user-uploaded audio
-//   <repo>/public/voice-packs/default/   ← bundled default pack (Pixel Buddy chiptune)
+//   <repo>/public/voice-packs/default/   ← bundled default pack (default-butler — "Butler · 皇上系列")
 //
 // Why a UUID-keyed flat dir (no nested user-supplied paths): the audio id ends up
 // in URL path (/api/voice-pack/audio/:id), so we whitelist [a-f0-9-]{8,64} and

@@ -35,7 +35,7 @@ function upload(req, res, parsedUrl, isLocal, deps) {
     if (totalSize > MAX_UPLOAD) {
       aborted = true;
       res.writeHead(413, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: 'File too large (max 50MB)' }));
+      res.end(JSON.stringify({ error: 'File too large (max 100MB)' }));
       req.destroy();
       return;
     }

@@ -1,6 +1,7 @@
 import React from 'react';
 import { t } from '../../i18n';
 import { TERMINAL_STATES, fmtDuration, phaseColor } from '../../utils/workflowFormat';
+import { usePreviewTip } from '../common/HoverPreviewTip';
 import styles from './WorkflowTimeline.module.css';
 
 // 失败/运行中/排队走语义色类；完成条按阶段着色（内联 background）。
@@ -17,6 +18,9 @@ function barClass(state) {
  * compact: HUD 紧凑版（更窄标签、更矮横条）。
  */
 export default function WorkflowTimeline({ data, now, compact }) {
+  // 菱形 prompt/result 预览：共享 usePreviewTip（事件委托 + 单实例 portal 浮层，与 TeamSessionPanel 甘特同源）。
+  const { previewHandlers, previewNode } = usePreviewTip();
+
   const agents = (data.agents || []).filter(a => typeof a.startedAt === 'number');
   if (!agents.length) return <div className={styles.notice}>{t('ui.workflow.noTimeline')}</div>;
 
@@ -27,7 +31,11 @@ export default function WorkflowTimeline({ data, now, compact }) {
   const sorted = [...agents].sort((x, y) => x.startedAt - y.startedAt);
 
   return (
-    <div className={`${styles.timeline} ${compact ? styles.compact : ''}`}>
+    <>
+    <div
+      className={`${styles.timeline} ${compact ? styles.compact : ''}`}
+      {...previewHandlers}
+    >
       {sorted.map((a, i) => {
         const running = !TERMINAL_STATES.has(a.state);
         const done = a.state === 'done' || a.state === 'completed';
@@ -55,20 +63,21 @@ export default function WorkflowTimeline({ data, now, compact }) {
               >
                 <span className={styles.ganttDur}>{d}</span>
               </div>
-              {/* 头部菱形 → prompt 预览；尾部菱形 → result 预览。用原生 title 而非 antd Tooltip：
-                  与 TeamSessionPanel 甘特一致——一条时间轴可渲大量菱形、且 live 模式每秒重渲，
-                  每个 Tooltip wrapper 的 token/style/zIndex hook 开销过大。
+              {/* 头部菱形 → prompt 预览；尾部菱形 → result 预览。走 data-preview + usePreviewTip 委托浮层
+                  （不用原生 title：菱形 :hover scale 会重置其计时器、且会与自渲浮层双重弹出）。
                   注：resultPreview 仅完成快照(journal)有值，live 推导恒为空 → 运行中只显示头部菱形。 */}
               {a.promptPreview && (
-                <span className={styles.marker} style={{ left: `${left}%`, color: barColor }} title={a.promptPreview}>◆</span>
+                <span className={styles.marker} style={{ left: `${left}%`, color: barColor }} data-preview={a.promptPreview}>◆</span>
               )}
               {a.resultPreview && (
-                <span className={styles.marker} style={{ left: `${tailLeft}%`, color: barColor }} title={a.resultPreview}>◆</span>
+                <span className={styles.marker} style={{ left: `${tailLeft}%`, color: barColor }} data-preview={a.resultPreview}>◆</span>
               )}
             </div>
           </div>
         );
       })}
     </div>
+    {previewNode}
+    </>
   );
 }

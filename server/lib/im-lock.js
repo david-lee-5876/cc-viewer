@@ -5,7 +5,7 @@
 // - 获取用 openSync(path,'wx') 原子哨兵（与 workspace-registry.js 同款），保证并发只有一个赢家。
 // - 内容写入走 temp + renameSyncWithRetry（与 file-api.js / saveWorkspaces 一致），避免读到半写 JSON。
 // - 读方对 JSON.parse 失败一律容忍（返回 null），绝不据此删锁。
-// - 活性判定三态：dead（无锁）/ booting（已建锁未写 port 且在启动窗内）/ ready（已写 port 且 HTTP 身份探测通过）。
+// - 活性判定四态：dead（无锁）/ booting（已建锁未写 port 且在启动窗内）/ ready（已写 port 且 HTTP 身份探测通过）/ hung（pid 存活但探测失败或超启动窗）。
 //   长跑 bot 不会更新 mtime，故不沿用 workspace-registry 的 mtime 陈旧判据，改用 PID 存活 + HTTP 身份探测。
 // - 释放按身份（仅当锁的 pid === 调用方 pid 才 unlink），避免误删后继进程的锁。
 import { openSync, closeSync, readFileSync, writeFileSync, unlinkSync, mkdirSync, existsSync } from 'node:fs';

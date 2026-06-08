@@ -15,7 +15,8 @@ const SAVED = process.env.CCV_PROJECTS_DIR;
 const TMP = mkdtempSync(join(tmpdir(), 'ccv-live-'));
 process.env.CCV_PROJECTS_DIR = TMP;
 
-const { deriveLiveJournal, resolveRunDir } = await import('../server/lib/workflow-live.js');
+const { deriveLiveJournal, resolveRunDir, parsePhasesFromScript, __clearPhasesCacheForTests } =
+  await import('../server/lib/workflow-live.js');
 const { armWorkflowLiveWatch, unwatchAllWorkflows, __setWatchImplForTests, __triggerLiveScanForTests } =
   await import('../server/lib/workflow-watcher.js');
 
@@ -143,6 +144,136 @@ describe('deriveLiveJournal', () => {
     assert.equal(X.tokens, 41);          // 35 + 6
     assert.equal(X.toolCalls, 2);        // 1 + 1
     assert.equal(X.lastToolName, 'Edit');
+  });
+});
+
+describe('parsePhasesFromScript', () => {
+  const meta = (phasesSrc) => `export const meta = {\n  name: 'demo',\n  description: 'd',\n  phases: ${phasesSrc},\n}\nconst ROOT = '/tmp'\nconst SCHEMA = { type: 'object', items: [1, 2] }\n`;
+
+  it('多行 phases（title+detail）→ index 从 1 同形', () => {
+    const r = parsePhasesFromScript(meta(`[\n    { title: 'Review', detail: 'parallel reviewers' },\n    { title: 'Verify', detail: 'adversarial' },\n  ]`));
+    assert.deepEqual(r, [
+      { index: 1, title: 'Review', detail: 'parallel reviewers' },
+      { index: 2, title: 'Verify', detail: 'adversarial' },
+    ]);
+  });
+
+  it('单行紧凑 phases', () => {
+    const r = parsePhasesFromScript(meta(`[{ title: 'TopUp', detail: '3 个并行 agent' }]`));
+    assert.deepEqual(r, [{ index: 1, title: 'TopUp', detail: '3 个并行 agent' }]);
+  });
+
+  it('detail 可选 → 缺省空串', () => {
+    const r = parsePhasesFromScript(meta(`[{ title: 'Explore' }, { title: 'Design' }]`));
+    assert.deepEqual(r, [
+      { index: 1, title: 'Explore', detail: '' },
+      { index: 2, title: 'Design', detail: '' },
+    ]);
+  });
+
+  it('phases 后紧跟其它代码不被吞（字符串感知配对）', () => {
+    const r = parsePhasesFromScript(meta(`[{ title: 'A', detail: 'a' }]`));
+    assert.equal(r.length, 1);
+    assert.equal(r[0].title, 'A');
+  });
+
+  it('detail 含 ] } 逗号 与转义引号', () => {
+    const r = parsePhasesFromScript(meta(`[{ title: 'Step [B]', detail: 'desc: }, x\\' y' }]`));
+    assert.deepEqual(r, [{ index: 1, title: 'Step [B]', detail: "desc: }, x' y" }]);
+  });
+
+  it('双引号字符串', () => {
+    const r = parsePhasesFromScript(meta(`[{ title: "Scan", detail: "d1" }]`));
+    assert.deepEqual(r, [{ index: 1, title: 'Scan', detail: 'd1' }]);
+  });
+
+  it('空 phases → []', () => {
+    assert.deepEqual(parsePhasesFromScript(meta(`[]`)), []);
+  });
+
+  it('无 meta / 非字符串 / 空 → []', () => {
+    assert.deepEqual(parsePhasesFromScript('function f() {}'), []);
+    assert.deepEqual(parsePhasesFromScript('// just a comment'), []);
+    assert.deepEqual(parsePhasesFromScript(null), []);
+    assert.deepEqual(parsePhasesFromScript(''), []);
+  });
+
+  it('项数上限保护（>50 截断）', () => {
+    const items = Array.from({ length: 60 }, (_, i) => `{ title: 't${i}' }`).join(', ');
+    const r = parsePhasesFromScript(meta(`[${items}]`));
+    assert.equal(r.length, 50);
+  });
+
+  it('更长键名不抢匹配（subtitle/subdetail 不命中 title/detail）', () => {
+    const r = parsePhasesFromScript(meta(`[{ subtitle: 'no', title: 'yes', subdetail: 'nope', detail: 'real' }]`));
+    assert.deepEqual(r, [{ index: 1, title: 'yes', detail: 'real' }]);
+  });
+
+  it('反引号模板串 title/detail（含 ${} 插值不破坏配对）', () => {
+    const r = parsePhasesFromScript(meta('[{ title: `Step ${n}`, detail: `a ${x[0]} b` }]'));
+    assert.deepEqual(r, [{ index: 1, title: 'Step ${n}', detail: 'a ${x[0]} b' }]);
+  });
+
+  it('字段顺序无关（detail 在 title 之前）', () => {
+    const r = parsePhasesFromScript(meta(`[{ detail: 'first', title: 'T' }]`));
+    assert.deepEqual(r, [{ index: 1, title: 'T', detail: 'first' }]);
+  });
+
+  it('phases 为变量引用（非字面量）→ []', () => {
+    const r = parsePhasesFromScript(`export const meta = {\n  name: 'x',\n  phases: PHASES,\n}\nconst PHASES = []\n`);
+    assert.deepEqual(r, []);
+  });
+});
+
+describe('deriveLiveJournal phases 集成 + 缓存', () => {
+  setEnv();
+  beforeEach(() => __clearPhasesCacheForTests());
+
+  function setupWithMeta(scriptBody) {
+    const ENC2 = '-proj', SID2 = 'sid-phases', RUN2 = 'wf_phases-1';
+    const sdir = join(TMP, ENC2, SID2);
+    const rd = join(sdir, 'subagents', 'workflows', RUN2);
+    mkdirSync(rd, { recursive: true });
+    mkdirSync(join(sdir, 'workflows', 'scripts'), { recursive: true });
+    const scriptPath = join(sdir, 'workflows', 'scripts', `flowp-${RUN2}.js`);
+    writeFileSync(scriptPath, scriptBody);
+    writeFileSync(join(rd, 'agent-A.jsonl'), agentLines({
+      prompt: 'do x', model: 'm', tools: ['Read'],
+      usage: { input_tokens: 1, output_tokens: 2, cache_creation_input_tokens: 0 },
+    }));
+    writeFileSync(join(rd, 'agent-A.meta.json'), JSON.stringify({ agentType: 'Explore' }));
+    writeFileSync(join(rd, 'journal.jsonl'), JSON.stringify({ type: 'started', agentId: 'A' }) + '\n');
+    return { rd, RUN2, scriptPath };
+  }
+
+  it('运行中填充 phases，且 agent 不丢、phaseIndex 仍 null', () => {
+    const { rd, RUN2 } = setupWithMeta(
+      `export const meta = {\n  name: 'flowp',\n  phases: [{ title: 'Review', detail: 'r' }, { title: 'Verify' }],\n}\n`);
+    const d = deriveLiveJournal(rd, RUN2);
+    assert.ok(d);
+    assert.equal(d.workflowName, 'flowp');
+    assert.deepEqual(d.phases, [
+      { index: 1, title: 'Review', detail: 'r' },
+      { index: 2, title: 'Verify', detail: '' },
+    ]);
+    assert.equal(d.agents.length, 1);             // agent 列不消失（回归保护）
+    assert.equal(d.agents[0].phaseIndex, null);   // 运行中无权威映射
+  });
+
+  it('脚本无 meta → phases []', () => {
+    const { rd, RUN2 } = setupWithMeta('// no meta here');
+    assert.deepEqual(deriveLiveJournal(rd, RUN2).phases, []);
+  });
+
+  it('缓存按 mtime/size 失效：改写脚本后重解析', () => {
+    const { rd, RUN2, scriptPath } = setupWithMeta(
+      `export const meta = {\n  name: 'flowp',\n  phases: [{ title: 'One' }],\n}\n`);
+    assert.deepEqual(deriveLiveJournal(rd, RUN2).phases, [{ index: 1, title: 'One', detail: '' }]);
+    // 改写脚本（size 变）→ 缓存失效 → 拿到新 phases
+    writeFileSync(scriptPath, `export const meta = {\n  name: 'flowp',\n  phases: [{ title: 'One' }, { title: 'Two' }],\n}\n`);
+    const r2 = deriveLiveJournal(rd, RUN2).phases;
+    assert.equal(r2.length, 2);
+    assert.equal(r2[1].title, 'Two');
   });
 });
 

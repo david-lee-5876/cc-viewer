@@ -231,7 +231,7 @@ export function moveSkill({ source, name, enable, projectDir = process.cwd(), ho
     renameSync(from, to);
   } catch (e) {
     if (e.code === 'EXDEV') {
-      // 跨设备兜底：cp -r + rm -rf（server.js:1337 已有相似模式）
+      // 跨设备兜底：cp -r + rm -rf（与 routes/files-fs.js 的 EXDEV 分支同款模式）
       cpSync(from, to, { recursive: true });
       rmSync(from, { recursive: true, force: true });
     } else {

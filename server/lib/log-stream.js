@@ -127,7 +127,7 @@ function extractDedupKey(raw) {
   const ts = extractTimestamp(raw);
   const urlMatch = raw.match(/"url"\s*:\s*"([^"]+)"/);
   if (ts && urlMatch) return `${ts}|${urlMatch[1]}`;
-  // fallback: 无法提取 key 则用内容哈希
+  // fallback: 无法提取 key 时返回 null；调用方改用位置键 __nokey_<index> 入表（非内容哈希）。
   return null;
 }
 

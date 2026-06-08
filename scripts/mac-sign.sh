@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # macOS 应用签名和公证脚本
-# 使用前请先阅读 SIGNING_GUIDE.md
+# 使用前请先运行 scripts/check-sign-config.sh 检查证书与环境变量配置
 
 set -e
 

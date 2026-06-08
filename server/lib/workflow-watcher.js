@@ -162,7 +162,10 @@ export function unwatchWorkflowDir(workflowsDir) {
 function _liveSignature(data) {
   if (!data) return 'none';
   const states = data.agents.map(a => `${a.agentId}:${a.state}:${a.tokens}:${a.toolCalls}`).join('|');
-  return `${data.status}#${data.agentCount}#${data.totalTokens}#${data.totalToolCalls}#${states}`;
+  // 纳入 phases 摘要：edit-then-resume 改写脚本 meta.phases（agent 计数/态未变）时也能触发重播，
+  // 否则 readPhasesCached 已按 mtime/size 失效重解析了新 phases，却因签名不变被这里抑制广播。
+  const phases = (data.phases || []).map(p => p.title).join(',');
+  return `${data.status}#${data.agentCount}#${data.totalTokens}#${data.totalToolCalls}#${phases}#${states}`;
 }
 
 // runDir = <sessionDir>/subagents/workflows/<runId> → 上溯三级到 sessionDir，查权威快照是否已落盘

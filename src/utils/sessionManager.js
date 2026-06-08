@@ -57,8 +57,9 @@ export function assignMessageTimestamps(messages, prevMessages, isNewSession, pr
  *   - user / 其他 role：体现"哪次 API 调用 *承载* 此 input" → `_timestamp` (carrier，本就 = 该请求自身 ts)。
  *
  * 用途：
- *   - ChatView 1228 reqIdx = tsToIndex[resolveBubbleProducerTs(msg)] —— "查看请求"按钮跳到 producer
- *   - ChatView 1791 tsItemMap[resolveBubbleProducerTs(msg)] —— 网络报文→对话反向跳转 highlight
+ *   - ChatView reqIdx = tsToIndex[resolveBubbleProducerTs(msg)] —— "查看请求"按钮跳到 producer
+ *   - ChatView 网络报文→对话反向跳转 highlight 的 tsItemMap key 走 m.props.displayTs || m.props.timestamp
+ *     （assistant bubble 已收 displayTs={msg._generatedTs}，等价 producer ts）
  *
  * 不影响：`_timestamp` 作 carrier 语义（resolveModelInfo / 时间排序 / dedup key 等消费者保持不变）。
  *

@@ -123,8 +123,8 @@ function askHook(req, res, parsedUrl, isLocal, deps) {
       }
 
       // TOCTOU 防御：占位 id 之前先注册 res.on('close')，否则 await runWaterfallHook 期间 client
-      // abort 的 close 事件落空 → entry 残 5min。占位 set 提前到 await 之前防两条同 ms 并发
-      // POST 的 do-while 都通过 collision check 后 set 互相覆盖（first res 永泄漏到 5min）。
+      // abort 的 close 事件落空 → entry 残到 HOOK_TIMEOUT（24h）。占位 set 提前到 await 之前防两条同 ms 并发
+      // POST 的 do-while 都通过 collision check 后 set 互相覆盖（first res 永泄漏到 HOOK_TIMEOUT）。
       const _placeholderEntry = { questions, res, timer: null, createdAt: Date.now(), shortPoll: shortPollMode };
       deps.pendingAskHooks.set(id, _placeholderEntry);
       deps.persistAskEntry(id, _placeholderEntry);

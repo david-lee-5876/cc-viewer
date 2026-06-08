@@ -69,6 +69,10 @@ function WorkflowList({ data }) {
   const phases = data.phases || [];
   const agents = data.agents || [];
 
+  // 运行中（live）有 phases 但 agent 的 phaseIndex 恒 null（无权威 agent→phase 映射）→ 不分组，
+  // 走扁平 agent 列表（phases 列仍显示）；完成态权威快照 agent 带 numeric phaseIndex → 分组。
+  const grouped = phases.length > 0 && agents.some(a => typeof a.phaseIndex === 'number');
+
   // 按 phaseIndex 分组；无 phase 的 agent 归到 0 组（少见）。
   const byPhase = useMemo(() => {
     const m = new Map();
@@ -79,6 +83,14 @@ function WorkflowList({ data }) {
     }
     return m;
   }, [agents]);
+
+  // 分组态下 phaseIndex 不落在任一 phase 的剩余 agent（含归到 0 组者）——尾部无标题兜底渲染，
+  // 避免 phases.map 只遍历 1..N 时把它们丢弃。
+  const orphanAgents = useMemo(() => {
+    if (!grouped) return [];
+    const known = new Set(phases.map(p => p.index));
+    return agents.filter(a => !(typeof a.phaseIndex === 'number' && known.has(a.phaseIndex)));
+  }, [grouped, phases, agents]);
 
   return (
     <div className={styles.body}>
@@ -99,18 +111,21 @@ function WorkflowList({ data }) {
       )}
       <div className={styles.agentsCol}>
         <AgentHead title={t('ui.workflow.agents', { count: agents.length })} />
-        {phases.length > 0
-          ? phases.map(p => {
-              const list = byPhase.get(p.index) || [];
-              if (!list.length) return null;
-              const groupTitle = p.detail ? `${p.title}: ${p.detail}` : p.title;
-              return (
-                <div key={p.index} className={styles.phaseGroup}>
-                  <div className={styles.phaseGroupTitle} title={groupTitle}>{groupTitle}</div>
-                  {list.map((a, i) => <AgentRow key={a.agentId || i} agent={a} />)}
-                </div>
-              );
-            })
+        {grouped
+          ? (<>
+              {phases.map(p => {
+                const list = byPhase.get(p.index) || [];
+                if (!list.length) return null;
+                const groupTitle = p.detail ? `${p.title}: ${p.detail}` : p.title;
+                return (
+                  <div key={p.index} className={styles.phaseGroup}>
+                    <div className={styles.phaseGroupTitle} title={groupTitle}>{groupTitle}</div>
+                    {list.map((a, i) => <AgentRow key={a.agentId || i} agent={a} />)}
+                  </div>
+                );
+              })}
+              {orphanAgents.map((a, i) => <AgentRow key={a.agentId || `orphan-${i}`} agent={a} />)}
+            </>)
           : agents.map((a, i) => <AgentRow key={a.agentId || i} agent={a} />)}
       </div>
     </div>

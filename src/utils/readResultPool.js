@@ -3,8 +3,8 @@
  *
  * 1.6.237 后实测：同一 .jsx 文件被 87 个 SubAgent / 父 user message 各持一份完整副本（30MB+ 重复）。
  * 对 Read 工具的 resultText 做 content-addressed dedup，让相同内容共享同一字符串引用。
- * hash 仅用 length + 前 64 / 后 64 字符避免大字符串 O(n) hash；碰撞概率极低
- * （要求 length + 边界两端共 128 字节全匹配且中段不同）。
+ * hash 仅用 length + 前 64 / 后 64 字符避免大字符串 O(n) hash；当 length > 512
+ * 再加采中段 64 字符（共三段 192 字节），令仅中段不同的长串也能区分；碰撞概率极低。
  *
  * 抽到独立模块（无外部依赖）便于 node --test 直接 import，避免被
  * toolResultBuilder.js 的传递依赖（./helpers 无 .js 后缀）污染。

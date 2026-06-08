@@ -51,7 +51,7 @@ if (!port) {
 }
 
 // Drain stdin best-effort. Claude Code passes a JSON payload with session_id /
-// transcript_path; only session_id is forwarded. Capped to 64 KB to defang any
+// transcript_path; both session_id and transcript_path are forwarded. Capped to 64 KB to defang any
 // malformed huge payload().
 let stdinData = '';
 try {

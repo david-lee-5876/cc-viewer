@@ -64,7 +64,7 @@ let _defaultConfig = null; // { origin, authType, model }
 
 function _getActiveProfileFilePath() {
   // _projectName/_logDir 声明在 ~line 218；本函数只会在这些变量初始化后被调用
-  // （_loadProxyProfile 的初始调用被挪到 line ~237 之后；watchFile 回调、HTTP handler 也都在之后）
+  // （_loadProxyProfile 的初始调用与 watchFile 挂载都被挪到 _projectName/_logDir 初始化之后；watchFile 回调、HTTP handler 也都在之后）
   if (!_projectName || !_logDir) return null;
   return join(_logDir, 'active-profile.json');
 }
@@ -159,7 +159,7 @@ function getActiveProfileId() {
 }
 
 // _loadProxyProfile 的初始调用 + watchFile 挂载挪到 _projectName/_logDir 初始化之后
-// （见 "初始化日志文件路径" 段后的 _kickoffProxyProfileWatcher 调用），避免 TDZ。
+// （见 "初始化日志文件路径" 段后的 _loadProxyProfile() + watchFile(PROFILE_PATH, …) 挂载），避免 TDZ。
 
 // 纯函数：把 headers 里任意大小写的 authorization / x-api-key 替换为 profile 的 apiKey；
 // 两者都不存在时强制植入 x-api-key（第三方代理最常见的鉴权形式）。

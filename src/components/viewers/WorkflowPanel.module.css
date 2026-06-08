@@ -211,11 +211,11 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  background: var(--color-primary-pale);
+  background: var(--color-primary);
   border-radius: 4px;
   padding: 0 6px;
   font-size: 11px;
-  color: var(--color-primary);
+  color: rgba(255, 255, 255, 0.96);
 }
 
 .agentModel {

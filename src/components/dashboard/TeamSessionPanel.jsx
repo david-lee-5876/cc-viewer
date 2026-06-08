@@ -1,4 +1,5 @@
 import React, { useRef, useState, useCallback, useMemo, useEffect } from 'react';
+import { usePreviewTip } from '../common/HoverPreviewTip';
 import { Empty, Popover, Modal, Tooltip } from 'antd';
 import ChatMessage from '../chat/ChatMessage';
 import { getModelInfo } from '../../utils/helpers';
@@ -204,6 +205,9 @@ function TeamButton({ requests, onOpenSession, navBtnClass }) {
 /* ── Gantt chart sub-component ── */
 function TeamGantt({ teamAgents, teamTotalStart, teamTotalEnd, leadSegments, ganttWrapRef, ganttIndicatorRef, ganttHeight, onGanttHeightChange }) {
   const [ganttOpen, setGanttOpen] = useState(true);
+  // 钻石事件提示：共享 usePreviewTip（事件委托 + 单实例 portal 浮层），替代失效的原生 title
+  // （钻石 :hover scale 会重置原生 title 计时器，与 WorkflowTimeline 同源问题）。
+  const { previewHandlers, previewNode } = usePreviewTip();
   if (!teamAgents || teamAgents.length === 0) return null;
 
   const totalMs = teamTotalEnd - teamTotalStart || 1;
@@ -265,7 +269,7 @@ function TeamGantt({ teamAgents, teamTotalStart, teamTotalEnd, leadSegments, gan
         )}
       </div>
       {ganttOpen && (<>
-        <div ref={ganttWrapRef} className={styles.teamGanttWrap} style={ganttHeight ? { maxHeight: 'none', height: ganttHeight } : undefined}>
+        <div ref={ganttWrapRef} className={styles.teamGanttWrap} style={ganttHeight ? { maxHeight: 'none', height: ganttHeight } : undefined} {...previewHandlers}>
           {/* team-lead row */}
           <div className={styles.teamGanttRow}>
             <div className={`${styles.teamGanttLabel} ${styles.ganttLabelLead}`}>team-lead</div>
@@ -281,10 +285,9 @@ function TeamGantt({ teamAgents, teamTotalStart, teamTotalEnd, leadSegments, gan
               {leadSegments && leadSegments.filter(s => s.label !== 'idle').map((seg, i) => {
                 const tips = { create: 'Team Created', tasks: 'Tasks Created', spawn: 'Agents Spawned', msg: 'SendMessage', cleanup: 'Team Cleanup', text: 'Status Update', thinking: 'Thinking...', 'report-received': 'Report Received' };
                 const dColor = seg.label === 'thinking' ? 'var(--color-code-purple)' : seg.label === 'report-received' ? 'var(--color-success)' : 'var(--color-primary)';
-                // 原生 title 替代 antd Tooltip:gantt 时间线一段会话能渲 100+ 钻石,每个 Tooltip wrapper
-                // 都跑 useToken/useStyleRegister/useZIndex 等 hook(trace 显示 tooltip/index.js 累计 756ms)。
-                // 钻石提示是探索性的,~700ms 浏览器原生延迟可接受;不需要跨行。改 span+title 后 N 倍开销归零。
-                return <span key={`d${i}`} title={tips[seg.label] || seg.label} className={styles.teamGanttDiamond} style={{ left: pct(seg.start) + '%', color: dColor }}>◆</span>;
+                // 走 data-preview + usePreviewTip 委托浮层(替代失效原生 title):一段会话可渲 100+ 钻石、
+                // 钻石是纯 span 零 per-marker 组件开销,委托读 data-preview 单实例浮层渲出。
+                return <span key={`d${i}`} data-preview={tips[seg.label] || seg.label} className={styles.teamGanttDiamond} style={{ left: pct(seg.start) + '%', color: dColor }}>◆</span>;
               })}
             </div>
           </div>
@@ -305,8 +308,8 @@ function TeamGantt({ teamAgents, teamTotalStart, teamTotalEnd, leadSegments, gan
                 {ag.events.filter(ev => !ev.label.startsWith('tool:')).map((ev, ei) => {
                   const tips = { spawn: 'Agent Spawned', claim: 'Task Claimed', done: 'Task Completed', shutdown: 'Shutdown Request', 'msg-in': 'Message Received', report: 'Report Submitted' };
                   const tip = tips[ev.label] || ev.label;
-                  // 同上:agent 行事件钻石也走原生 title,避免每个 agent × 每个事件叠 antd Tooltip 开销。
-                  return <span key={`d${ei}`} title={`${ag.name}: ${tip}`} className={`${styles.teamGanttDiamond} ${styles.ganttLabelAgent}`} style={{ left: pct(ev.ts) + '%' }}>◆</span>;
+                  // 同上:agent 行事件钻石也走 data-preview + 委托浮层。
+                  return <span key={`d${ei}`} data-preview={`${ag.name}: ${tip}`} className={`${styles.teamGanttDiamond} ${styles.ganttLabelAgent}`} style={{ left: pct(ev.ts) + '%' }}>◆</span>;
                 })}
               </div>
             </div>
@@ -361,6 +364,7 @@ function TeamGantt({ teamAgents, teamTotalStart, teamTotalEnd, leadSegments, gan
           {/* scroll position indicator */}
           <div ref={ganttIndicatorRef} className={`${styles.teamGanttIndicator} ${styles.ganttIndicatorInitial}`} />
         </div>
+        {previewNode}
         <div
           className={styles.teamGanttResizer}
           onMouseDown={(e) => {

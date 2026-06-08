@@ -5,7 +5,7 @@
  *
  * Uses workspace mode (CCV_WORKSPACE_MODE=1) so interceptor.js skips auto-init.
  * Then manually: startViewer() → initForWorkspace() → spawnClaude().
- * This mirrors cli.js:runCliModeWorkspaceSelector() + /api/workspaces/launch.
+ * This mirrors the workspace-launch flow behind /api/workspaces/launch (cf. cli.js runCliMode).
  */
 import { dirname, join } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
@@ -68,7 +68,7 @@ async function launch({ path: projectPath, extraArgs = [], claudePath, isNpmVers
   // 3. Import server.js (workspace mode → skips auto-start)
   serverMod = await importAbs(join(rootDir, 'server', 'server.js'));
 
-  // 4. Manually start server (like cli.js:542)
+  // 4. Manually start server
   await serverMod.startViewer();
 
   // 5. Get port

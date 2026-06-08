@@ -11,7 +11,7 @@ import styles from './ProjectAliasEditor.module.css';
 const ALIAS_MAX_LEN = _internals.MAX_LEN;
 
 // Header-inline editor for per-project alias. Renders:
-//   - always-visible (faint, opacity .55 → 1 on hover/focus) pencil button
+//   - pencil button hidden by default (opacity:0), revealed on hover/focus
 //   - antd Modal with input + Save/Cancel/Clear footer
 //
 // Why a self-contained component (not state on AppHeader): AppHeader is ~1700

@@ -85,11 +85,12 @@ class App extends AppBase {
 
   // 套餐用量:额度搭车在常规 Claude 响应头(anthropic-ratelimit-unified-*)上，SSE 已把最新响应
   // 喂进 requests，故无需独立请求/手动刷新——pill 自动跟随最新响应。仅在「有新响应」(requests 引用变化)
-  // 时重算，且仅订阅(OAuth)用户才扫描;解析值未变则不 setState，避免流式期间多余重渲染。
+  // 时重算;解析值未变则不 setState，避免流式期间多余重渲染。
+  // 注意:开关以「响应里是否解析出套餐用量」为准,不再用首请求的 authType 卡死——unified 头本身即证明是订阅账号,
+  // 避免第一条请求碰巧未带 Authorization(走 x-api-key/Unknown) 时永久压住 pill。
   componentDidUpdate(prevProps, prevState) {
     if (super.componentDidUpdate) super.componentDidUpdate(prevProps, prevState);
     if (this._isLocalLog) return;
-    if (this.state.defaultConfig?.authType !== 'OAuth') return;
     const reqs = this.state.requests;
     if (!reqs || reqs.length === 0) return;
     // 无新响应且已有快照 → 跳过(extractLatestPlanUsage 从尾部命中，通常 O(1))。
@@ -482,8 +483,9 @@ class App extends AppBase {
           </Layout.Content>
           <div className={styles.footer}>
             <CountryFlag />
-            {/* 套餐用量(仅订阅 OAuth):额度搭车在常规响应头上，自动跟随最新响应更新(仅有新响应时重算)。 */}
-            {!this._isLocalLog && this.state.defaultConfig?.authType === 'OAuth' && (
+            {/* 套餐用量:额度搭车在常规响应头上，自动跟随最新响应更新(仅有新响应时重算)。
+                开关以「已解析出套餐用量」为准,authType==='OAuth' 仅作无数据时的占位兜底。 */}
+            {!this._isLocalLog && (this.state.planUsage || this.state.defaultConfig?.authType === 'OAuth') && (
               <UsageWindowPill
                 planUsage={this.state.planUsage}
                 authType={this.state.defaultConfig?.authType}

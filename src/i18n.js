@@ -9069,6 +9069,26 @@ const i18nData = {
     "tr": "20'den fazla skill Claude Code bağlamının kirlendiği anlamına gelir — kullanılmayanları elle kaldırın",
     "uk": "Понад 20 Skill забруднює контекст Claude Code — видаліть невикористовувані вручну"
   },
+  "ui.mcpWarnOverload": {
+    "zh": "MCP 工具过多会增加上下文初始占用，并可能造成上下文污染",
+    "en": "Too many MCP tools increase initial context usage and risk context pollution",
+    "zh-TW": "MCP 工具過多會增加上下文初始佔用，並可能造成上下文汙染",
+    "ko": "MCP 도구가 너무 많으면 초기 컨텍스트 사용량이 늘고 컨텍스트 오염 위험이 있습니다",
+    "ja": "MCP ツールが多すぎると初期コンテキスト使用量が増え、コンテキスト汚染の恐れがあります",
+    "de": "Zu viele MCP-Tools erhöhen die anfängliche Kontextnutzung und können den Kontext verunreinigen",
+    "es": "Demasiadas herramientas MCP aumentan el uso inicial del contexto y pueden contaminarlo",
+    "fr": "Trop d'outils MCP augmentent l'utilisation initiale du contexte et risquent de le polluer",
+    "it": "Troppi strumenti MCP aumentano l'uso iniziale del contesto e rischiano di inquinarlo",
+    "da": "For mange MCP-værktøjer øger den indledende kontekstbrug og kan forurene konteksten",
+    "pl": "Zbyt wiele narzędzi MCP zwiększa początkowe zużycie kontekstu i może go zanieczyścić",
+    "ru": "Слишком много MCP-инструментов увеличивают начальное использование контекста и могут его загрязнить",
+    "ar": "وجود الكثير من أدوات MCP يزيد من استهلاك السياق الأولي وقد يلوّث السياق",
+    "no": "For mange MCP-verktøy øker den innledende kontekstbruken og kan forurense konteksten",
+    "pt-BR": "Muitas ferramentas MCP aumentam o uso inicial de contexto e podem poluí-lo",
+    "th": "เครื่องมือ MCP มากเกินไปเพิ่มการใช้บริบทเริ่มต้นและอาจทำให้บริบทปนเปื้อน",
+    "tr": "Çok fazla MCP aracı başlangıç bağlam kullanımını artırır ve bağlamı kirletebilir",
+    "uk": "Забагато інструментів MCP збільшують початкове використання контексту та можуть його забруднити"
+  },
   "ui.skillsLoadError.http": {
     "zh": "服务器错误 (HTTP {status})",
     "en": "Server error (HTTP {status})",

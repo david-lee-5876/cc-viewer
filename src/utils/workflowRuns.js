@@ -6,7 +6,7 @@
  * 原生携带 Task ID / Run ID / Transcript dir 路径(含 sessionId),由 parseWorkflowFromText 解析,
  * 无需服务端 _ccvWorkflow 注入——历史日志(含旧日志)同样可枚举。
  *
- * 镜像 teamModalBuilder.js 的 extractTeamSessions 模式:纯函数、无副作用,便于 node --test 直接 import。
+ * 镜像 teamSessionParser.js 的 extractTeamSessions 模式:纯函数、无副作用,便于 node --test 直接 import。
  */
 
 import { extractToolResultText, parseWorkflowFromText } from './toolResultCore.js';

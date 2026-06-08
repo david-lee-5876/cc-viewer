@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { t } from '../../i18n';
-import { getModelShort } from '../../utils/helpers';
+import { getModelShort, getModelMaxTokens } from '../../utils/helpers';
 import { subscribeActive, getActiveWorkflows } from '../../utils/workflowStore';
 import { TERMINAL_STATES, STATUS_KEYS, fmtTokens, fmtDuration, stateGlyph } from '../../utils/workflowFormat';
 import WorkflowTimeline from './WorkflowTimeline';
@@ -16,17 +16,34 @@ function stateClass(state) {
 function Row({ agent }) {
   const running = !TERMINAL_STATES.has(agent.state);
   const model = getModelShort(agent.model);
+  const is1M = agent.model && getModelMaxTokens(agent.model) >= 1000000;
   const dur = fmtDuration(agent.durationMs);
   const doing = running && agent.lastToolName ? agent.lastToolName : '';
   return (
     <div className={styles.row}>
       <span className={`${styles.dot} ${stateClass(agent.state)} ${running ? styles.statePulse : ''}`}>{stateGlyph(agent.state)}</span>
-      <span className={styles.label} title={agent.label}>{agent.label || agent.agentType || agent.agentId}</span>
-      {doing && <span className={styles.doing} title={agent.lastToolSummary || doing}>{doing}</span>}
-      {model && <span className={styles.model}>{model}</span>}
-      <span className={styles.tok}>{fmtTokens(agent.tokens)} {t('ui.workflow.tok')}</span>
-      <span className={styles.tool}>{agent.toolCalls} {t('ui.workflow.tools')}</span>
-      {dur && <span className={styles.dur}>{dur}</span>}
+      <span className={styles.labelCell}>
+        <span className={styles.label} title={agent.label}>{agent.label || agent.agentType || agent.agentId}</span>
+        {doing && <span className={styles.doing} title={agent.lastToolSummary || doing}>{doing}</span>}
+      </span>
+      <span className={styles.model} title={model ? `${model}${is1M ? ' · 1M' : ''}` : ''}>{model ? `${model}${is1M ? ' · 1M' : ''}` : ''}</span>
+      <span className={styles.tok}>{fmtTokens(agent.tokens)}</span>
+      <span className={styles.tool}>{agent.toolCalls}</span>
+      <span className={styles.dur}>{dur || ''}</span>
+    </div>
+  );
+}
+
+// 列标题行：与数据行同列宽，整列对齐成表格（镜像 WorkflowPanel 的 AgentHead）
+function HudHead({ count }) {
+  return (
+    <div className={`${styles.row} ${styles.head}`}>
+      <span className={styles.dot} />
+      <span className={styles.labelCell}>{t('ui.workflow.agents', { count })}</span>
+      <span className={styles.model}>{t('ui.workflow.colModel')}</span>
+      <span className={styles.tok}>{t('ui.workflow.colTokens')}</span>
+      <span className={styles.tool}>{t('ui.workflow.tools')}</span>
+      <span className={styles.dur}>{t('ui.workflow.colDur')}</span>
     </div>
   );
 }
@@ -61,6 +78,7 @@ export default function WorkflowLiveHud() {
   if (!data) return null;
 
   const agents = data.agents || [];
+  const phases = data.phases || [];
   const total = data.agentCount || agents.length;
   const done = agents.filter(a => TERMINAL_STATES.has(a.state)).length;
   const statusLabel = data.status
@@ -108,6 +126,17 @@ export default function WorkflowLiveHud() {
           </button>
         </span>
       </div>
+      {!collapsed && phases.length > 0 && (
+        <div className={styles.phases}>
+          <span className={styles.phasesLabel}>{t('ui.workflow.phases')}</span>
+          {phases.map(p => (
+            <span key={p.index} className={styles.phaseChip} title={p.detail || p.title || ''}>
+              <span className={styles.phaseChipIdx}>{p.index}</span>
+              <span className={styles.phaseChipTitle}>{p.title}</span>
+            </span>
+          ))}
+        </div>
+      )}
       {!collapsed && view === 'timeline' && (
         <div className={styles.rows}>
           <WorkflowTimeline data={data} now={Date.now()} compact />
@@ -115,6 +144,7 @@ export default function WorkflowLiveHud() {
       )}
       {!collapsed && view === 'list' && (
         <div className={styles.rows}>
+          <HudHead count={total} />
           {rows.map((a, i) => <Row key={a.agentId || i} agent={a} />)}
         </div>
       )}

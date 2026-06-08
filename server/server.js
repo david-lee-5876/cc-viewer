@@ -1982,7 +1982,7 @@ export function broadcastTurnEnd(sessionId = null, ts = Date.now()) {
 }
 
 // 流式状态 SSE 推送定时器：检测 streamingState 变化并广播给所有客户端。
-// rising-edge → turn_end flush 由 _observeStreamingTick 统一处理。
+// rising-edge → turn_end cancel（丢弃 pending，不 flush）由 _observeStreamingTick 统一处理。
 let _streamingStatusTimer = null;
 // 启动后 30s 的更新检查 timer 句柄。必须可清理:
 //  - .unref() 防止它把事件循环 keep-alive 30s(测试进程靠 --test-force-exit 兜底是时序侥幸);
@@ -1995,7 +1995,7 @@ function startStreamingStatusTimer() {
     if (isSdkMode) return;
     const isActive = streamingState.active;
     const wasActive = _lastCliActive;
-    // 统一走 _observeStreamingTick：内部负责 rising-edge cancel（flush pending turn_end）+ 更新 _lastCliActive。
+    // 统一走 _observeStreamingTick：内部负责 rising-edge cancel（丢弃 pending turn_end，不 flush）+ 更新 _lastCliActive。
     _observeStreamingTick(isActive, 'cli');
     const changed = wasActive !== isActive;
     if (changed || isActive) {

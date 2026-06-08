@@ -1,15 +1,17 @@
 #!/usr/bin/env node
-// Generate the bundled default voice pack — a tiny chiptune mascot SFX set
-// (5 distinct 8-bit-style cues) covering every voice-pack event. Output lands
-// at public/voice-packs/default/ ; the dir name is content-neutral so the
-// theme can be swapped (Pixel Buddy today, recorded voice tomorrow) without
-// renaming paths. To override per-event, drop a `<eventKey>.{wav|mp3|ogg|m4a}`
-// into that dir — the manager picks any allowed extension over the .wav written here.
+// Generate a chiptune mascot voice pack ("default-pixel-buddy") — 8-bit-style cues
+// covering every voice-pack event — into public/voice-packs/default/.
+//
+// ⚠️ The pack CURRENTLY shipped in that dir is a different, hand-maintained one
+// ("default-butler", recorded .MP3s). Running this script overwrites it with the
+// chiptune set + rewrites pack.json's name to default-pixel-buddy. To avoid an
+// accidental clobber, this script REFUSES to run when the dir already holds a
+// differently-named pack.json — pass --force to regenerate the chiptune pack anyway.
 //
 // Usage:
-//   node scripts/gen-default-voicepack.js
+//   node scripts/gen-default-voicepack.js [--force]
 
-import { writeFileSync, mkdirSync } from 'node:fs';
+import { writeFileSync, mkdirSync, existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { EVENT_KEYS } from '../server/lib/voice-pack-events.js';
@@ -62,7 +64,7 @@ const PATTERNS = {
 {
   const missing = EVENT_KEYS.filter((k) => !(k in PATTERNS));
   if (missing.length > 0) {
-    console.error(`[voice-pack] gen-placeholder-voicepack.js missing PATTERNS for: ${missing.join(', ')}`);
+    console.error(`[voice-pack] gen-default-voicepack.js missing PATTERNS for: ${missing.join(', ')}`);
     process.exit(1);
   }
 }
@@ -134,12 +136,25 @@ function buildWav(pcm) {
   return Buffer.concat([header, pcm]);
 }
 
+// 防误覆盖：若目标目录已存在「异名」pack.json（如随仓发布的 default-butler），需显式 --force 才覆盖。
+const FORCE = process.argv.includes('--force');
+const existingPackPath = join(OUT_DIR, 'pack.json');
+if (!FORCE && existsSync(existingPackPath)) {
+  let existingName = '';
+  try { existingName = JSON.parse(readFileSync(existingPackPath, 'utf-8')).name || ''; } catch { /* 坏文件视为无名，放行 */ }
+  if (existingName && existingName !== 'default-pixel-buddy') {
+    console.error(`[voice-pack] public/voice-packs/default/ 已存在异名默认包「${existingName}」，本脚本会用 default-pixel-buddy 覆盖它。`);
+    console.error('[voice-pack] 如确需重新生成 chiptune 占位包，请加 --force：node scripts/gen-default-voicepack.js --force');
+    process.exit(1);
+  }
+}
+
 mkdirSync(OUT_DIR, { recursive: true });
 const manifest = {
   name: 'default-pixel-buddy',
   displayName: 'Pixel Buddy · 像素小宠物 (默认)',
-  // Real shipping default — these are intentional chiptune SFX, not placeholders.
-  // Replace any file with your own recording to override per-event.
+  // Intentional chiptune SFX (not silent placeholders); placeholder:false marks them as real audio.
+  // Note: the dir's currently-shipped pack is default-butler, not this one (see header).
   placeholder: false,
   events: {},
   // Onomatopoeia table — what each cue is meant to sound like, for anyone

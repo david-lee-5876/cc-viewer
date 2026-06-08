@@ -8,8 +8,10 @@
  *     ├─ agent-<id>.meta.json    {"agentType":...}
  *     └─ journal.jsonl           started / result 事件（带 agentId）→ running / done 判定
  *
- * 推导出的模型与 normalizeWorkflowJournal 同形（phases 为空 → 前端走扁平 agent 列表），
- * 完成后由权威的 <runId>.json 快照接管（phase 分组）。
+ * 推导出的模型与 normalizeWorkflowJournal 同形。phases 由 parsePhasesFromScript 从生成脚本
+ * （workflows/scripts/<name>-<runId>.js 顶部 meta.phases）文本解析填充——运行中即可显示阶段列；
+ * 但 agent 的 phaseIndex 运行中仍为 null（无权威 agent→phase 映射），故前端按「有 phases 但无
+ * agent 带 numeric phaseIndex」走扁平 agent 列表，完成后由权威的 <runId>.json 快照接管 phase 分组。
  *
  * token 口径：input + output + cache_creation（运行中单调增；与完成快照略有出入，完成时被
  * 权威值替换）。工具数与快照一致（统计 tool_use 块）。
@@ -24,6 +26,10 @@ import { _RUN_ID_RE as RUN_ID_RE } from './workflow-journal.js';
 const MAX_AGENT_BYTES = 64 * 1024 * 1024;
 const LABEL_MAX = 80;
 const PROMPT_PREVIEW_MAX = 600;  // 头部菱形 hover 预览的 prompt 截断长度（与 journal promptPreview 量级一致）
+const MAX_SCRIPT_BYTES = 2 * 1024 * 1024;  // 脚本超过此大小只读头部 SCRIPT_HEAD_BYTES（meta 恒在文件最前）
+const SCRIPT_HEAD_BYTES = 256 * 1024;      // 超大脚本时读取的头部字节数，足够覆盖 meta 块
+const MAX_PHASES = 50;                       // 解析出的 phases 项数上限（防御异常脚本）
+const PHASES_CACHE_MAX = 256;                // _phasesCache 条目上限（防长跑服务端无界增长）
 
 function projectsDir() {
   return process.env.CCV_PROJECTS_DIR || join(getClaudeConfigDir(), 'projects');
@@ -45,15 +51,161 @@ function isInsideProjectsDir(realPath) {
   return realPath === root || realPath.startsWith(root + sep);
 }
 
-/** 从 workflows/scripts/<name>-<runId>.js 反推 workflowName（运行中即可拿到）。 */
-function deriveWorkflowName(sessionDir, runId) {
+/**
+ * 从 workflows/scripts/<name>-<runId>.js 反推 workflowName + 脚本绝对路径（运行中即可拿到）。
+ * 一次 readdirSync 同时给出 name 与 scriptPath，供 phases 解析复用，避免重复扫目录。
+ * @returns {{ name: string, scriptPath: string|null }}
+ */
+function deriveWorkflowScript(sessionDir, runId) {
   try {
     const scriptsDir = join(sessionDir, 'workflows', 'scripts');
+    const suffix = `-${runId}.js`;
     for (const f of readdirSync(scriptsDir)) {
-      if (f.endsWith(`-${runId}.js`)) return f.slice(0, -(`-${runId}.js`.length));
+      if (f.endsWith(suffix)) {
+        return { name: f.slice(0, -suffix.length), scriptPath: join(scriptsDir, f) };
+      }
     }
   } catch {}
-  return '';
+  return { name: '', scriptPath: null };
+}
+
+/**
+ * 从一个对象/数组字面量起始的开括号位置，做「字符串感知」的括号配对扫描，
+ * 返回配平的闭括号下标（含）；不配平返回 -1。
+ * 进入 '...' / "..." 串态时不计括号、并处理 `\` 转义，故 detail 文本里的
+ * `]` `}` `'` 都不会破坏配对。
+ */
+function _matchBalanced(text, openIdx) {
+  const open = text[openIdx];
+  const close = open === '[' ? ']' : '}';
+  let depth = 0, inStr = false, quote = '', esc = false;
+  for (let i = openIdx; i < text.length; i++) {
+    const ch = text[i];
+    if (inStr) {
+      if (esc) { esc = false; continue; }
+      if (ch === '\\') { esc = true; continue; }
+      if (ch === quote) inStr = false;
+      continue;
+    }
+    if (ch === "'" || ch === '"' || ch === '`') { inStr = true; quote = ch; continue; }
+    if (ch === '[' || ch === '{') depth++;
+    else if (ch === ']' || ch === '}') {
+      depth--;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+/** 反转义 JS 单/双引号字符串字面量的内容（仅常见序列；够用且安全）。 */
+function _unescapeStr(s) {
+  return s.replace(/\\(['"`\\nrt])/g, (_, c) =>
+    c === 'n' ? '\n' : c === 'r' ? '\r' : c === 't' ? '\t' : c);
+}
+
+/**
+ * 在一段对象字面量文本里抽取 `key: '...'`（字符串感知，处理转义）。无则 null。
+ * key 前要求边界字符（`{` / `,` / 空白 / 串首），避免 subtitle/subdetail 等更长键名
+ * 子串命中 title/detail。
+ */
+function _extractStrField(objText, key) {
+  const re = new RegExp(`(?:^|[{,\\s])${key}\\s*:\\s*(['"\`])`);
+  const m = re.exec(objText);
+  if (!m) return null;
+  const quote = m[1];
+  let i = m.index + m[0].length, esc = false, out = '';
+  for (; i < objText.length; i++) {
+    const ch = objText[i];
+    if (esc) { out += ch; esc = false; continue; }
+    if (ch === '\\') { out += ch; esc = true; continue; }
+    if (ch === quote) return _unescapeStr(out);
+    out += ch;
+  }
+  return null;
+}
+
+/**
+ * 纯文本解析 workflow 脚本顶部 `export const meta = { ... phases: [{title, detail?}, ...] }`。
+ * 绝不 import/eval 脚本（执行不可信代码）。输出与 normalizeWorkflowJournal 同形：
+ *   [{ index:(从1), title:string, detail:string('' if missing) }]
+ * 任何异常/不匹配/无 phases 一律返回 []。
+ */
+export function parsePhasesFromScript(scriptText) {
+  if (typeof scriptText !== 'string' || !scriptText) return [];
+  // 框定 meta 块（meta 恒为顶部纯字面量）
+  const metaKey = scriptText.match(/export\s+const\s+meta\s*=\s*\{/);
+  if (!metaKey) return [];
+  const metaOpen = scriptText.indexOf('{', metaKey.index);
+  const metaClose = _matchBalanced(scriptText, metaOpen);
+  if (metaClose === -1) return [];
+  const metaBody = scriptText.slice(metaOpen, metaClose + 1);
+
+  // 在 meta 内定位 phases 数组（字符串感知配对，detail 内的 `]` 不影响）
+  const phasesKey = metaBody.match(/phases\s*:\s*\[/);
+  if (!phasesKey) return [];
+  const arrOpen = metaBody.indexOf('[', phasesKey.index);
+  const arrClose = _matchBalanced(metaBody, arrOpen);
+  if (arrClose === -1) return [];
+  const arrBody = metaBody.slice(arrOpen + 1, arrClose);
+
+  // 逐项切出 {...} 对象（字符串感知配对），抽 title/detail
+  const phases = [];
+  let i = 0;
+  while (i < arrBody.length && phases.length < MAX_PHASES) {
+    const objOpen = arrBody.indexOf('{', i);
+    if (objOpen === -1) break;
+    const objClose = _matchBalanced(arrBody, objOpen);
+    if (objClose === -1) break;
+    const objText = arrBody.slice(objOpen, objClose + 1);
+    const title = _extractStrField(objText, 'title');
+    if (title !== null) {
+      phases.push({ index: phases.length + 1, title, detail: _extractStrField(objText, 'detail') || '' });
+    }
+    i = objClose + 1;
+  }
+  return phases;
+}
+
+// scriptPath → { mtimeMs, size, phases }。脚本运行中不可变，命中即跳过读盘+解析；
+// edit-then-resume（mtime/size 变）则重解析。size 上限淘汰防长跑无界增长。
+const _phasesCache = new Map();
+
+/** 安全读取并（带缓存地）解析脚本 phases。失败/越界一律 []。 */
+function readPhasesCached(scriptPath) {
+  if (!scriptPath) return [];
+  let real;
+  try { real = realpathSync(scriptPath); } catch { return []; }
+  if (!isInsideProjectsDir(real)) return [];
+
+  let mtimeMs, size;
+  try { ({ mtimeMs, size } = statSync(real)); } catch { return []; }
+
+  const hit = _phasesCache.get(real);
+  if (hit && hit.mtimeMs === mtimeMs && hit.size === size) return hit.phases;
+
+  let text = '';
+  try {
+    if (size <= MAX_SCRIPT_BYTES) {
+      text = readFileSync(real, 'utf-8');
+    } else {
+      const fd = openSync(real, 'r');
+      try {
+        const buf = Buffer.allocUnsafe(SCRIPT_HEAD_BYTES);
+        const n = readSync(fd, buf, 0, SCRIPT_HEAD_BYTES, 0);
+        text = buf.subarray(0, n).toString('utf-8');
+      } finally { closeSync(fd); }
+    }
+  } catch { return []; }
+
+  const phases = parsePhasesFromScript(text);
+  if (_phasesCache.size >= PHASES_CACHE_MAX) _phasesCache.clear();
+  _phasesCache.set(real, { mtimeMs, size, phases });
+  return phases;
+}
+
+/** 测试辅助：清空 phases 解析缓存。 */
+export function __clearPhasesCacheForTests() {
+  _phasesCache.clear();
 }
 
 // 每文件增量解析缓存：filePath → { mtimeMs, size, offset, partial(Buffer), acc }。
@@ -194,7 +346,9 @@ export function deriveLiveJournal(runDir, runId) {
   const { done } = readResumeJournal(runDir);
   // sessionDir = runDir 上溯三级（runId → workflows → subagents → sessionDir）
   const sessionDir = dirname(dirname(dirname(runDir)));
-  const workflowName = deriveWorkflowName(sessionDir, runId);
+  const { name: workflowName, scriptPath } = deriveWorkflowScript(sessionDir, runId);
+  // 运行中从生成脚本文本解析 meta.phases 填充阶段列（权威 <runId>.json 落盘后由完成快照接管）。
+  const phases = readPhasesCached(scriptPath);
 
   const agents = [];
   let totalTokens = 0, totalToolCalls = 0;
@@ -248,7 +402,7 @@ export function deriveLiveJournal(runDir, runId) {
     totalToolCalls,
     defaultModel: '',
     startTime,
-    phases: [],
+    phases,
     agents,
     live: true,
   };

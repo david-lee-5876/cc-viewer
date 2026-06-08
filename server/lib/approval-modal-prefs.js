@@ -5,7 +5,7 @@
 // fields (modalEnabled, soundEnabled, notifyOnlyWhenHidden) plus the voicePack subtree.
 // voice-pack-manager.js stays focused on the file/audio backing store.
 //
-// Both server/server.js (handles POST /api/preferences) and src/AppBase.jsx (hydrate +
+// Both server/routes/preferences.js (handles POST /api/preferences) and src/AppBase.jsx (hydrate +
 // handleVoicePackChange) use this so the merge contract is single-sourced.
 
 import { EVENT_KEYS } from './voice-pack-events.js';

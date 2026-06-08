@@ -15,9 +15,9 @@
 // / AppBase pick up local mutations without a full reload.
 
 // Key prefix mirrors existing `ccv_` convention (cf. ccv_themeColor / ccv_viewMode).
-// Note (limitation, P0-3 from review): keys on projectName basename, not full
-// path — two projects sharing a basename (e.g. ~/work/cc-viewer + ~/tmp/cc-viewer)
-// share one alias. Acceptable for v1; document in history.md.
+// Known limitation: keyed by projectName basename (not full path; cf. interceptor.js _projectName),
+// so two projects sharing a basename (~/work/cc-viewer + ~/tmp/cc-viewer) collide on one alias.
+// Accepted for v1; real fix would key on a full-path hash (server must also send projectPath).
 const KEY_PREFIX = 'ccv_projectAlias_';
 const MAX_LEN = 32; // taskbar typically truncates 30-50; 32 is the realistic cap.
 

@@ -65,6 +65,7 @@
 }
 
 .marker:hover { transform: translate(-50%, -50%) scale(1.4); }
+/* 预览浮层 .previewTip 已抽到 common/HoverPreviewTip.module.css（与 TeamSessionPanel 甘特共用）。 */
 
 .compact .marker { font-size: 10px; }
 

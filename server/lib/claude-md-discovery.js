@@ -6,7 +6,7 @@
  * 策略：
  *   - 项目候选：从 cwd 实际路径（realpath 后）向上走，每层若 <dir>/CLAUDE.md 存在且为文件，收一条。
  *     终止条件：dir === dirname(dir)（fs root） / dir === homedir() / <dir>/.git 存在 / depth 达 8（任一即停）。
- *     hit homedir 与 hit .git 时仍包含当前层再停，hit fs root 立即停。
+ *     三种终止条件（homedir / .git / fs root）都先收当前层再停——pushIfFile 在终止判定之前无条件执行。
  *   - 全局候选：~/.claude/CLAUDE.md（以参数 claudeConfigDir 为准，由调用方传入，便于沙箱测试）。
  *   - 排序：项目候选按"靠近 cwd"在前，全局总是最后一条。
  *   - 去重：基于 realpath 去重；同一物理文件被多入口指向只留一条（保留先入者）。

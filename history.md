@@ -1,7 +1,12 @@
 # Changelog
 
+## 1.6.305 (2026-06-08)
+
+- fix(usage): 左下角套餐用量 pill 开关改以「响应是否解析出 `anthropic-ratelimit-unified-*`」为准，不再用首请求的 authType 卡死——首请求走 x-api-key/Unknown 时不再永久压住 pill；componentDidUpdate 无条件扫描，footer 渲染条件加 `planUsage` 兜底
+
 ## 1.6.304 (2026-06-08)
 
+- feat(workflow): 运行中工作流面板实时显示「阶段」列——从生成脚本 `workflows/scripts/<name>-<runId>.js` 顶部 `meta.phases` 纯文本解析（字符串感知括号配对，不执行脚本）填充 live journal，按 mtime/size 缓存；前端 WorkflowList 改用 `grouped` 判定（有 phases 但 agent 无 numeric phaseIndex 时仍走扁平列表，避免 agent 列消失），完成后权威快照接管分组
 - feat(workflow): 时间轴横条头/尾各加一个菱形——hover 显示该 agent 的 prompt / result 预览（原生 title，菱形 ◆ 字形 + 投影，参照 Agent Team 甘特）；server 归一化与 live 推导透传 promptPreview/resultPreview
 - refine(workflow): agent 列表表格化——模型 / Tokens / 工具 / 耗时 定宽右对齐成列 + 顶部表头（「代理 (N)」占首列标题）+ 阶段行追加 `阶段:描述`，组内 agent 行缩进
 - refine(workflow): 「列表 / 时间轴」切换改用 antd Segmented（自带滑块切换动画）；全局调整 antd Segmented 选中态为主色蓝填充 + 白字（替换默认浅色滑块）

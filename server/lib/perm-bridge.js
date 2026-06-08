@@ -8,7 +8,7 @@
  * (allow/deny) in the web UI, then outputs hookSpecificOutput.
  *
  * Exit 0 = success (stdout contains hookSpecificOutput with permissionDecision)
- * Exit 1 = fallback (Claude Code proceeds with normal terminal UI)
+ * Exit 1 = error (malformed/missing stdin or invalid env); makes Claude Code log a hook error. Graceful fallback (cc-viewer not running / no decision) instead exits 0 with { continue: true } so the terminal UI proceeds without an error log.
  */
 
 import { readFileSync } from 'node:fs';

@@ -28,10 +28,9 @@
   top: 0;
   bottom: 0;
   width: var(--usage-percent, 0);
-  /* 暗色下 --text-disabled×0.25 几乎不可见,改亮色填充保对比度;
-     比 popover 血条(0.35)更淡——pill 文字是暗灰(--text-disabled),填充太亮会压字 */
-  background-color: var(--text-secondary);
-  opacity: 0.22;
+  /* 填充用中灰 #999 @0.2:白底→浅灰、近黑底→可辨中灰,两套主题同色同透明度,无需分主题。 */
+  background-color: #999;
+  opacity: 0.2;
   transition: width 0.5s ease;
   pointer-events: none;
 }
@@ -119,7 +118,7 @@
   top: 0;
   bottom: 0;
   background-color: var(--text-secondary);
-  opacity: 0.35;
+  opacity: 0.15;
   pointer-events: none;
 }
 

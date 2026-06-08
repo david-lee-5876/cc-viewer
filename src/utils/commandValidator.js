@@ -11,7 +11,7 @@ export function isImageFile(path) {
 
 /**
  * Regex matching Bash commands that may mutate filesystem or git state.
- * 命中任一即触发文件浏览器与 git 面板自动刷新（ChatView._checkToolFileChanges 的 Bash 路径依赖）。
+ * 命中任一即触发文件浏览器与 git 面板自动刷新（ToolFileChangeController 的 Bash 路径依赖）。
  *
  * 覆盖类别：
  * - delete：rm（含 rm -rf）、rmdir（删空目录）、unlink（POSIX 单文件删除）、find ... -delete

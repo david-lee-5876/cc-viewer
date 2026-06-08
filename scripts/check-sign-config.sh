@@ -12,7 +12,7 @@ IDENTITIES=$(security find-identity -v -p codesigning | grep "Developer ID Appli
 
 if [ -z "$IDENTITIES" ]; then
   echo "   ❌ 未找到 Developer ID Application 证书"
-  echo "   📖 请查看 SIGNING_GUIDE.md 了解如何获取证书"
+  echo "   📖 请在 Apple Developer 账户中申请 Developer ID Application 证书"
   echo ""
 else
   echo "   ✅ 找到证书:"
@@ -79,7 +79,7 @@ if [ -n "$IDENTITIES" ] && [ -n "$CSC_LINK" ] && [ -n "$CSC_KEY_PASSWORD" ]; the
     echo "   要启用公证，请设置 APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, APPLE_TEAM_ID"
   fi
 else
-  echo "❌ 配置未完成，请查看 SIGNING_GUIDE.md 完成配置"
+  echo "❌ 配置未完成，请设置 CSC_LINK / CSC_KEY_PASSWORD 等环境变量后重试"
 fi
 
 echo ""
