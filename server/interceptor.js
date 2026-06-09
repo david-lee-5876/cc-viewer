@@ -259,6 +259,14 @@ let _lastTailFp = '';           // 截至最近一次 startRequest 的末位 mes
 let _mainAgentDeltaCount = 0;   // mainAgent 请求计数器（用于触发定期 checkpoint）
 const CHECKPOINT_INTERVAL = 10; // 每 N 条 mainAgent 请求写一个 checkpoint
 
+// 完成序倒置守卫（KEEP IN SYNC: server/lib/delta-reconstructor.js + docs/WIRE_FORMAT.md §3.7）：
+// entry 形态在请求发起时冻结，但 completed entry 按响应完成顺序落盘（AsyncWriteQueue FIFO）。
+// burst 下慢请求的条目会落在快请求之后，文件序 ≠ 请求序，重建器按文件序拼接会翻倍。
+// `_seq` 记录请求发起序（语义序），`_seqEpoch` 标识写进程（重启 / 多进程混写时 seq 不可比，
+// 重建器据 epoch 切换基线而不是误判乱序）。teammate 子进程不参与（其条目不进 mainAgent 重建）。
+let _seqCounter = 0;
+const _seqEpoch = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+
 /**
  * Delta storage: completed 写入成功后更新状态。
  *
@@ -653,6 +661,12 @@ export function setupInterceptor() {
       // 立即把末位 fp 算成字符串保存（不存对象引用），避免后续 mutation 风险
       _deltaOriginalTailFp = messages.length > 0 ? fingerprintMsg(messages[messages.length - 1]) : '';
       _mainAgentDeltaCount++;
+
+      // 完成序倒置守卫：请求发起序号（必须与下方 Plan C eager 块同处一个同步段，中间不得插 await）
+      if (!_isTeammate) {
+        requestEntry._seq = ++_seqCounter;
+        requestEntry._seqEpoch = _seqEpoch;
+      }
 
       // 并发竞态修复（详见模块顶部注释 + history.md Unreleased 段 fix(interceptor) 条目）：
       // snapshot 上一请求处理时的 count/fp 给 Plan C 用，然后 eager 把模块级状态推到本次值

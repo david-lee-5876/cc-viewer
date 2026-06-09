@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- fix(delta): 根治 team 关闭密集事件期 mainAgent 对话整段重复渲染——`_seq`/`_seqEpoch` 请求序号 + 重建器乱序守卫 + 重建完整性校验 + sessionMerge 等长分支内容感知 + merge 入口守卫谓词，四层防御堵「完成序倒置」（机制详见 docs/WIRE_FORMAT.md §3.7）；顺带堵 teammate 双标条目污染累积态、同条重发幂等、mergeLogFiles 内部字段泄漏；新增 delta-reorder.test.js 确定性复现用例
+
 ## 1.6.307 (2026-06-09)
 
 - fix(im): 「对话记录」弹窗助手回复滞后/不显示、需手动刷新——根因是 IM worker 独立进程/端口，其 turn_end 落在 worker 自己进程，主服务收不到。改为主服务 fs.watch 各 IM 日志目录（弹窗请求 `/api/im/:platform/logs` 时惰性登记），写入即广播 `im_log_update` SSE，前端经 window 事件零滞后自动重拉（复用保滚动的纯刷新路径）；watcher 按目录登记，切项目（LOG_DIR 变）后自动关旧重建，新增 im-log-watcher 模块 + 单测

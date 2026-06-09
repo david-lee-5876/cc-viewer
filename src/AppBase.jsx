@@ -19,7 +19,7 @@ import { getDefaultBindingsForLocale as vpDefaultBindingsForLocale } from '../se
 import { mergeVoicePackInto } from '../server/lib/approval-modal-prefs';
 import { saveEntries, loadEntries, clearEntries, getCacheMeta, saveSessionEntries, loadSessionEntries } from './utils/entryCache';
 import { buildSessionIndex, splitHotCold, mergeSessionIndices, HOT_SESSION_COUNT, assignMessageTimestamps, applyInPlaceLastMsgReplace } from './utils/sessionManager';
-import { mergeMainAgentSessions as _mergeMainAgentSessions } from './utils/sessionMerge';
+import { mergeMainAgentSessions as _mergeMainAgentSessions, isMergeBlockedEntry } from './utils/sessionMerge';
 import { reconstructEntries, createIncrementalReconstructor } from '../server/lib/delta-reconstructor.js';
 import { createEntrySlimmer, createIncrementalSlimmer, restoreSlimmedEntry, internEntryBigFields } from './utils/entry-slim.js';
 import { yieldToMain, runChunkedPass, INGEST_BATCH_SIZE } from './utils/ingestPipeline.js';
@@ -395,8 +395,8 @@ class AppBase extends React.Component {
       // 记录本次 mainAgent entry 的 ts，下一次循环用作 prevMainAgentTs
       st.prevMainAgentTs = timestamp;
 
-      // session 合并（跳过 _slimmed）
-      if (!entry._slimmed) {
+      // session 合并（跳过 _slimmed；批量路径额外跳过 stale/broken/inProgress，见谓词 JSDoc）
+      if (!entry._slimmed && !isMergeBlockedEntry(entry, { batch: true })) {
         st.sessions = this.mergeMainAgentSessions(st.sessions, entry);
       }
     }
@@ -1609,8 +1609,9 @@ class AppBase extends React.Component {
           }
         }
 
-        // 合并 mainAgent sessions（跳过被剪枝的 entry，其 messages 已被清空）
-        if (isMainAgent(entry) && entry.body && Array.isArray(entry.body.messages) && !entry._slimmed) {
+        // 合并 mainAgent sessions（跳过被剪枝的 entry，其 messages 已被清空；
+        // 跳过重建层标记的乱序/断裂条目，防完成序倒置翻倍，见 isMergeBlockedEntry JSDoc）
+        if (isMainAgent(entry) && entry.body && Array.isArray(entry.body.messages) && !entry._slimmed && !isMergeBlockedEntry(entry)) {
           const timestamp = entry.timestamp || new Date().toISOString();
           const lastSession = mainAgentSessions.length > 0 ? mainAgentSessions[mainAgentSessions.length - 1] : null;
           const prevMessages = lastSession?.messages || [];

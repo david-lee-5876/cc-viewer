@@ -162,11 +162,13 @@ export function streamReconstructedEntries(filePath, onSegment, opts = {}) {
   let currentSegment = [];
   let dedup = new Map();
   let sentCount = 0;
+  // 跨段共享 seq 守卫状态：stale checkpoint 自成段边界，必须文件级跟踪才能识破乱序
+  const seqState = { lastSeq: 0, lastEpoch: null };
 
   function flushSegment(nextCp) {
     if (currentSegment.length === 0) return;
     const dedupedSegment = Array.from(dedup.values());
-    reconstructSegment(dedupedSegment, nextCp);
+    reconstructSegment(dedupedSegment, nextCp, seqState);
 
     let toSend = dedupedSegment;
     if (sinceMs) {
@@ -217,11 +219,13 @@ export async function streamReconstructedEntriesAsync(filePath, onSegment, opts 
   let currentSegment = [];
   let dedup = new Map();
   let sentCount = 0;
+  // 跨段共享 seq 守卫状态：stale checkpoint 自成段边界，必须文件级跟踪才能识破乱序
+  const seqState = { lastSeq: 0, lastEpoch: null };
 
   async function flushSegment(nextCp) {
     if (currentSegment.length === 0) return;
     const dedupedSegment = Array.from(dedup.values());
-    reconstructSegment(dedupedSegment, nextCp);
+    reconstructSegment(dedupedSegment, nextCp, seqState);
 
     let toSend = dedupedSegment;
     if (sinceMs) {

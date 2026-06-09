@@ -159,10 +159,24 @@ export async function mergeLogFiles(logDir, files) {
     await streamReconstructedEntriesAsync(filePath, async (segment) => {
       let chunk = '';
       for (const entry of segment) {
+        // 乱序/断裂条目若未被补偿回填（messages 仍是裸 delta 切片），丢弃不写：
+        // 剥除 _deltaFormat 后它会伪装成旧格式全量条目，未来读取时把累积状态
+        // 重置成几条切片，比丢掉这条（内容已被更新条目取代）破坏大得多
+        if ((entry._staleReorder || entry._reconstructBroken) &&
+            entry._totalMessageCount && Array.isArray(entry.body?.messages) &&
+            entry.body.messages.length !== entry._totalMessageCount) {
+          continue;
+        }
         delete entry._deltaFormat;
         delete entry._totalMessageCount;
         delete entry._conversationId;
         delete entry._isCheckpoint;
+        // 完成序倒置守卫的内部字段不落盘：合并产物是已重建的全量条目，
+        // seq 序号与 stale/broken 标记只在重建期有意义，泄漏会让后续读取误判
+        delete entry._seq;
+        delete entry._seqEpoch;
+        delete entry._staleReorder;
+        delete entry._reconstructBroken;
         chunk += JSON.stringify(entry) + '\n---\n';
       }
       await appendFile(tmpPath, chunk);

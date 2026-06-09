@@ -54,9 +54,11 @@ export function messageFingerprint(msg) {
  * @param {Array} newMsgs - 新消息数组
  * @param {Array} curMsgs - 累积消息数组
  * @param {Array<string>} [newFps] - 预计算的 newMsgs fp 数组缓存
+ * @param {Array<string>} [sharedCurFpsCache] - 调用方共享的 curMsgs fp 懒缓存（anchor miss 后
+ *   等长分支的对位比较可复用，避免对同一 curMsgs 重算 fp）
  * @returns {{anchorIdx: number, overlapLen: number} | null}
  */
-function findReverseAnchor(newMsgs, curMsgs, newFps) {
+function findReverseAnchor(newMsgs, curMsgs, newFps, sharedCurFpsCache) {
   const newLen = newMsgs.length;
   const curLen = curMsgs ? curMsgs.length : 0;
   if (newLen === 0 || curLen === 0) return null;
@@ -64,12 +66,12 @@ function findReverseAnchor(newMsgs, curMsgs, newFps) {
   // 空内容 fp 不当锚点：role|empty 在 curMsgs 多处可能命中（连续多条空 content 消息），
   // 反向扫到第一个 role|empty 会误锚到错误位置，导致 overlapLen 计算偏差。
   // 若 newMsgs[0..N-1] 是"newMsgs[0] 空 + 后续有效"的混合序列：放弃以 newMsgs[0] 为锚点，
-  // 由调用方 fallback 路径（newLen<curLen → rebuild / newLen===curLen → 整段 append /
+  // 由调用方 fallback 路径（newLen<curLen → rebuild / newLen===curLen → 等长内容感知 /
   // newLen>curLen → push tail）兜底；这条防线保的是"全 empty 新序列误复用旧 curMsgs 末尾"。
   if (!fp0 || fp0.endsWith('|empty')) return null;
   // curMsgs fp 懒缓存：sparse Array 仅记录被访问过的位置，避免上来就 map 整段长 session
   // （curLen 可能 > 5000，但实际访问命中的 p 通常 < 50 个）。
-  const curFpsCache = new Array(curLen);
+  const curFpsCache = sharedCurFpsCache || new Array(curLen);
   const curFpAt = (idx) => {
     let v = curFpsCache[idx];
     if (v === undefined) {
@@ -94,6 +96,29 @@ function findReverseAnchor(newMsgs, curMsgs, newFps) {
     // 验证失败（fp 加固后罕见）→ 继续向左找下一候选；curFpsCache 让重叠候选区域复用 fp。
   }
   return null;
+}
+
+/**
+ * merge 入口守卫（KEEP IN SYNC: server/lib/delta-reconstructor.js 标记写入点）：
+ * 重建层标记的脏条目不得进入 mainAgentSessions 合并——
+ *  - `_staleReorder`：完成序倒置的乱序条目（内容已被更新条目取代）；
+ *  - `_reconstructBroken`：重建结果与 _totalMessageCount 不符且无法修复（拼接会翻倍/错位）；
+ *  - 批量路径额外跳过 `inProgress`：孤立占位条目的 body.messages 是裸 delta 切片
+ *    （批量 reconstructEntries 不为 inProgress 重建全量），merge 会触发 rebuild 截断。
+ *    SSE 实时路径不拦 inProgress——watcher 增量重建器已为其拼出全量 messages，
+ *    无 live-port 配置下"提问气泡请求时即显示"依赖这一行为。
+ * AppBase 的 SSE 与批量两个 merge 入口、以及单测共用此谓词，防三处逻辑漂移。
+ *
+ * @param {object} entry
+ * @param {object} [options]
+ * @param {boolean} [options.batch=false] - 批量（强刷/历史加载）路径
+ * @returns {boolean} true = 该条目不应参与 session 合并
+ */
+export function isMergeBlockedEntry(entry, options = {}) {
+  if (!entry) return true;
+  if (entry._staleReorder || entry._reconstructBroken) return true;
+  if (options.batch && entry.inProgress) return true;
+  return false;
 }
 
 /**
@@ -152,8 +177,11 @@ export function mergeMainAgentSessions(prevSessions, entry, options = {}) {
 
     // fp 缓存：预算 newMessages 的 fp 数组一次，传给 findReverseAnchor 避免多块连续校验
     // 时反复调用 messageFingerprint（流式 5000+ 次/秒 SSE 路径节省 25-100ms 累计延迟）。
+    // curFpsCache 与 findReverseAnchor 共享：anchor miss 时等长分支的对位比较直接复用
+    // 反向扫已经算过的 curMsgs fp，零重复计算。
     const newFps = newLen > 0 ? newMessages.map(messageFingerprint) : null;
-    const anchor = findReverseAnchor(newMessages, lastSession.messages, newFps);
+    const curFpsCache = new Array(curLen);
+    const anchor = findReverseAnchor(newMessages, lastSession.messages, newFps, curFpsCache);
 
     if (anchor) {
       const tailStart = anchor.overlapLen;
@@ -171,10 +199,36 @@ export function mergeMainAgentSessions(prevSessions, entry, options = {}) {
       }
       lastSession.messages = newMessages;
     } else if (newLen === curLen) {
-      // 等长且 anchor 未命中：Plan Mode 2-msg 全替换窗口，整段 append。
-      for (let i = 0; i < newLen; i++) {
-        if (!newMessages[i]._timestamp) newMessages[i]._timestamp = entryTimestamp;
-        lastSession.messages.push(newMessages[i]);
+      // 等长且 anchor 未命中：两种形态必须区分（docs/WIRE_FORMAT.md §3.1 / §3.7）——
+      // (a) Plan Mode 全新短窗口：内容与累积历史无关，整段 append 保留历史；
+      // (b) 同会话近似拷贝：末位原地替换 / 中段编辑，但服务端信号缺失（完成序倒置让无信号
+      //     的 stale checkpoint 后落盘、或旧日志无信号）。此形态整段 append 会让对话翻倍
+      //     （mainAgent 整段重复 bug 的翻倍终点），必须替换。
+      // 判定：对位 fp 严格多数（≥ floor(N/2)+1）→ 近似拷贝。近似拷贝逐位几乎全等；
+      // Plan Mode 新窗口对位相等 ≈ 0；N=2 时需两条全等才替换（保守保持旧 append 行为）。
+      let aligned = 0;
+      const majority = Math.floor(newLen / 2) + 1;
+      for (let i = 0; i < newLen && aligned < majority; i++) {
+        let cfp = curFpsCache[i];
+        if (cfp === undefined) {
+          cfp = messageFingerprint(lastSession.messages[i]);
+          curFpsCache[i] = cfp;
+        }
+        if (newFps[i] === cfp) aligned++;
+      }
+      if (aligned >= majority) {
+        // 近似拷贝 → 整段替换（等价于无信号版 in-place replace）。
+        // 引用更换会使 ChatView WeakMap 渲染缓存失效一次性重渲染，预期内。
+        for (let i = 0; i < newLen; i++) {
+          if (!newMessages[i]._timestamp) newMessages[i]._timestamp = entryTimestamp;
+        }
+        lastSession.messages = newMessages;
+      } else {
+        // Plan Mode 2-msg 全替换窗口，整段 append。
+        for (let i = 0; i < newLen; i++) {
+          if (!newMessages[i]._timestamp) newMessages[i]._timestamp = entryTimestamp;
+          lastSession.messages.push(newMessages[i]);
+        }
       }
     } else {
       // newLen > curLen 且 anchor (单点 newMsgs[0]) 未命中：保守回退至"严格前缀扩展"语义——
