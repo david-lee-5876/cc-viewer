@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.6.307 (2026-06-09)
+
+- fix(im): 「对话记录」弹窗助手回复滞后/不显示、需手动刷新——根因是 IM worker 独立进程/端口，其 turn_end 落在 worker 自己进程，主服务收不到。改为主服务 fs.watch 各 IM 日志目录（弹窗请求 `/api/im/:platform/logs` 时惰性登记），写入即广播 `im_log_update` SSE，前端经 window 事件零滞后自动重拉（复用保滚动的纯刷新路径）；watcher 按目录登记，切项目（LOG_DIR 变）后自动关旧重建，新增 im-log-watcher 模块 + 单测
+- fix(mermaid): mermaid 渲染失败时把 "Syntax error" 节点硬塞进 document.body 污染页面——开 `suppressErrorRendering` 官方开关（失败改走 removeTempElements），渲染前 `parse(suppressErrors)` 预校验非法/半截块不触发 render，rendered 标记移到成功后以便流式补全重试
+- refine(im): 日志模式（`?logfile=`）下隐藏 IM 状态 chip 与 messaging 配置入口（该模式下 IM 无法配置/使用）
+
 ## 1.6.306 (2026-06-08)
 
 - fix(chat): 修复图片上传未完成时按 Enter 导致图片漏发(纯文字发出、缩略图孤儿式留在预览)——新增 in-flight 上传守卫:发送时若有上传在途则自动缓发,显示「上传中」占位 + 发送按钮 spinner,待上传 resolve 后自动带图重发,10s 超时只提示重试不静默发纯文字;覆盖粘贴/选图/拖拽与 SDK/PTY 两种模式,守卫逻辑抽纯函数(uploadDeferLogic)并补单测

@@ -201,6 +201,18 @@ describe('server/routes/im.js 分支补齐', { concurrency: false }, () => {
     assert.equal(r.json().project, 'IM_discord');
     assert.equal(r.json().latest, 'IM_discord/IM_discord_2026-01-01.jsonl', 'findRecentLog 命中 → latest 设值');
   });
+  it('GET logs：惰性调用 deps.ensureImWatch(platformId)（登记日志目录监听）', async () => {
+    const route = imRoutes.find((r) => r.predicate('/api/im/discord/logs', 'GET'));
+    const calls = [];
+    const r = await call(route, { pathname: '/api/im/discord/logs', deps: { im: {}, ensureImWatch: (id) => calls.push(id) } });
+    assert.equal(r.status, 200);
+    assert.deepEqual(calls, ['discord'], 'imLogs 应惰性登记该平台的日志目录监听');
+  });
+  it('GET logs：deps.ensureImWatch 缺失时（worker/旧 deps）optional-chaining 不抛、仍正常返回', async () => {
+    const route = imRoutes.find((r) => r.predicate('/api/im/discord/logs', 'GET'));
+    const r = await call(route, { pathname: '/api/im/discord/logs', deps: { im: {} } });
+    assert.equal(r.status, 200); // 无 ensureImWatch 字段也不影响主流程
+  });
 
   // ── imSenders: notFound + loopbackOnly ──
   it('GET senders：未知平台 → 404', async () => {

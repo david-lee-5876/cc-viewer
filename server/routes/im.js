@@ -212,6 +212,8 @@ function imProcessPost(req, res, parsedUrl, isLocal, deps) {
 function imLogs(req, res, parsedUrl, isLocal, deps) {
   const id = platformOf(parsedUrl.pathname);
   if (!id) { notFound(res); return; }
+  // 弹窗打开即请求本接口 → 惰性登记该平台日志目录监听，后续写入经 im_log_update SSE 零滞后推送。
+  deps.ensureImWatch?.(id);
   const project = `IM_${id}`;
   let latest = null;
   try {

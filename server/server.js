@@ -77,6 +77,7 @@ import { checkAndUpdate } from './lib/updater.js';
 import { loadPlugins, runWaterfallHook, runParallelHook } from './lib/plugin-loader.js';
 import { CONTEXT_WINDOW_FILE, readModelContextSize } from './lib/context-watcher.js';
 import { watchLogFile, startWatching, unwatchAll, sendEventToClients, sendToClients } from './lib/log-watcher.js';
+import { createImLogWatcher } from './lib/im-log-watcher.js';
 import { unwatchAllWorkflows } from './lib/workflow-watcher.js';
 import { cleanupExtractCache } from './lib/jsonl-archive.js';
 import { backupConfigs } from './lib/config-backup.js';
@@ -440,6 +441,25 @@ function getAllLocalIps() {
 // exposed via GETTERS (read fresh at request time — never captured at import), while
 // never-reassigned Maps/arrays are shared by reference. Helpers/constants that live in
 // server.js (not importable elsewhere) are funneled through here too.
+
+// IM 日志目录监听器：仅主 web 服务启用（IM worker 无浏览器 SSE 客户端，广播无意义）。
+// 惰性 ensure：「对话记录」弹窗请求 /api/im/:platform/logs 时才开始 watch 该平台目录；
+// 写入即广播 im_log_update SSE → 前端零滞后重拉（详见 im-log-watcher.js / AppBase im_log_update 监听）。
+const _imLogWatcher = process.env.CCV_IM_PLATFORM ? null : createImLogWatcher({
+  getLogDir: () => LOG_DIR,
+  onChange: (platform) => {
+    if (clients.length > 0 && sendEventToClients) {
+      sendEventToClients(clients, 'im_log_update', { platform, ts: Date.now() });
+    }
+  },
+});
+
+// 惰性登记 IM 日志目录监听（主服务）；worker 上 _imLogWatcher 为 null → no-op。
+function _ensureImWatch(id) {
+  try { _imLogWatcher?.ensure(id); }
+  catch (e) { console.warn(`[im-log-watcher] ensure(${id}) failed:`, e?.message || e); }
+}
+
 const deps = {
   // Reassignable runtime state — must stay getters.
   get protocol() { return serverProtocol; },
@@ -479,6 +499,7 @@ const deps = {
   notifyParentPending: _notifyParentPending,
   logWatcherOpts: _logWatcherOpts,
   scheduleTurnEndBroadcast: _scheduleTurnEndBroadcast,
+  ensureImWatch: _ensureImWatch,
   maskProfiles: _maskProfiles,
   maskApiKey: _maskApiKey,
   isMasked: _isMasked,
@@ -1154,6 +1175,8 @@ async function setupTerminalWebSocket(httpServer) {
       let lastLogAt = 0;
       return (event, bytes) => {
         if (event === 'start') floodCount++;
+        // 该日志为 Windows 实机排洪泛卡死的观测点，macOS 下纯噪声，静默（限流逻辑本身不受影响）。
+        if (process.platform === 'darwin') return;
         const now = Date.now();
         if (now - lastLogAt < 5000) return;
         lastLogAt = now;

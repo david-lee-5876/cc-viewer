@@ -234,6 +234,18 @@ export default function ImConversationModal({ open, onClose, platform, onOpenCon
     return () => { cancelled = true; if (es) try { es.close(); } catch { /* noop */ } };
   }, [open, platform, reloadKey]);
 
+  // 助手回复零滞后自动刷新：主服务 fs.watch 到本平台 IM 日志写入 → im_log_update SSE → AppBase 转 window 事件。
+  // 弹窗打开时监听，命中当前 platform 即 bump reloadKey，复用上方「纯刷新」路径（保留滚动/吸底，不闪烁）。
+  useEffect(() => {
+    if (!open || !platform) return undefined;
+    const onUpdate = (e) => {
+      if (e?.detail?.platform === platform) setReloadKey((k) => k + 1);
+    };
+    window.addEventListener('ccv:im-log-update', onUpdate);
+    return () => window.removeEventListener('ccv:im-log-update', onUpdate);
+    // reloadKey 不入依赖：setReloadKey 用函数式更新，不读闭包内 reloadKey，无需重订阅（重订阅反而多余）。
+  }, [open, platform]);
+
   // 助手（MainAgent）一侧的身份：用所属 IM 平台的 logo + 名称呈现。memo 在 [platform] 上稳定，避免每次重渲都
   // 生成新对象而打穿 ChatMessage 的 shouldComponentUpdate（imAgent !== 恒为真）。
   const imAgent = useMemo(

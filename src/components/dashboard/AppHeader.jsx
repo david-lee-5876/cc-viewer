@@ -142,13 +142,14 @@ class AppHeader extends React.Component {
   // Electron 点击回传派发(_handleHeaderAction case 'menuShortcut')。
   // onClick 全部是 bound class-field arrow / inline arrow，可脱离菜单上下文 standalone 调用。
   _getMenuDescriptors() {
-    const { viewMode, onImportLocalLogs } = this.props;
+    const { viewMode, onImportLocalLogs, isLocalLog } = this.props;
     return [
       { key: 'import-local', icon: <ImportOutlined />, label: t('ui.importLocalLogs'), onClick: onImportLocalLogs },
       { key: 'export-prompts', icon: <ExportOutlined />, label: t('ui.exportPrompts'), onClick: this.handleShowPrompts },
       { key: 'plugin-management', icon: <ApiOutlined />, label: t('ui.pluginManagement'), onClick: this.handleShowPlugins },
       { key: 'process-management', icon: <DashboardOutlined />, label: t('ui.processManagement'), onClick: this.handleShowProcesses },
-      { key: 'messaging', icon: <MessageOutlined />, label: t('ui.messaging.menu'), onClick: () => this.setState({ messagingModalVisible: true, messagingInitialTool: null }) },
+      // 日志模式下 IM 无法正常配置/使用，隐藏 IM 配置入口
+      ...(isLocalLog ? [] : [{ key: 'messaging', icon: <MessageOutlined />, label: t('ui.messaging.menu'), onClick: () => this.setState({ messagingModalVisible: true, messagingInitialTool: null }) }]),
       { key: 'proxy-switch', icon: <SwapOutlined />, label: t('ui.proxySwitch'), onClick: () => this.setState({ proxyModalVisible: true }), dividerAfter: true },
       { key: 'project-stats', icon: <BarChartOutlined />, label: t('ui.projectStats'), onClick: this.handleShowProjectStats },
       ...(viewMode === 'raw' ? [{ key: 'global-settings', icon: <SettingOutlined />, label: t('ui.globalSettings'), onClick: () => this.setState({ globalSettingsVisible: true }) }] : []),
@@ -1632,7 +1633,8 @@ class AppHeader extends React.Component {
               </Tooltip>
             ));
           })()}
-          {IM_PLATFORMS.map((p) => (
+          {/* 日志模式下 IM 无法正常配置/使用，不暴露入口 */}
+          {!isLocalLog && IM_PLATFORMS.map((p) => (
             <ImStatusChip key={p.id} descriptor={p} onStatus={this._onImStatus} onClick={() => this.setState({ imRecordVisible: true, imRecordPlatform: p.id })} />
           ))}
           {isElectronTab && (
