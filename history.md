@@ -2,6 +2,7 @@
 
 ## 1.6.308 (2026-06-10)
 
+- fix(ci): release Windows 构建钉回 windows-2025 镜像——windows-latest 滚动到 windows-2025-vs2026 后 node-gyp 找不到 VS2026，node-pty 原生编译失败
 - fix(win): 根治 /plugins 菜单快速导航偶发整页永久卡死——真凶为 ChatView prompt 检测正则灾难性回溯（/plugins 菜单形态文本 8 行即 >90s，4KB buffer 等效无限占死主线程，旧「洪泛超消化力」结论被推翻），重写为线性行式解析器 promptDetect.js（新旧等价回归 + 对抗样本 <50ms 断言，`ccv_legacy_prompt_detect=1` 逃生开关）；xterm 喂入改消化力闭环：write callback 计时 AIMD 自适应 chunk（4~32KB，Windows 16KB 起步，500ms fail-open 不死锁）；顺带修 write 抛错时 chunk 静默丢失（指针快照位置错误）；新增 termDiag 本地诊断（控制台 `__ccvTermDiag()`，`localStorage.ccv_term_diag='1'` 开周期日志）；解析器 CRLF 行尾兼容（Windows ConPTY）+ ANSI 序列跨 write 撕裂缓带（splitTrailingAnsiCarry）+ 单项超大快照不再误报 "output trimmed"
 - feat(context): 上下文血条识别 fable 模型——fable-5 及 fable-5.x 默认 1M 窗口（前端规则表/auto 校准 + 服务端 context-watcher 四处同步）
 - fix(terminal): web terminal xterm 全链路加固——堵 input-sequential 非字符串 chunk 致服务进程崩溃（入口 every(string) 校验 + sendNext 守卫，拒绝路径回 ok:false 不静默丢弃）；粘贴/注入剥离内嵌 `\x1b[201~` 防 paste-injection（xterm 6.0 未内置，主面板 + scratch 双端覆盖；循环剥离到稳定堵分裂残片重组绕过 + 覆盖 8-bit C1 CSI `\x9b` 变体）；pendingImages 路径注入补 preventDefault（修注入即提交）；主 PTY spawn 加在途闸防双开 shell 泄漏（while 循环覆盖 ≥3 并发）；ws close 重连补 writeQ/terminal reset 防回放重复（主面板 + scratch）；resize cols/rows 钳制为有限正整数 + fit 0 尺寸守卫防 2×1 打到 ConPTY；初始 fit/mobile rAF 加 unmount 竞态守卫 + webgl 加载失败 catch 补 dispose

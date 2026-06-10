@@ -17,7 +17,10 @@ jobs:
         include:
           - os: macos-latest
             platform: mac
-          - os: windows-latest
+          # windows-latest 已滚动到 windows-2025-vs2026,自带 VS2026 而 node-gyp 识别不了
+          # (node-pty 原生编译报 "Could not find any Visual Studio installation")。
+          # 钉住 windows-2025(VS2022)直到 node-gyp 支持 VS2026。
+          - os: windows-2025
             platform: win
           - os: ubuntu-latest
             platform: linux
