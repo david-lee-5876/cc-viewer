@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.6.309 (2026-06-10)
+
+- fix(chat): 根治流式期间无法脱离吸底——SSE 高频重启缓动链使锁常驻、用户滚动信号被吃掉；新增用户滚动意图暂停窗口：直接监听 wheel/touch/pointer 拖动（纯点击/tap 不开窗），窗口内暂停一切自动追底、sticky 实时翻转，停手 300ms（可调 `userScrollIdleMs`）终判并恢复追底；desktop 与安卓 Virtuoso 双路径覆盖，「回到底部」等显式动作不受抑制；容器外触摸（横滑代码块等）不误暂停追底；顺带修 unbind/换绑不释放缓动锁的孤儿锁（决策入口被堵死至下个缓动周期）
+
 ## 1.6.308 (2026-06-10)
 
 - fix(ci): release Windows 构建钉回 windows-2025 镜像——windows-latest 滚动到 windows-2025-vs2026 后 node-gyp 找不到 VS2026，node-pty 原生编译失败

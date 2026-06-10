@@ -119,13 +119,17 @@ describe('StickyBottomController', () => {
     assert.deepEqual(roInstances[0].observed, [el]);
   });
 
-  // ─── 2. bind virtuoso 模式仅装 RO ──────────────────────────────────────
-  it('2. bind virtuoso 模式仅装 RO，不装 scroll', () => {
+  // ─── 2. bind virtuoso 模式装 RO + 轻量延展 scroll 监听 ─────────────────
+  it('2. bind virtuoso 模式装 RO + 仅延展不决策的 scroll 监听', () => {
     const { ctrl } = makeController({ getMode: () => 'virtuoso' });
     const el = makeFakeEl();
     ctrl.bind(el);
-    assert.equal(el._hasListener('scroll'), false);
+    // 用户滚动暂停窗口机制：virtuoso 也挂 scroll，但只做 momentum 延展、不做 sticky 决策
+    assert.equal(el._hasListener('scroll'), true);
     assert.equal(roInstances.length, 1);
+    // 不排决策 rAF（决策权威仍是 notifyAtBottom）
+    el._fire('scroll');
+    assert.equal(ctrl._scrollHandlerRafId, null, 'virtuoso scroll 不进决策通道');
   });
 
   // ─── 3. bind 同 el 重入 idempotent ─────────────────────────────────────
@@ -360,12 +364,13 @@ describe('StickyBottomController', () => {
     assert.equal(el.scrollTop, 0);
   });
 
-  // ─── 20. _recentTouchTs 内 300ms RO 抑制 ───────────────────────────────
-  it('20. touch 300ms 内 RO 抑制（不写 scrollTop，仍 refreshFollowTarget）', () => {
+  // ─── 20. touch 拖动后 300ms 用户滚动窗口内 RO 抑制 ─────────────────────
+  it('20. touch 拖动 300ms 内 RO 抑制（不写 scrollTop，仍 refreshFollowTarget）', () => {
     const { ctrl } = makeController({ initialSticky: true });
     const el = makeFakeEl({ scrollHeight: 1500, clientHeight: 600, scrollTop: 0 });
     ctrl.bind(el);
     document.fire('touchstart');
+    document.fire('touchmove'); // 有位移 = 拖动（纯 tap 不开窗，见 user-intent 测试）
     document.fire('touchend');
     el.scrollHeight = 2000;
     roInstances[0].fire(el);
@@ -375,6 +380,7 @@ describe('StickyBottomController', () => {
     el.scrollHeight = 2200;
     roInstances[0].fire(el);
     assert.equal(el.scrollTop, 1600, '350ms 后抑制窗口过，正常跟');
+    ctrl.dispose(); // 清空窗定时器，防真实 setTimeout 跨用例泄漏
   });
 
   // ─── 21. notifyAtBottom 锁短路 + 60px 兜底 + 16ms 决策去重 ─────────────

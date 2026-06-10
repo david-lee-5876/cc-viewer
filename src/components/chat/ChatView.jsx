@@ -209,6 +209,7 @@ class ChatView extends React.Component {
       inputEmpty: true,
       pendingInput: null,
       stickyBottom: true,
+      userScrolling: false, // 用户滚动意图暂停窗口（wheel/touch/pointer 拖动进行中或空窗内）
       ptyPrompt: null,
       ptyPromptHistory: [],
       inputSuggestion: null,
@@ -308,7 +309,7 @@ class ChatView extends React.Component {
       ? (Math.random() < 0.5 ? orbitingUrl : shimmerUrl)
       : null;
     this._unmounted = false;
-    // 流式吸底控制器：收敛 7 处 scrollTop 写入、3 套并行机制、引用计数 lock、touchSuppress
+    // 流式吸底控制器：收敛 7 处 scrollTop 写入、3 套并行机制、引用计数 lock、用户滚动意图暂停窗口
     // 详见 src/utils/stickyBottomController.js + plan modular-floating-hopper.md (v2.1)
     this._stickyController = new StickyBottomController({
       getSticky: () => this.state.stickyBottom,
@@ -318,6 +319,12 @@ class ChatView extends React.Component {
         this.setState({ stickyBottom: v });
       },
       getMode: () => useVirtuoso ? 'virtuoso' : 'desktop',
+      // 用户滚动窗口开/关沿 → state.userScrolling，驱动 Virtuoso followOutput 门控
+      onUserScrollChange: (active) => {
+        if (this._unmounted) return;
+        if (this.state.userScrolling === active) return;
+        this.setState({ userScrolling: active });
+      },
     });
 
     // ── Ask 问答流状态机控制器（逻辑从 ChatView 抽出，见 ./controllers/askFlowController.js）──
@@ -839,6 +846,8 @@ class ChatView extends React.Component {
     }
     // mobileChatVisible: scroll to bottom when becoming visible
     if (isMobile && this.props.mobileChatVisible && !prevProps.mobileChatVisible) {
+      // 显式动作（面板切显示）：清除用户滚动窗口，贴底不被残留窗口抑制
+      this._stickyController.resetUserScrollState();
       requestAnimationFrame(() => {
         if (this.virtuosoRef.current) {
           this.virtuosoRef.current.scrollToIndex({ index: 'LAST' });
@@ -926,7 +935,8 @@ class ChatView extends React.Component {
         }
         // (b) sticky 时同步写到底（避免 React 18 batched commit 后一帧"先看顶后瞬移"）
         // 先 refreshFollowTarget 复用一次 forced layout，writeUnderLock 直接用缓存值（修补 1）
-        if (this.state.stickyBottom) {
+        // 用户滚动窗口内不硬贴底（用户意志优先，停手终判会补追）
+        if (this.state.stickyBottom && !this._stickyController.isUserScrolling()) {
           const el = useVirtuoso ? this._virtuosoScrollerEl : this.containerRef.current;
           if (el) {
             this._stickyController.refreshFollowTarget(el);
@@ -954,7 +964,9 @@ class ChatView extends React.Component {
 
   // 保留方法名（queueNext L759 仍在调）；常规吸底与跳转分流，常规吸底走 controller.writeUnderLock
   scrollToBottom() {
-    const shouldStick = this.state.stickyBottom;
+    // 单点守卫：用户滚动窗口内常规吸底分支全部停摆（含 Virtuoso scrollToIndex 兜底），
+    // 跳转分支（scrollToTimestamp）不受影响
+    const shouldStick = this.state.stickyBottom && !this._stickyController.isUserScrolling();
     // scrollToTimestamp 的目标不在当前渲染集合内（典型：被「仅展示当前会话」隐藏到更早 session —
     // tsItemMap 不含该 ts → _scrollTargetIdx 为 null、目标 ref 也未绑定）：下面两个平台跳转分支都不会
     // 命中，父层 chatScrollToTs 便永远清不掉，后续对任意 ts 的跳转全部失效。这里兜底清除该请求
@@ -1011,11 +1023,14 @@ class ChatView extends React.Component {
   }
 
   // 流式吸底状态机已收敛进 src/utils/stickyBottomController.js（StickyBottomController 实例）：
-  //   - bind/unbind/dispose、scroll/RO 监听、引用计数 lock、双 rAF 缓动、touchSuppress、决策去重
+  //   - bind/unbind/dispose、scroll/RO 监听、引用计数 lock、双 rAF 缓动、用户滚动意图暂停窗口、决策去重
   //   - notifyAtBottom（Virtuoso 接管）、suppressOnce（handleLoadMore 用）、writeUnderLock（唯一写入）
   // 本类仅持 controller 实例（this._stickyController），所有 scrollTop 写入走 controller.writeUnderLock。
 
   handleStickToBottom = () => {
+    // 显式动作清除用户滚动窗口：在 setState 之前同步调，让 userScrolling:false 与
+    // stickyBottom:true 同一 React 批次 commit，followOutput 不出现中间帧
+    this._stickyController.resetUserScrollState();
     this.setState({ stickyBottom: true }, () => {
       if (useVirtuoso && this.virtuosoRef.current) {
         this.virtuosoRef.current.scrollToIndex({ index: 'LAST', behavior: 'smooth' });
@@ -3576,7 +3591,7 @@ class ChatView extends React.Component {
             className={styles.mobileVirtuoso}
             data={visible}
             initialTopMostItemIndex={Math.max(0, visible.length - 1)}
-            followOutput={this.state.stickyBottom ? 'auto' : false}
+            followOutput={this.state.stickyBottom && !this.state.userScrolling ? 'auto' : false}
             atBottomStateChange={(atBottom) => this._stickyController.notifyAtBottom(atBottom)}
             atBottomThreshold={60}
             increaseViewportBy={{ top: 200, bottom: 200 }}

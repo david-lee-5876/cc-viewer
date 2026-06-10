@@ -87,7 +87,7 @@ describe('StickyBottomController 分支补强', () => {
     // 阈值 ?? 默认值
     assert.equal(ctrl._thresholdEnter, 10);
     assert.equal(ctrl._thresholdLeave, 50);
-    assert.equal(ctrl._touchSuppressMs, 300);
+    assert.equal(ctrl._userScrollIdleMs, 300);
     assert.equal(ctrl._atBottomPx, 60);
     assert.equal(ctrl._smoothFollowMinFrameMs, 33);
     // now 默认 Date.now — 返回数字
@@ -110,7 +110,7 @@ describe('StickyBottomController 分支补强', () => {
     assert.equal(ctrl._getMode(), 'virtuoso');
     assert.equal(ctrl._thresholdEnter, 0);
     assert.equal(ctrl._thresholdLeave, 5);
-    assert.equal(ctrl._touchSuppressMs, 0);
+    assert.equal(ctrl._userScrollIdleMs, 0, 'touchSuppressMs:0 经兼容映射不被默认值吞');
     assert.equal(ctrl._atBottomPx, 0);
     assert.equal(ctrl._smoothFollowMinFrameMs, 0);
     assert.equal(ctrl._now(), 42);
@@ -575,39 +575,43 @@ describe('StickyBottomController 分支补强', () => {
     const ctrl = new StickyBottomController({ getSticky: () => true, setSticky: () => {}, getMode: () => 'desktop', touchSuppressMs: 300, now: () => mockNow });
     const el = makeFakeEl({ scrollHeight: 1000, clientHeight: 600, scrollTop: 0 });
     ctrl.bind(el);
-    ctrl._onTouchEnd(); // recentTouchTs = mockNow → 在抑制窗口
+    ctrl._onTouchEnd(); // lastUserIntentTs = mockNow → 在用户滚动窗口
     el.scrollHeight = 3000;
     ctrl.handleScrollerResize(el);
     assert.equal(el.scrollTop, 0, 'touch 抑制窗口内不写');
+    ctrl.dispose(); // 清空窗定时器，防真实 setTimeout 跨用例泄漏
   });
 
-  // ─── _isWithinTouchSuppress：三臂 ──────────────────────────────────────
-  it('B50. _isWithinTouchSuppress: TOUCH_HOLD_MARKER → true', () => {
+  // ─── _isWithinTouchSuppress（= isUserScrolling 薄别名）：三臂 ───────────
+  it('B50. _isWithinTouchSuppress: touchstart 按住（hold）→ true', () => {
     const ctrl = new StickyBottomController({ now: () => mockNow });
-    ctrl._onTouchStart(); // recentTouchTs = -1 (TOUCH_HOLD_MARKER)
+    ctrl._onTouchStart(); // _touchHold = true
     assert.equal(ctrl._isWithinTouchSuppress(), true);
+    ctrl.dispose();
   });
 
-  it('B51. _isWithinTouchSuppress: recentTouchTs<=0（初始 0）→ false', () => {
+  it('B51. _isWithinTouchSuppress: 从未有意图（初始 ts=0）→ false', () => {
     const ctrl = new StickyBottomController({ now: () => mockNow });
-    // 初始 _recentTouchTs=0 → <=0 → false
+    // 初始 _lastUserIntentTs=0 → <=0 → false
     assert.equal(ctrl._isWithinTouchSuppress(), false);
   });
 
-  it('B52. _isWithinTouchSuppress: 窗口外（now-ts >= suppressMs）→ false', () => {
+  it('B52. _isWithinTouchSuppress: 窗口外（now-ts >= 空窗）→ false', () => {
     let now = 1000;
     const ctrl = new StickyBottomController({ touchSuppressMs: 300, now: () => now });
-    ctrl._onTouchEnd(); // recentTouchTs = 1000
+    ctrl._onTouchEnd(); // lastUserIntentTs = 1000（touchSuppressMs 兼容映射为空窗时长）
     now = 1000 + 350; // 越过 300ms
     assert.equal(ctrl._isWithinTouchSuppress(), false);
+    ctrl.dispose();
   });
 
-  it('B53. _isWithinTouchSuppress: 窗口内（now-ts < suppressMs）→ true', () => {
+  it('B53. _isWithinTouchSuppress: 窗口内（now-ts < 空窗）→ true', () => {
     let now = 1000;
     const ctrl = new StickyBottomController({ touchSuppressMs: 300, now: () => now });
-    ctrl._onTouchEnd(); // recentTouchTs = 1000
+    ctrl._onTouchEnd(); // lastUserIntentTs = 1000
     now = 1000 + 100; // 100 < 300
     assert.equal(ctrl._isWithinTouchSuppress(), true);
+    ctrl.dispose();
   });
 
   // ─── notifyAtBottom：disposed / lock / 真值修正 (A) 两条 + (B) ──────────
@@ -707,13 +711,17 @@ describe('StickyBottomController 分支补强', () => {
   });
 
   // ─── _onTouchStart / _onTouchEnd 直接触发（document.fire 路径）──────────
-  it('B64. document touchstart/touchend 经监听更新 recentTouchTs', () => {
+  it('B64. document touchstart/touchmove/touchend 经监听驱动用户滚动窗口', () => {
     const ctrl = new StickyBottomController({ getMode: () => 'desktop', now: () => mockNow });
     const el = makeFakeEl();
     ctrl.bind(el);
     globalThis.document.fire('touchstart');
-    assert.equal(ctrl._recentTouchTs, -1, 'touchstart → TOUCH_HOLD_MARKER');
+    assert.equal(ctrl.isUserScrolling(), true, 'touchstart → hold 撑起窗口');
+    globalThis.document.fire('touchmove'); // 有位移 = 拖动
     globalThis.document.fire('touchend');
-    assert.equal(ctrl._recentTouchTs, mockNow, 'touchend → now()');
+    assert.equal(ctrl.isUserScrolling(), true, '拖动结束 → 空窗计时中');
+    mockNow += 350; // 越过 300ms 空窗
+    assert.equal(ctrl.isUserScrolling(), false, '空窗过后窗口关闭');
+    ctrl.dispose();
   });
 });
