@@ -175,32 +175,6 @@ ccv -h
 但是由于1M的opus后期长生的单条日志过于庞大，得益于作者采取了对MainAgent的一些日志优化，在没有gzip的情况下，可以降低至少66%的体积。
 这个压缩日志的解析方法，可以从当前仓库中抽取。
 
-### 更多便捷有用的功能
-
-<img height="767" width="1500" alt="image" src="https://github.com/user-attachments/assets/add558c5-9c4d-468a-ac6f-d8d64759fdbd" />
-
-你可以通过侧边栏工具快速定位你的prompt
-
-***
-
-<img height="765" width="1500" alt="image" src="https://github.com/user-attachments/assets/82b8eb67-82f5-41b1-89d6-341c95a047ed" />
-
-有趣的KV-Cache-Text，能帮你看见 Claude 看到的东西是什么
-
-***
-
-<img height="765" width="1500" alt="image" src="https://github.com/user-attachments/assets/54cdfa4e-677c-4aed-a5bb-5fd946600c46" />
-
-你可以上传图片说出你的需求，Claude 对图片的理解能力非常强大，同时你知道，你可以截图直接ctrl + V直接黏贴图片，对话里面可以显示你的完整内容
-
-***
-
-<img height="370" width="600" alt="image" src="https://github.com/user-attachments/assets/87d332ea-3e34-4957-b442-f9d070211fbf" />
-
-你可以直接自定义插件、管理cc-viewer所有进程以及cc-viewer拥有对第三方接口的热切换能力（没错，你可以使用GLM、Kimi、MiniMax、Qwen、DeepSeek，虽然作者认为他们现在都很弱）
-
-***
-
 <img height="746" width="1500" alt="image" src="https://github.com/user-attachments/assets/b1f60c7c-1438-4ecc-8c64-193d21ee3445" />
 
 更多功能等你发现...比如：本系统支持Agent Team，以及内置了Code Reviewer。马上就要适配Codex 的Code Reviewer引入（作者很推崇使用Codex 给Claude Code Reivew 代码）
