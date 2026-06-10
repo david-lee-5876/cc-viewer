@@ -127,6 +127,20 @@ describe('context-watcher: readModelContextSize', () => {
     }
   });
 
+  it('defaults fable-5 to 1M when no size tag in model.id', () => {
+    backupContextFile();
+    try {
+      mkdirSync(CLAUDE_DIR, { recursive: true });
+      writeFileSync(CONTEXT_WINDOW_FILE, JSON.stringify({
+        model: { id: 'claude-fable-5' },
+      }) + '\n');
+      const result = readModelContextSize();
+      assert.equal(result.contextSize, 1000000);
+    } finally {
+      restoreContextFile();
+    }
+  });
+
   it('returns default 200k when model.id has no size tag and no context_window field', () => {
     backupContextFile();
     try {
@@ -149,6 +163,9 @@ describe('context-watcher: getContextSizeForModel', () => {
   it('opus-4-9 → 1M (前瞻版本)', () => { assert.equal(getContextSizeForModel('claude-opus-4-9'), 1000000); });
   it('mythons → 1M', () => { assert.equal(getContextSizeForModel('claude-mythons'), 1000000); });
   it('mythons with date suffix → 1M', () => { assert.equal(getContextSizeForModel('claude-mythons-20260101'), 1000000); });
+  // fable-5 base 'fable-5-1' 等不与启动缓存 base(fable-5)相撞的形态走兜底正则
+  it('fable-5 with date suffix → 1M', () => { assert.equal(getContextSizeForModel('claude-fable-5-20260101'), 1000000); });
+  it('fable-5.x → 1M (前瞻版本)', () => { assert.equal(getContextSizeForModel('claude-fable-5-1'), 1000000); });
   // 用 haiku(base 'haiku-4-5')而非 sonnet-4-6:后者的 base 会撞上启动缓存命中分支、
   // 绕过本用例要验的 /opus|mythons/ miss→200K 兜底,使断言失去意义。
   it('non-opus/non-mythons → 200K', () => { assert.equal(getContextSizeForModel('claude-haiku-4-5'), 200000); });

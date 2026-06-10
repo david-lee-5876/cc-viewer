@@ -13,6 +13,8 @@ import { darkTerminalTheme, lightTerminalTheme, terminalFontFamily } from './ter
 import { isWindows } from '../../env';
 import styles from './TerminalPanel.module.css';
 import { TerminalWriteQueue } from '../../utils/terminalWriteQueue';
+import { diagCount } from '../../utils/termDiag';
+import { sanitizeBracketPasteText } from '../../utils/ptyChunkBuilder';
 import { appendToken, getBasePath } from '../../utils/apiUrl';
 
 class ScratchTerminal extends React.Component {
@@ -26,7 +28,11 @@ class ScratchTerminal extends React.Component {
     // 写入节流复用 TerminalPanel 同款 utility（utils/terminalWriteQueue.js）。
     // ScratchTerminal 历史用 [string].push + join 的实现，单字符串 push 不存在
     // O(n²) 切片问题，但 unmount 时同样会丢最后 16ms buffer；改用 utility 统一行为。
-    this._writeQ = new TerminalWriteQueue(() => this.terminal);
+    // Windows DOM 渲染器 chunk 初值保守起步，AIMD 自适应（与 TerminalPanel 同策略）
+    this._writeQ = new TerminalWriteQueue(
+      () => this.terminal,
+      isWindows ? { initialChunkBytes: 16 * 1024 } : undefined
+    );
     this._closing = false;
   }
 
@@ -63,6 +69,7 @@ class ScratchTerminal extends React.Component {
       try {
         this.terminal.textarea.removeEventListener('focus', this._handleScratchFocus);
         this.terminal.textarea.removeEventListener('blur', this._handleScratchBlur);
+        this.terminal.textarea.removeEventListener('paste', this._handleScratchPaste, true);
       } catch {}
     }
     try { this.props.onFocusChange?.(false); } catch {}
@@ -113,10 +120,27 @@ class ScratchTerminal extends React.Component {
     // 上报 focus / blur 给父组件，驱动 .scratchPanesFocused 边框
     this._handleScratchFocus = () => { try { this.props.onFocusChange?.(true); } catch {} };
     this._handleScratchBlur = () => { try { this.props.onFocusChange?.(false); } catch {} };
+    // 粘贴注入防护：含 \x1b[20[01]~ 时接管（sanitize + 自行包裹），否则交回 xterm 默认处理
+    this._handleScratchPaste = (e) => {
+      const text = e.clipboardData?.getData('text');
+      if (!text || !this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+      const hasInjection = /\x1b\[20[01]~/.test(text);
+      if (this.terminal?.modes?.bracketedPasteMode && !hasInjection) return; // 干净粘贴交 xterm
+      if (hasInjection || text.includes('\n') || text.includes('\r')) {
+        e.preventDefault();
+        e.stopPropagation();
+        const wrapped = `\x1b[200~${sanitizeBracketPasteText(text)}\x1b[201~`;
+        this.ws.send(JSON.stringify({ type: 'input', data: wrapped }));
+      }
+    };
     const ta = this.terminal.textarea;
     if (ta) {
       ta.addEventListener('focus', this._handleScratchFocus);
       ta.addEventListener('blur', this._handleScratchBlur);
+      // paste-injection 防护（与 TerminalPanel._handlePaste 同策略）：scratch 是真实 shell，
+      // 剪贴板内嵌 \x1b[201~ 会提前闭合 bracketed paste 注入命令；xterm 6.0 自动包裹不
+      // sanitize（上游 7.0 才修）。capture=true 抢在 xterm 自身 paste handler 之前接管。
+      ta.addEventListener('paste', this._handleScratchPaste, true);
     }
 
     // 字体异步就绪后重 fit（与 TerminalPanel 同理，复用公开 refit）
@@ -149,6 +173,7 @@ class ScratchTerminal extends React.Component {
           this._throttledWrite(msg.data);
         } else if (msg.type === 'data-resync') {
           // 服务端反压恢复:丢弃积压、重置、写快照对齐(reset 清 scrollback 的取舍见 TerminalPanel 同分支注释)
+          diagCount('resyncCount');
           this._writeQ.reset();
           try { this.terminal?.reset(); } catch {}
           this._writeQ.push('\x1b[33m[cc-viewer] output skipped during congestion\x1b[0m\r\n');
@@ -169,6 +194,10 @@ class ScratchTerminal extends React.Component {
 
     this.ws.onclose = () => {
       if (this._closing) return;
+      // 重连前清屏 + 清写队列（同 TerminalPanel 的 close 处理）：服务端每次新连接都无条件
+      // 重发完整 replay buffer(≤50KB)，不 reset 会让旧内容整段在 scrollback 重复渲染。
+      this._writeQ.reset();
+      try { this.terminal?.reset(); } catch {}
       this._wsReconnectTimer = setTimeout(() => {
         if (!this._closing && this.containerRef.current) {
           this.connectWebSocket();

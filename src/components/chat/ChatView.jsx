@@ -18,6 +18,7 @@ import { classifyRequest, formatRequestTag, formatTeammateLabel } from '../../ut
 import { playEvent as playVoiceEvent } from '../../utils/voicePackPlayer';
 import { buildChunksForAnswer, buildBracketPasteSubmitChunks, BRACKET_PASTE_SUBMIT_SETTLE_MS } from '../../utils/ptyChunkBuilder';
 import { isPlanApprovalPrompt, isDangerousOperationPrompt, parseToolInfoFromBuffer, pickPlanApproveOptionNumber } from '../../utils/promptClassifier';
+import { stripAnsi, splitTrailingAnsiCarry, detectPromptInBuffer, detectPromptLegacy, isFalsePositiveQuestion } from '../../utils/promptDetect';
 import { isImageFile } from '../../utils/commandValidator';
 import { loadExpandedPaths, saveExpandedPaths } from '../../utils/fileExpandedPathsStorage';
 import { createEmptyToolState, appendToolResultMap, cachedBuildToolResultMap, getToolResultCache, setToolResultCache, buildSubAgentResultMap, createEmptyGlobalIndexState, appendToGlobalToolResultIndex } from '../../utils/toolResultBuilder';
@@ -280,6 +281,7 @@ class ChatView extends React.Component {
     this._unsubWsState = null;
     this._inputRef = React.createRef();
     this._ptyBuffer = '';
+    this._ptyAnsiCarry = ''; // 跨 write 撕裂的半截 ANSI 序列缓带（字节流层面，prompt 清空不重置）
     this._ptyDataSeq = 0; // increments on every PTY output event
     this._ptyDebounceTimer = null;
     this._stopOptimisticTimer = null; // 乐观停止兜底定时器
@@ -2356,16 +2358,15 @@ class ChatView extends React.Component {
   };
 
   _stripAnsi(str) {
-    // Remove CSI sequences (ESC [ ... final byte), OSC sequences (ESC ] ... ST), and other escape sequences
-    return str
-      .replace(/\x1b\[[0-9;]*[A-Za-z]/g, '')
-      .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')
-      .replace(/\x1b[^[\]](.|$)/g, '')
-      .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, '');
+    return stripAnsi(str); // 单一实现迁至 utils/promptDetect.js（测试同源 import）
   }
 
   _appendPtyData(raw) {
-    const clean = this._stripAnsi(raw);
+    // ANSI 序列可能被 PTY 分片从中间切断：尾部未终结的 CSI/OSC 半截暂存 carry，
+    // 并入下一片再 strip——保证 strip 始终跑在完整序列上（详见 splitTrailingAnsiCarry）
+    const [safe, carry] = splitTrailingAnsiCarry(this._ptyAnsiCarry + raw);
+    this._ptyAnsiCarry = carry;
+    const clean = this._stripAnsi(safe);
     this._ptyBuffer += clean;
     this._ptyDataSeq++;
     // Keep buffer at max 4KB
@@ -2379,61 +2380,18 @@ class ChatView extends React.Component {
   _detectPrompt() {
     const buf = this._ptyBuffer.trimEnd();
 
-    let question = null;
-    let options = null;
-
-    // Pattern 1: Numbered options — "Question?\n  ❯ 1. Option A\n    2. Option B"
-    // Allows trailing blank lines and hint lines (e.g. "\n\nEsc to cancel · Tab to amend")
-    const match1 = buf.match(/([^\n]*\?)\s*\n((?:\s*[❯>]?\s*\d+\.\s+[^\n]+\n?){2,})(?:\n[^\d❯>\n][^\n]*|\n)*$/);
-    if (match1) {
-      question = match1[1].trim();
-      const optionLines = match1[2].match(/\s*([❯>])?\s*(\d+)\.\s+([^\n]+)/g);
-      if (optionLines) {
-        options = optionLines.map(line => {
-          const m = line.match(/\s*([❯>])?\s*(\d+)\.\s+(.+)/);
-          return {
-            number: parseInt(m[2], 10),
-            text: m[3].trim(),
-            selected: !!m[1],
-          };
-        });
-      }
-    }
-
-    // Pattern 2: Non-numbered cursor-based options (Ink Select) —
-    // "Some prompt text\n  ❯ Allow once\n    Deny"
-    // Question line may or may not end with "?"
-    // Allows trailing blank lines and hint lines (e.g. "\n\nEsc to cancel · Tab to amend")
-    if (!options) {
-      const match2 = buf.match(/([^\n]+)\n((?:\s+[❯>]?\s+[^\n]+\n?){2,})(?:\n[^\s❯>\n][^\n]*|\n)*$/);
-      if (match2) {
-        const candidateQ = match2[1].trim();
-        const block = match2[2];
-        // Parse lines: each line starts with optional ❯/> marker + text
-        const lines = block.split('\n').filter(l => l.trim());
-        const parsed = [];
-        for (const line of lines) {
-          const m = line.match(/^\s*([❯>])?\s+(.+)/);
-          if (m && m[2].trim()) {
-            parsed.push({
-              number: parsed.length + 1,
-              text: m[2].trim(),
-              selected: !!m[1],
-            });
-          }
-        }
-        if (parsed.length >= 2 && parsed.some(p => p.selected)) {
-          question = candidateQ;
-          options = parsed;
-        }
-      }
-    }
+    // 线性行式解析器（根治旧多行正则的灾难性回溯卡死，详见 utils/promptDetect.js）；
+    // ccv_legacy_prompt_detect=1 为旧实现逃生开关（漏检兜底，自担卡死风险）
+    let useLegacy = false;
+    try { useLegacy = localStorage.getItem('ccv_legacy_prompt_detect') === '1'; } catch {}
+    const detected = useLegacy ? detectPromptLegacy(buf) : detectPromptInBuffer(buf);
+    const question = detected ? detected.question : null;
+    const options = detected ? detected.options : null;
 
     if (question && options) {
-      // Skip false positive: question looks like a file/directory path or status-bar output
-      if (/^[■\s]*[~\/.:]/.test(question) && /\//.test(question)) return;
-      // Skip false positive: question looks like Claude Code timing/status output (e.g. "*Crunchedfor2m18s")
-      if (/^[*■✦⏎]/.test(question)) return;
+      // Skip false positive: file/directory path、status-bar、timing 输出（注意：过滤是
+      // 直接 return，不走下方的 dismiss 分支——与「未检出」语义不同，保持原状）
+      if (isFalsePositiveQuestion(question)) return;
 
       const prev = this.state.ptyPrompt;
       const prompt = { question, options };

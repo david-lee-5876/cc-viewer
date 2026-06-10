@@ -21,6 +21,7 @@ import {
   buildMultiSelectOtherChunks,
   buildChunksForAnswer,
   buildBracketPasteSubmitChunks,
+  sanitizeBracketPasteText,
   BRACKET_PASTE_SUBMIT_SETTLE_MS,
 } from '../src/utils/ptyChunkBuilder.js';
 
@@ -178,5 +179,47 @@ describe('ptyChunkBuilder (real module) — buildBracketPasteSubmitChunks (L223-
 
   it('exports the settle-ms constant used to space paste→Enter', () => {
     assert.equal(BRACKET_PASTE_SUBMIT_SETTLE_MS, 250);
+  });
+
+  it('sanitizes embedded \\x1b[201~ before wrapping (paste-injection 防护)', () => {
+    // 注入：剪贴板内含 201~ 提前闭合 + 恶意按键。剥离后包裹，注入序列不再逃逸。
+    const evil = 'ls\x1b[201~\r rm -rf /';
+    assert.deepEqual(
+      buildBracketPasteSubmitChunks(evil),
+      ['\x1b[200~ls\r rm -rf /\x1b[201~', ENTER]
+    );
+  });
+});
+
+describe('ptyChunkBuilder — sanitizeBracketPasteText', () => {
+  it('strips both 200~ and 201~ sequences anywhere in the text', () => {
+    assert.equal(sanitizeBracketPasteText('a\x1b[201~b\x1b[200~c'), 'abc');
+    assert.equal(sanitizeBracketPasteText('\x1b[201~\x1b[201~x'), 'x');
+  });
+
+  it('leaves clean text untouched', () => {
+    assert.equal(sanitizeBracketPasteText('hello\nworld'), 'hello\nworld');
+    assert.equal(sanitizeBracketPasteText('日本語'), '日本語');
+  });
+
+  it('passes non-string through unchanged (defensive)', () => {
+    assert.equal(sanitizeBracketPasteText(null), null);
+    assert.equal(sanitizeBracketPasteText(undefined), undefined);
+  });
+
+  it('defeats split-reassembly bypass (循环剥离到稳定)', () => {
+    // 攻击：残片 `\x1b[20` + 完整 `\x1b[201~` + `1~`。单趟 replace 删中段后左右残片
+    // 拼回 `\x1b[201~` → paste 提前闭合、后续按键注入。循环剥离必须彻底清除。
+    const evil = '\x1b[20' + '\x1b[201~' + '1~' + 'rm -rf /';
+    const out = sanitizeBracketPasteText(evil);
+    assert.ok(!out.includes('\x1b[201~'), 'no residual 201~ after stable sanitize');
+    assert.equal(out, 'rm -rf /');
+  });
+
+  it('strips 8-bit C1 CSI variant (\\x9b201~)', () => {
+    assert.equal(sanitizeBracketPasteText('a\x9b201~b\x9b200~c'), 'abc');
+    // 8-bit 残片也参与重组
+    const evil = '\x9b20' + '\x9b201~' + '1~' + 'x';
+    assert.ok(!sanitizeBracketPasteText(evil).includes('\x9b201~'));
   });
 });

@@ -31,8 +31,8 @@ export function readModelContextSize() {
       if (sizeMatch) {
         const num = parseInt(sizeMatch[1], 10);
         contextSize = sizeMatch[2] === 'm' ? num * 1000000 : num * 1000;
-      } else if (/opus|mythons/i.test(lower)) {
-        // Opus / mythons models default to 1M context
+      } else if (/opus|mythons|fable[ -]5/i.test(lower)) {
+        // Opus / mythons / fable-5 family models default to 1M context
         contextSize = 1000000;
       }
       // Cache the base name → size mapping
@@ -61,8 +61,8 @@ export function getContextSizeForModel(apiModelName) {
   if (_startupModelBase && base === _startupModelBase) {
     return _startupContextSize;
   }
-  // Opus / mythons always have 1M context; other unknown models default to 200K
-  if (/opus|mythons/i.test(lower)) return 1000000;
+  // Opus / mythons / fable-5 family always have 1M context; other unknown models default to 200K
+  if (/opus|mythons|fable[ -]5/i.test(lower)) return 1000000;
   return 200000;
 }
 

@@ -2,8 +2,8 @@
  * Prompt classification utilities for PTY prompt detection.
  * Shared by ChatView.jsx and ChatMessage.jsx.
  *
- * NOTE: test/permission-detect.test.js 有 isPlanApprovalPrompt / isDangerousOperationPrompt
- * 的内联副本，任何修改必须**双改保持同步**，否则 production 与 test 行为分裂。
+ * NOTE: test/permission-detect.test.js 直接 import 本模块的真实现（不再内嵌副本），
+ * 修改本文件后跑该测试即可验证行为。
  */
 
 export function isPlanApprovalPrompt(prompt) {

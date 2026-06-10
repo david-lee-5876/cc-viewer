@@ -1,8 +1,11 @@
 # Changelog
 
-## Unreleased
+## 1.6.308 (2026-06-10)
 
-- fix(delta): 根治 team 关闭密集事件期 mainAgent 对话整段重复渲染——`_seq`/`_seqEpoch` 请求序号 + 重建器乱序守卫 + 重建完整性校验 + sessionMerge 等长分支内容感知 + merge 入口守卫谓词，四层防御堵「完成序倒置」（机制详见 docs/WIRE_FORMAT.md §3.7）；顺带堵 teammate 双标条目污染累积态、同条重发幂等、mergeLogFiles 内部字段泄漏；新增 delta-reorder.test.js 确定性复现用例
+- fix(win): 根治 /plugins 菜单快速导航偶发整页永久卡死——真凶为 ChatView prompt 检测正则灾难性回溯（/plugins 菜单形态文本 8 行即 >90s，4KB buffer 等效无限占死主线程，旧「洪泛超消化力」结论被推翻），重写为线性行式解析器 promptDetect.js（新旧等价回归 + 对抗样本 <50ms 断言，`ccv_legacy_prompt_detect=1` 逃生开关）；xterm 喂入改消化力闭环：write callback 计时 AIMD 自适应 chunk（4~32KB，Windows 16KB 起步，500ms fail-open 不死锁）；顺带修 write 抛错时 chunk 静默丢失（指针快照位置错误）；新增 termDiag 本地诊断（控制台 `__ccvTermDiag()`，`localStorage.ccv_term_diag='1'` 开周期日志）；解析器 CRLF 行尾兼容（Windows ConPTY）+ ANSI 序列跨 write 撕裂缓带（splitTrailingAnsiCarry）+ 单项超大快照不再误报 "output trimmed"
+- feat(context): 上下文血条识别 fable 模型——fable-5 及 fable-5.x 默认 1M 窗口（前端规则表/auto 校准 + 服务端 context-watcher 四处同步）
+- fix(terminal): web terminal xterm 全链路加固——堵 input-sequential 非字符串 chunk 致服务进程崩溃（入口 every(string) 校验 + sendNext 守卫，拒绝路径回 ok:false 不静默丢弃）；粘贴/注入剥离内嵌 `\x1b[201~` 防 paste-injection（xterm 6.0 未内置，主面板 + scratch 双端覆盖；循环剥离到稳定堵分裂残片重组绕过 + 覆盖 8-bit C1 CSI `\x9b` 变体）；pendingImages 路径注入补 preventDefault（修注入即提交）；主 PTY spawn 加在途闸防双开 shell 泄漏（while 循环覆盖 ≥3 并发）；ws close 重连补 writeQ/terminal reset 防回放重复（主面板 + scratch）；resize cols/rows 钳制为有限正整数 + fit 0 尺寸守卫防 2×1 打到 ConPTY；初始 fit/mobile rAF 加 unmount 竞态守卫 + webgl 加载失败 catch 补 dispose
+- fix(delta): 根治 team 关闭密集事件期 mainAgent 对话整段重复渲染——`_seq`/`_seqEpoch` 请求序号 + 重建器乱序守卫 + 重建完整性校验 + sessionMerge 等长分支内容感知 + merge 入口守卫谓词，四层防御堵「完成序倒置」（机制详见 docs/WIRE_FORMAT.md §3.7）；顺带堵 teammate 双标条目污染累积态、同条重发幂等、mergeLogFiles 内部字段泄漏；新增 delta-reorder.test.js 确定性复现用例；重建编排抽单一核心 _stepReconstruct（批量/段级/增量三 API 共用，防路径分叉）；mergeLogFiles 补剥 _inPlaceReplaceDetected（孤信号）与已废弃 _eagerSnapshot；补 _seq 生产端不变量测试（单调/epoch 稳定/teammate 不写）+ stale 就地补偿内容与 baselineSeen 门测试 + 双层重建 load-bearing 不变量回归测试（WIRE_FORMAT §3.7 文档化）
 
 ## 1.6.307 (2026-06-09)
 

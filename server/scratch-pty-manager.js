@@ -203,13 +203,21 @@ export function writeScratch(id, data) {
   return false;
 }
 
+// cols/rows 钳制为有限正整数（同 pty-manager.resizePty 的理由：防 NaN/2×1 毒化 lastCols
+// 后毒化 respawn）。非有限值回退到上一个有效值。
+function _clampScratchDim(v, min, max, fallback) {
+  const n = Math.floor(Number(v));
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(min, Math.min(max, n));
+}
+
 export function resizeScratch(id, cols, rows) {
   const s = ptys.get(id);
   if (!s) return;
-  s.lastCols = cols;
-  s.lastRows = rows;
+  s.lastCols = _clampScratchDim(cols, 2, 1000, s.lastCols);
+  s.lastRows = _clampScratchDim(rows, 1, 1000, s.lastRows);
   if (s.ptyProcess) {
-    try { s.ptyProcess.resize(cols, rows); } catch { }
+    try { s.ptyProcess.resize(s.lastCols, s.lastRows); } catch { }
   }
 }
 

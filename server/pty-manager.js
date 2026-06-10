@@ -26,6 +26,14 @@ let currentWorkspacePath = null;
 let lastWorkspacePath = null; // 进程退出后保留，用于 respawn shell
 let lastPtyCols = 120;
 let lastPtyRows = 30;
+// 主 PTY spawn 的在途闸：guard 在 await getPty 之前、ptyProcess 赋值在 await 之后，
+// 两条同步到达的 input 消息会越过 guard 双开（首个 pty 失引用泄漏 + 输出串扰）。
+// 同步占位一个 promise，并发调用复用它，绝不二次 spawn（仿 scratch-pty-manager._spawnInflight）。
+let _spawnInflight = null;
+// resize 入口的 cols/rows 钳制范围：上界足够宽（4K 显示器超宽终端），下界 ≥2 列/1 行
+// 防 FitAddon 在 0 尺寸容器算出的 2×1 或畸形客户端的 NaN/负数毒化 lastPtyCols/Rows。
+const PTY_COLS_MIN = 2, PTY_COLS_MAX = 1000;
+const PTY_ROWS_MIN = 1, PTY_ROWS_MAX = 1000;
 const MAX_BUFFER = 200000;
 let batchBuffer = '';
 let batchScheduled = false;
@@ -157,10 +165,19 @@ export function _markThinkingDisplayRejected(claudePath) {
 }
 
 export async function spawnClaude(proxyPort, cwd, extraArgs = [], claudePath = null, isNpmVersion = false, serverPort = null, serverProtocol = 'http', internalToken = null) {
+  // 等待任何在途 spawn 完成再 kill+spawn，避免与 spawnShell 双开/串台（自身串行化）。
+  // while 而非 if：≥3 个并发 spawn 时，A 完成后 B 会设新的 inflight=pB，单次 if 的 C
+  // 不会复查 pB 就 kill+spawn 致 implB/implC 并发双开——循环到真正无在途为止才放行。
+  while (_spawnInflight) { try { await _spawnInflight; } catch { } }
   if (ptyProcess) {
     killPty();
   }
+  const p = _spawnClaudeImpl(proxyPort, cwd, extraArgs, claudePath, isNpmVersion, serverPort, serverProtocol, internalToken);
+  _spawnInflight = p;
+  try { return await p; } finally { if (_spawnInflight === p) _spawnInflight = null; }
+}
 
+async function _spawnClaudeImpl(proxyPort, cwd, extraArgs = [], claudePath = null, isNpmVersion = false, serverPort = null, serverProtocol = 'http', internalToken = null) {
   const pty = await getPty();
 
   fixSpawnHelperPermissions();
@@ -383,7 +400,21 @@ export function writeToPtySequential(chunks, onComplete, opts = {}) {
     const chunk = chunks[idx];
     idx++;
 
-    ptyProcess.write(chunk);
+    // 防御性纵深（server.js 入口已 every(string) 校验，这里是第二道）：非字符串 chunk 的
+    // pty.write 抛 ERR_INVALID_ARG_TYPE、下方 chunk.endsWith 也抛——在 setTimeout 上下文中
+    // 脱离任何 try/catch 会变成 uncaughtException 打挂整个进程。统一拦成失败上报。
+    if (typeof chunk !== 'string') {
+      cleanup();
+      if (onComplete) onComplete(false);
+      return;
+    }
+    try {
+      ptyProcess.write(chunk);
+    } catch (e) {
+      cleanup();
+      if (onComplete) onComplete(false);
+      return;
+    }
 
     // Space, Enter, arrows need more time for inquirer to re-render
     const isToggleOrSubmit = chunk === ' ' || chunk === '\r'
@@ -403,6 +434,13 @@ export function writeToPtySequential(chunks, onComplete, opts = {}) {
  */
 export async function spawnShell() {
   if (ptyProcess) return false; // 已有进程在运行
+  if (_spawnInflight) return _spawnInflight; // 复用在途 spawn，防双开
+  const p = _spawnShellImpl();
+  _spawnInflight = p;
+  try { return await p; } finally { if (_spawnInflight === p) _spawnInflight = null; }
+}
+
+async function _spawnShellImpl() {
   const cwd = lastWorkspacePath || process.cwd();
 
   const pty = await getPty();
@@ -465,11 +503,20 @@ export async function spawnShell() {
   return true;
 }
 
+// cols/rows 钳制为有限正整数：FitAddon 在 0 尺寸容器会算出 2×1，畸形客户端可能发
+// NaN/0/负数——未校验直接存进 lastPtyCols/Rows 会毒化后续 pty.spawn（cols:NaN 抛错，
+// spawnShell 的异常被吞 → 终端永远拉不起且无日志）。非有限值回退到上一个有效值。
+function _clampDim(v, min, max, fallback) {
+  const n = Math.floor(Number(v));
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(min, Math.min(max, n));
+}
+
 export function resizePty(cols, rows) {
-  lastPtyCols = cols;
-  lastPtyRows = rows;
+  lastPtyCols = _clampDim(cols, PTY_COLS_MIN, PTY_COLS_MAX, lastPtyCols);
+  lastPtyRows = _clampDim(rows, PTY_ROWS_MIN, PTY_ROWS_MAX, lastPtyRows);
   if (ptyProcess) {
-    try { ptyProcess.resize(cols, rows); } catch { }
+    try { ptyProcess.resize(lastPtyCols, lastPtyRows); } catch { }
   }
 }
 

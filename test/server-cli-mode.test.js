@@ -220,6 +220,22 @@ describe('server.js CLI-mode terminal WS with a real PTY', { concurrency: false,
     await conn.close();
   });
 
+  // 非字符串 chunk：入口 every(string) 校验拒绝。① 进程不崩（否则后续连接失败）
+  // ② 拒绝路径仍回 input-sequential-done(ok:false, seq)，不静默丢弃让带 seq 客户端挂超时。
+  it('input-sequential rejects non-string chunks with ok:false (no crash, replies seq)', async () => {
+    const conn = await connectWs(base);
+    conn.send({ type: 'input-sequential', chunks: ['ok', 123, {}], seq: 'unit-seq-bad', settleMs: 30 });
+    const done = await conn.waitFor((m) => m.type === 'input-sequential-done', 4000);
+    assert.ok(done, 'reject path must still reply input-sequential-done');
+    assert.equal(done.ok, false, 'invalid chunks → ok:false');
+    assert.equal(done.seq, 'unit-seq-bad', 'seq echoed even on reject');
+    // 进程存活：紧接一条合法序列仍正常完成
+    conn.send({ type: 'input-sequential', chunks: ['echo alive\r'], seq: 'unit-seq-ok', settleMs: 30 });
+    const ok2 = await conn.waitFor((m) => m.type === 'input-sequential-done' && m.seq === 'unit-seq-ok', 4000);
+    assert.ok(ok2, 'server survived bad input and processes the next valid request');
+    await conn.close();
+  });
+
   // ─────────── resize：移动端优先仲裁 + clientSizes/mobileClients 维护 ───────────
   it('mobile resize is authoritative and a PC resize stores size without crashing', async () => {
     const pc = await connectWs(base);

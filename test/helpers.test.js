@@ -52,6 +52,9 @@ describe('helpers', () => {
     it('returns 1000000 for opus-4-9', () => { assert.equal(H.getModelMaxTokens('claude-opus-4-9'), 1000000); });
     it('returns 1000000 for mythons', () => { assert.equal(H.getModelMaxTokens('mythons'), 1000000); });
     it('returns 1000000 for mythons with surrounding chars', () => { assert.equal(H.getModelMaxTokens('claude-mythons-preview'), 1000000); });
+    it('returns 1000000 for fable-5', () => { assert.equal(H.getModelMaxTokens('claude-fable-5'), 1000000); });
+    it('returns 1000000 for fable-5 with [1m] suffix', () => { assert.equal(H.getModelMaxTokens('claude-fable-5[1m]'), 1000000); });
+    it('returns 1000000 for fable-5.x (前瞻版本)', () => { assert.equal(H.getModelMaxTokens('claude-fable-5-1-20260601'), 1000000); });
     it('returns 200000 for non-opus claude models', () => { assert.equal(H.getModelMaxTokens('claude-sonnet-4-6'), 200000); });
     it('returns 128000 for gpt-4o', () => { assert.equal(H.getModelMaxTokens('gpt-4o'), 128000); });
     it('returns 128000 for deepseek', () => { assert.equal(H.getModelMaxTokens('deepseek-v3'), 128000); });
@@ -86,6 +89,12 @@ describe('helpers', () => {
     });
     it('auto + mythons model → 1M', () => {
       assert.equal(H.resolveCalibrationTokens('auto', reqWith('claude-mythons')), 1000000);
+    });
+    it('auto + fable-5 model → 1M', () => {
+      assert.equal(H.resolveCalibrationTokens('auto', reqWith('claude-fable-5')), 1000000);
+    });
+    it('auto + fable-5.x model → 1M (前瞻版本)', () => {
+      assert.equal(H.resolveCalibrationTokens('auto', reqWith('claude-fable-5-2-20260601')), 1000000);
     });
     it('auto + claude-3-opus → 200K (裸 opus 不命中 opus-4-N 家族)', () => {
       assert.equal(H.resolveCalibrationTokens('auto', reqWith('claude-3-opus-20240229')), 200000);

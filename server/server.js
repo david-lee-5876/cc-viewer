@@ -1470,16 +1470,23 @@ async function setupTerminalWebSocket(httpServer) {
             // 把 client 提供的 seq 透传回去 — 合并 ws 后多个发送方共享一条 ws,
             // 只能靠 client 端按 seq 匹配自己发的请求(client 没传时也兼容,旧客户端不带 seq)。
             const seq = msg.seq;
-            if (Array.isArray(chunks) && chunks.length > 0) {
-              writeToPtySequential(chunks, (ok) => {
-                try {
-                  const reply = { type: 'input-sequential-done', ok };
-                  if (seq !== undefined) reply.seq = seq;
-                  ws.send(JSON.stringify(reply));
-                } catch (e) {
-                  console.warn('[server] input-sequential-done send failed:', e?.message || e);
-                }
-              }, { settleMs: msg.settleMs || 150 });
+            // 元素必须全是字符串：非字符串 chunk 的 pty.write 在 setTimeout 上下文抛
+            // ERR_INVALID_ARG_TYPE（脱离本 handler 的 try/catch）→ 进程崩溃。入口先拒绝。
+            // 统一回 done（含拒绝路径 ok:false）：带 seq 的客户端在等这条，静默丢弃会让它
+            // 挂到自身超时。复用同一发送逻辑，无效输入立即回 ok:false。
+            const replyDone = (ok) => {
+              try {
+                const reply = { type: 'input-sequential-done', ok };
+                if (seq !== undefined) reply.seq = seq;
+                ws.send(JSON.stringify(reply));
+              } catch (e) {
+                console.warn('[server] input-sequential-done send failed:', e?.message || e);
+              }
+            };
+            if (Array.isArray(chunks) && chunks.length > 0 && chunks.every(c => typeof c === 'string')) {
+              writeToPtySequential(chunks, replyDone, { settleMs: msg.settleMs || 150 });
+            } else {
+              replyDone(false);
             }
           } else if (msg.type === 'ask-hook-answer') {
             // Client answered AskUserQuestion via hook bridge.

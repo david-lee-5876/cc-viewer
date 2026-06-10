@@ -265,6 +265,7 @@ const CHECKPOINT_INTERVAL = 10; // 每 N 条 mainAgent 请求写一个 checkpoin
 // `_seq` 记录请求发起序（语义序），`_seqEpoch` 标识写进程（重启 / 多进程混写时 seq 不可比，
 // 重建器据 epoch 切换基线而不是误判乱序）。teammate 子进程不参与（其条目不进 mainAgent 重建）。
 let _seqCounter = 0;
+// 时间戳 + 6 位随机尾：随机尾用于区分同毫秒启动的第二写进程（IM worker 场景）
 const _seqEpoch = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
 /**

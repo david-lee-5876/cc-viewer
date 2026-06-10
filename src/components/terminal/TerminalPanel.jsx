@@ -20,12 +20,13 @@ import styles from './TerminalPanel.module.css';
 import { BUILTIN_PRESETS } from '../../utils/builtinPresets.js';
 import { buildLocalUltraplan } from '../../utils/ultraplanTemplates';
 import { UltraplanController } from '../../utils/ultraplanController';
-import { buildBracketPasteSubmitChunks, BRACKET_PASTE_SUBMIT_SETTLE_MS } from '../../utils/ptyChunkBuilder';
+import { buildBracketPasteSubmitChunks, BRACKET_PASTE_SUBMIT_SETTLE_MS, sanitizeBracketPasteText } from '../../utils/ptyChunkBuilder';
 import ConceptHelp from '../common/ConceptHelp';
 import CustomUltraplanEditModal from './CustomUltraplanEditModal';
 import UltraplanExpertManagerModal from './UltraplanExpertManagerModal';
 import { buildExpertList, visibleExpertKeys } from '../../utils/ultraplanExperts';
 import { TerminalWriteQueue } from '../../utils/terminalWriteQueue';
+import { installTermDiag, diagCount } from '../../utils/termDiag';
 import { downscaleForRetina } from '../../utils/imageDownscale';
 import { buildPresetShortcutsPayload } from '../../utils/presetShortcuts';
 import ImageLightbox from '../common/ImageLightbox';
@@ -477,6 +478,10 @@ class TerminalPanel extends React.Component {
   };
 
   componentDidMount() {
+    // 幂等：window.__ccvTermDiag 快照 + longtask 计数 + ccv_term_diag 周期日志。
+    // 有意不在 unmount 配对卸载——app-lifetime 单例（计数器/定时器全局唯一，
+    // 跨面板共享；_installed 守卫防重复安装）。
+    installTermDiag();
     this.initTerminal();
     // 注册 ws 消息 + 状态 handler。Provider 已在 App/Mobile 层根据 cliMode/terminalVisible 决定是否建立 ws。
     if (this.context && this.context.addMessageHandler) {
@@ -632,6 +637,7 @@ class TerminalPanel extends React.Component {
     if (this._resizeDebounceTimer) clearTimeout(this._resizeDebounceTimer);
     if (this._webglRecoveryTimer) clearTimeout(this._webglRecoveryTimer);
     if (this._autoRefreshInterval) { clearInterval(this._autoRefreshInterval); this._autoRefreshInterval = null; }
+    if (this._initRafId) { cancelAnimationFrame(this._initRafId); this._initRafId = 0; }
     if (this.resizeObserver) {
       this.resizeObserver.disconnect();
     }
@@ -647,6 +653,8 @@ class TerminalPanel extends React.Component {
       // 守卫真正生效，与 ScratchTerminal 行为对齐
       this.terminal = null;
     }
+    // fitAddon 随 terminal.dispose 失效，置 null 让晚到回调的 !this.fitAddon 守卫生效
+    this.fitAddon = null;
   }
 
   initTerminal() {
@@ -702,20 +710,29 @@ class TerminalPanel extends React.Component {
     // 用 TerminalWriteQueue 替代原「string += / slice」实现，消除大流量时
     // O(n²) 字符串切片热点（trace3 显示 _flushWrite 794ms self），同时
     // 修复 UTF-16 surrogate 边界切碎、unmount 16ms 数据丢失等隐患。
-    // 节奏与原实现等价：每帧 1 个 chunk（≤32KB），不做激进 multi-chunk drain。
-    // 移动端内存预算低,积压自保水位减半(默认桌面 2MB/512KB)
+    // 节奏与原实现等价：每帧 1 个 chunk，不做激进 multi-chunk drain。
+    // 移动端内存预算低,积压自保水位减半(默认桌面 2MB/512KB)。
+    // chunk 初值：Windows DOM 渲染器解析慢，16KB 保守起步（其余平台 32KB），
+    // 运行期由 write callback 计时 AIMD 自适应收敛（详见 terminalWriteQueue 头注释）。
     this._writeQ = new TerminalWriteQueue(
       () => this.terminal,
-      (isMobile && !isPad) ? { highWaterBytes: 1024 * 1024, trimTargetBytes: 256 * 1024 } : undefined
+      {
+        ...((isMobile && !isPad) ? { highWaterBytes: 1024 * 1024, trimTargetBytes: 256 * 1024 } : null),
+        ...(isWindows ? { initialChunkBytes: 16 * 1024 } : null),
+      }
     );
 
     if (isMobile && !isPad) {
       // 移动端：基于屏幕尺寸一次性计算固定 cols/rows，避免动态 fit 导致渲染抖动
-      requestAnimationFrame(() => {
+      this._initRafId = requestAnimationFrame(() => {
+        this._initRafId = 0;
+        if (!this.terminal) return; // mount 后一帧内 unmount 的竞态守卫
         this._mobileFixedResize();
       });
     } else {
-      requestAnimationFrame(() => {
+      this._initRafId = requestAnimationFrame(() => {
+        this._initRafId = 0;
+        if (!this.terminal || !this.fitAddon) return; // unmount 竞态：fit/focus 作用于尸体会抛
         this.fitAddon.fit();
         this.terminal.focus();
       });
@@ -753,6 +770,11 @@ class TerminalPanel extends React.Component {
         const pending = this.props.pendingImages;
         const inAlternateScreen = this.terminal?.buffer?.active?.type === 'alternate';
         if (pending?.length > 0 && !inAlternateScreen && this.ws?.readyState === WebSocket.OPEN) {
+          // 必须 preventDefault（同上 Shift+Enter 分支）：仅 return false 不阻浏览器默认，
+          // Enter 的 keypress 仍被 xterm 转发 \r 到 PTY → 路径注入后立即提交，违背
+          // "用户看到路径再按 Enter 确认" 的设计。
+          e.preventDefault();
+          e.stopPropagation();
           const paths = pending.map(img => `'${img.path.replace(/'/g, "'\\''")}'`).join(' ');
           this.ws.send(JSON.stringify({ type: 'input', data: paths + ' ' }));
           this.props.onClearPendingImages?.();
@@ -955,6 +977,7 @@ class TerminalPanel extends React.Component {
         // 有意取舍:terminal.reset() 会连洪泛前的 scrollback 一起清掉——保留 scrollback 改写
         // 分隔条+追加快照的方案会让快照开头与已渲染内容重叠重复,且洪泛流的半截转义残留可能
         // 卡坏 ANSI 状态机;reset 换取干净对齐,黄字提示已向用户明示发生过跳过。
+        diagCount('resyncCount');
         this._writeQ.reset();
         this.terminal?.reset();
         this._writeQ.push('\x1b[33m[cc-viewer] output skipped during congestion\x1b[0m\r\n');
@@ -986,6 +1009,9 @@ class TerminalPanel extends React.Component {
     if (state === 'open') {
       this.sendResize();
     } else if (state === 'close') {
+      // writeQ 与 terminal 都要 reset（同 data-resync 分支）：close 时队列若有积压，
+      // 重连 replay 会把这些字节再发一遍 → 局部重复。只 reset xterm 漏了写队列。
+      this._writeQ?.reset();
       this.terminal?.reset();
     }
   };
@@ -1052,6 +1078,11 @@ class TerminalPanel extends React.Component {
   // ResizeObserver 路径和 60s 自动刷新 / 手动 L2/L3 都走它,行为统一。
   _fitPreservingScroll = () => {
     if (!this.fitAddon || !this.containerRef.current) return;
+    // 0/极小尺寸守卫（同 ScratchTerminal）：容器可见但高度≈0 时 FitAddon 会算出 2×1
+    // (MINIMUM_COLS=2/ROWS=1) 并经 sendResize 发给 PTY → ConPTY 全屏 reflow 崩坏 +
+    // 恢复时二次重绘。尺寸无效时跳过 fit，等容器恢复后 ResizeObserver 再触发。
+    const el = this.containerRef.current;
+    if (el.offsetWidth <= 0 || el.offsetHeight <= 0) return;
     try {
       const vp = this.containerRef.current.querySelector('.xterm-viewport');
       const prevScrollTop = vp?.scrollTop ?? 0;
@@ -1107,6 +1138,9 @@ class TerminalPanel extends React.Component {
       this.terminal.loadAddon(this.webglAddon);
       this._installWebglLongtaskGuard();
     } catch {
+      // 若 loadAddon(activate) 中途抛出，addon 可能已创建 GL context/canvas/onContextLoss
+      // disposable——只置 null 会泄漏，先显式 dispose 再置 null。
+      try { this.webglAddon?.dispose(); } catch {}
       this.webglAddon = null;
     }
   }
@@ -1209,6 +1243,7 @@ class TerminalPanel extends React.Component {
 
     // 等渲染器更新后再计算行数
     requestAnimationFrame(() => {
+      if (!this.terminal) return; // unmount 竞态：this.terminal._core 对 null 取属性会抛
       const newCellDims = this.terminal._core?._renderService?.dimensions?.css?.cell;
       const lineHeight = newCellDims?.height || cellDims.height;
       const rows = Math.max(5, Math.min(Math.floor(availableHeight / lineHeight), 100));
@@ -1249,15 +1284,19 @@ class TerminalPanel extends React.Component {
       }
     }
 
-    // 当 shell 已启用 bracketedPasteMode 时，xterm.js 会自动包裹，无需干预
-    if (this.terminal?.modes?.bracketedPasteMode) return;
-    const text = e.clipboardData?.getData('text');
-    if (!text || !this.ws || this.ws.readyState !== WebSocket.OPEN) return;
-    // shell 未启用 bracketed paste 时，手动包裹多行文本，防止换行被当作 Enter 执行
-    if (text.includes('\n') || text.includes('\r')) {
+    const rawText = e.clipboardData?.getData('text');
+    if (!rawText || !this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    // paste-injection 防护：剪贴板里内嵌的 \x1b[201~ 会提前闭合 bracketed paste 包裹，
+    // 余下字节作为真实按键注入。xterm 6.0 自动包裹路径不 sanitize（上游 7.0 才修），
+    // 故含该序列时我们接管：剥离后自行包裹发送，不再交给 xterm。
+    const hasInjection = /\x1b\[20[01]~/.test(rawText);
+    // 当 shell 已启用 bracketedPasteMode 且无注入序列时，xterm.js 会自动包裹，无需干预
+    if (this.terminal?.modes?.bracketedPasteMode && !hasInjection) return;
+    // shell 未启用 bracketed paste（或检测到注入序列）时，手动 sanitize + 包裹
+    if (hasInjection || rawText.includes('\n') || rawText.includes('\r')) {
       e.preventDefault();
       e.stopPropagation();
-      const wrapped = `\x1b[200~${text}\x1b[201~`;
+      const wrapped = `\x1b[200~${sanitizeBracketPasteText(rawText)}\x1b[201~`;
       this.ws.send(JSON.stringify({ type: 'input', data: wrapped }));
     }
   };

@@ -176,14 +176,15 @@ describe('TerminalWriteQueue', { concurrency: false }, () => {
     term.setThrowOn(0);  // 第 0 次 write 抛
     q.push('first');
     flushOneFrame();
-    // write 抛错 → out 已脱离 buffer 丢失，但 rAF 不再续约
+    // write 抛错 → 指针回滚到消费前，数据保留待重试；rAF 不再续约
     assert.equal(_rafQueue.size, 0, '抛错后不应再续约 rAF');
     assert.equal(term.writes.length, 0, '抛错的 write 不应进入 writes');
 
-    // 下次 push 应该重新触发 rAF 并写入成功
+    // 下次 push 重新触发 rAF：抛错帧的数据重组重试，不丢失
+    // （原实现指针快照误在消费循环后，抛错即丢该 chunk——与源码回滚契约相反，已修正）
     q.push('second');
     flushAllFrames();
-    assert.equal(term.receivedString(), 'second');
+    assert.equal(term.receivedString(), 'firstsecond');
   });
 
   it('drain 同步排空 buffer，无需 rAF', () => {
@@ -335,6 +336,16 @@ describe('TerminalWriteQueue 积压自保（trim）', { concurrency: false }, ()
     flushAllFrames(200);
     assert.equal(term.receivedString(), big, 'no data lost');
     assert.ok(!term.receivedString().includes('output trimmed'));
+  });
+
+  it('单项 >HIGH_WATER（3MB 超大快照）：最新项永不丢，且不得报假 trim 提示', () => {
+    // 越过 2MB 高水位但队列只有一项 → 循环什么都没丢，不能给用户写
+    // "output trimmed" 黄字（数据其实 100% 完整交付），trimCount 也不能脏
+    const big = 'x'.repeat(3 * 1024 * 1024);
+    q.push(big);
+    flushAllFrames(200);
+    assert.equal(term.receivedString(), big, 'oversized single item fully delivered');
+    assert.ok(!term.receivedString().includes('output trimmed'), 'no false trim notice');
   });
 
   it('自定义 highWaterBytes 选项生效（移动端低水位）', () => {

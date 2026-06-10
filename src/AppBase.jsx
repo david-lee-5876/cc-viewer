@@ -1611,6 +1611,8 @@ class AppBase extends React.Component {
 
         // 合并 mainAgent sessions（跳过被剪枝的 entry，其 messages 已被清空；
         // 跳过重建层标记的乱序/断裂条目，防完成序倒置翻倍，见 isMergeBlockedEntry JSDoc）
+        // KEEP IN SYNC: test/delta-reorder.test.js clientMergeSse 镜像本块守卫顺序
+        // （mainAgent 形态 → teammate/blocked → applyInPlaceLastMsgReplace → merge），改动需同步
         if (isMainAgent(entry) && entry.body && Array.isArray(entry.body.messages) && !entry._slimmed && !isMergeBlockedEntry(entry)) {
           const timestamp = entry.timestamp || new Date().toISOString();
           const lastSession = mainAgentSessions.length > 0 ? mainAgentSessions[mainAgentSessions.length - 1] : null;

@@ -63,6 +63,11 @@ describe('getModelMaxTokens', () => {
     assert.equal(H.getModelMaxTokens('mythons-pro'), 1000000);
   });
 
+  it('fable-5 家族默认 1M', () => {
+    assert.equal(H.getModelMaxTokens('claude-fable-5'), 1000000);
+    assert.equal(H.getModelMaxTokens('claude-fable-5-1'), 1000000);
+  });
+
   it('裸 claude → 200K', () => {
     assert.equal(H.getModelMaxTokens('claude-3-5-sonnet-20241022'), 200000);
   });
@@ -141,6 +146,11 @@ describe('resolveCalibrationTokens', () => {
 
   it('lastMainAgent model 含 mythons → 1M', () => {
     const last = { body: { model: 'mythons-x' } };
+    assert.equal(H.resolveCalibrationTokens('auto', last), 1000000);
+  });
+
+  it('lastMainAgent model 命中 fable-5 家族 → 1M', () => {
+    const last = { body: { model: 'claude-fable-5' } };
     assert.equal(H.resolveCalibrationTokens('auto', last), 1000000);
   });
 

@@ -18,6 +18,9 @@ const MODEL_CONTEXT_SIZES = [
   { match: /opus/i, tokens: 1000000 },
   // mythons 同样默认 1M(opus 之后、claude 之前,避免被 /claude/ 抢成 200K)
   { match: /mythons/i, tokens: 1000000 },
+  // fable-5 家族(fable-5 / fable-5.x / fable-5-x)默认 1M,同样须排在 /claude/ 之前
+  // (model id 形如 claude-fable-5);带 [1m] 后缀的由首条规则先命中,此处兜底无后缀形态
+  { match: /fable[ -]5/i, tokens: 1000000 },
   { match: /claude/i, tokens: 200000 },
   { match: /gpt-4o|o1|o3|o4/i, tokens: 128000 },
   { match: /gpt-4/i, tokens: 128000 },
@@ -63,7 +66,8 @@ function _classifyContextSize(modelName) {
   // Opus 4 家族(opus-4-7 / opus-4-8 / opus-4-9 / opus-4.x,连字符·点·空格分隔均可)
   // 默认 1M;mythons 同样 1M。用正则覆盖整个 4.x 系列,版本号 bump 时无需再改这里。
   // 注意只匹配 "opus-4-N",不匹配裸 opus(claude-3-opus 仍是 200K)。
-  if (/opus[ -]4[-.]\d/.test(m) || m.includes('mythons')) return 1000000;
+  // fable-5 家族(claude-fable-5 / fable-5.x)默认 1M,正则覆盖整个 5.x 系列。
+  if (/opus[ -]4[-.]\d/.test(m) || m.includes('mythons') || /fable[ -]5/.test(m)) return 1000000;
   if (m.includes('1m')) return 1000000;
   return 200000;
 }
@@ -80,6 +84,7 @@ function _classifyContextSize(modelName) {
  *  分类规则（_classifyContextSize）：
  *      · model 命中 opus-4-N 家族（opus-4-7/4-8/4-9/4.x，大小写不敏感）→ 1M
  *      · model 含 mythons → 1M
+ *      · model 命中 fable-5 家族（fable-5/5.x，大小写不敏感）→ 1M
  *      · model 含 1m 子串（如 deepseek-v3-1m）→ 1M
  *      · 否则 → 200K
  *  haiku 跳过的代价：纯 haiku 子任务期会落到 projectModelHint；该路径下 hint

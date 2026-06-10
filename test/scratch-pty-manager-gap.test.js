@@ -197,6 +197,22 @@ describe('scratch-pty-manager-gap: writeScratch / resizeScratch / killScratch', 
     assert.deepEqual(spawned[0].lastResize, { cols: 132, rows: 43 });
   });
 
+  it('resizeScratch 钳制 NaN/0/负/超大为有限正整数（防毒化 lastCols→spawn）', async () => {
+    const spawned = [];
+    _setPtyImportForTests(makeControllableImport(spawned));
+    await spawnScratch('g-clamp');
+    resizeScratch('g-clamp', NaN, NaN);     // 非有限 → 回退上一有效值（初值 100×24）
+    assert.deepEqual(spawned[0].lastResize, { cols: 100, rows: 24 });
+    resizeScratch('g-clamp', 0, 0);         // 0 → 下界 2×1
+    assert.deepEqual(spawned[0].lastResize, { cols: 2, rows: 1 });
+    resizeScratch('g-clamp', -9, -9);       // 负 → 下界
+    assert.deepEqual(spawned[0].lastResize, { cols: 2, rows: 1 });
+    resizeScratch('g-clamp', 99999, 99999); // 超大 → 上界 1000
+    assert.deepEqual(spawned[0].lastResize, { cols: 1000, rows: 1000 });
+    resizeScratch('g-clamp', 120, 40);      // 正常透传
+    assert.deepEqual(spawned[0].lastResize, { cols: 120, rows: 40 });
+  });
+
   it('resize 前先 setState：spawn 用最近 resize 设定的 cols/rows', async () => {
     const spawned = [];
     _setPtyImportForTests(makeControllableImport(spawned));

@@ -5,10 +5,22 @@
  *   1) 解决原实现 `_writeBuffer = _writeBuffer.slice(N)` 的 O(n²) 字符串切片
  *      —— 大流量（/resume 1MB+）下每帧复制整个剩余 buffer，导致 794ms self
  *      + GC +56%。改用「string[] queue + offset 指针」算法，整体 O(n)。
- *   2) 每帧仅 write 一个 chunk（≤32KB），与原实现节奏 100% 等价：
+ *   2) 每帧仅 write 一个 chunk，节奏与原实现等价：
  *      - 不做 single-frame multi-chunk drain（会让 /resume 滚动从平滑变跳顿）
- *      - 不用 callback flow control（dispose 时 callback 丢 → 永久死锁）
  *      - 不设 MAX_BYTES_PER_FRAME（tab 切回时主线程暴吃 200ms）
+ *
+ * 消化力自适应（AIMD，Windows DOM 渲染器洪泛掉帧治理）：
+ *   - chunk 尺寸动态 ∈ [4KB, 32KB]（构造 opts.initialChunkBytes 设初值，默认 32KB）。
+ *     依据 xterm write(data, callback) 的解析完成回调计时：单 chunk 耗时 >24ms
+ *     减半（把原子解析单元压进帧预算），<8ms 连续 3 次 +4KB。快机稳定 32KB
+ *     （现状零变化），慢机收敛 4~8KB。
+ *   - callback 安全边界（旧注释「dispose 时 callback 丢 → 永久死锁」的根治版）：
+ *     callback 仅用于计时与 outstanding 记账，**永不门控写出**；唯一软背压是
+ *     outstanding > 2×chunk 时跳过本帧（仍续约 rAF），且只在「本 epoch 已观察到
+ *     callback 正常回调」（_cbSeen）后才启用——mock/不回调的终端行为零变化；
+ *     配 500ms fail-open（callback 失联即清账恢复写），只会 fail-open 不会
+ *     fail-closed。reset()/dispose() 时 epoch++ 丢弃旧回调（terminal.reset 不清
+ *     xterm WriteBuffer，resync 后旧 cb 仍会到达，防串台污染计时）。
  *
  * 顺带修复（既有缺陷）：
  *   - UTF-16 surrogate pair 在 32KB 边界硬切 → emoji 显示为 �。
@@ -33,14 +45,25 @@
  *     中止半截转义 + \x1b[?2026l 退出可能被撕裂配对的同步输出模式），依赖洪泛流
  *     自带的全屏重绘自愈，
  *     不调 term.reset()（保 scrollback、避免 WebGL 重建抖动）。
- *   - 单次 /resume 1MB+ push 低于水位不会误触；仍不引入 callback/Promise
- *     （不踩 dispose 死锁坑）、每帧节奏不变（不踩 tab 切回暴吃 / /resume 跳顿坑）。
- *   - reset()：清空队列但保持可用（服务端 data-resync 对齐时用，区别于 dispose 终态）。
+ *   - 单次 /resume 1MB+ push 低于水位不会误触；每帧节奏不变
+ *     （不踩 tab 切回暴吃 / /resume 跳顿坑）。
+ *   - reset()：清空队列但保持可用（服务端 data-resync 对齐时用，区别于 dispose 终态）；
+ *     同时把 chunk 复位到构造初值（平台保守初值，慢机由 AIMD 再收敛）并取消在途 rAF。
  */
 
-const CHUNK_SIZE = 32 * 1024;        // 与原 TerminalPanel 一致
+import { diagCount, diagSet, diagEwma } from './termDiag.js';
+import { now } from './monotime.js';
+
+const CHUNK_SIZE = 32 * 1024;        // 自适应上限（= 原固定值，快机行为不变）
+const CHUNK_MIN = 4 * 1024;          // 自适应下限
+const ADAPT_SLOW_MS = 24;            // 单 chunk 解析耗时超此值 → 减半
+const ADAPT_FAST_MS = 8;             // 低于此值连续 ADAPT_FAST_STREAK 次 → +4KB
+const ADAPT_FAST_STREAK = 3;
+const ADAPT_STEP_UP = 4 * 1024;
+const CB_FAIL_OPEN_MS = 500;         // callback 失联超此值清账恢复写（fail-open）
 const GC_THRESHOLD_HEAD = 64;        // queue 头部消费指针超 64 项触发压缩
-const GC_RATIO_NUM = 2;              // 已消费 / 剩余 > 2 也触发（防长尾占内存）
+const GC_CONSUMED_RATIO = 2;         // head×2 > 总项数（已消费过半）也触发（防长尾占内存）
+const GC_RATIO_MIN_HEAD = 8;         // 比例触发的最小 head（避免小队列频繁 slice）
 const HIGH_WATER_BYTES = 2 * 1024 * 1024;  // 积压上限：超过即丢最旧整项
 const TRIM_TARGET_BYTES = 512 * 1024;      // 丢弃后回落的目标水位（留迟滞带防抖）
 // 丢弃提示：\x18 (CAN) 中止 xterm 解析器中可能残留的半截转义序列；随后 \x1b[?2026l
@@ -51,8 +74,10 @@ const TRIM_NOTICE = '\x18\x1b[?2026l\r\n\x1b[33m[cc-viewer] output trimmed (rend
 export class TerminalWriteQueue {
   /**
    * @param {() => any | null} getTerminal - 返回当前 xterm 实例（或 null）
-   * @param {{ highWaterBytes?: number, trimTargetBytes?: number }} [opts]
+   * @param {{ highWaterBytes?: number, trimTargetBytes?: number, initialChunkBytes?: number }} [opts]
    *   - 积压自保水位，移动端可传更小值（内存预算低）
+   *   - initialChunkBytes：自适应 chunk 初值（Windows DOM 渲染器建议 16KB），
+   *     运行期按消化耗时在 [CHUNK_MIN, CHUNK_SIZE] 内 AIMD 调节
    */
   constructor(getTerminal, opts) {
     this._getTerminal = getTerminal;
@@ -64,6 +89,32 @@ export class TerminalWriteQueue {
     this._highWater = opts?.highWaterBytes || HIGH_WATER_BYTES;
     this._trimTarget = opts?.trimTargetBytes || TRIM_TARGET_BYTES;
     this._trimmedSinceFlush = false;
+    // ── 消化力自适应状态 ──
+    const init = opts?.initialChunkBytes || CHUNK_SIZE;
+    this._initialChunk = Math.max(CHUNK_MIN, Math.min(CHUNK_SIZE, init)); // reset() 复位基准
+    this._chunkSize = this._initialChunk;
+    this._fastStreak = 0;      // 连续快回调计数（AIMD 增窗）
+    this._epoch = 0;           // reset/dispose 递增，丢弃旧 write callback
+    this._outstanding = 0;     // 已写出未回调的字符数
+    this._cbSeen = false;      // 本 epoch 是否观察到 callback 正常回调（门控前置条件）
+    this._lastWriteSentAt = 0; // fail-open 计时基准
+  }
+
+  /** 单 chunk 解析耗时 → AIMD 调节 chunk 尺寸 */
+  _adapt(dt) {
+    if (dt > ADAPT_SLOW_MS) {
+      this._chunkSize = Math.max(CHUNK_MIN, this._chunkSize >> 1);
+      this._fastStreak = 0;
+    } else if (dt < ADAPT_FAST_MS) {
+      if (++this._fastStreak >= ADAPT_FAST_STREAK) {
+        this._fastStreak = 0;
+        this._chunkSize = Math.min(CHUNK_SIZE, this._chunkSize + ADAPT_STEP_UP);
+      }
+    } else {
+      this._fastStreak = 0;
+    }
+    diagSet('chunkSize', this._chunkSize);
+    diagEwma('cbLatencyEwma', dt);
   }
 
   /**
@@ -85,14 +136,20 @@ export class TerminalWriteQueue {
    */
   _maybeTrim() {
     let pending = this._pendingBytes();
+    diagSet('writeQPendingBytes', pending);
     if (pending <= this._highWater) return;
+    // 单项超大（如 >2MB /resume 快照）时下方循环一项都不会丢——此时不得置
+    // trim 标记/计数，否则会给用户写假的 "output trimmed" 黄字（数据其实完整交付）
+    const headBefore = this._head;
     // length-1：最新一项永不丢（单项超大如 /resume 快照时整段保留，终端必须呈现最新状态）
     while (this._head < this._queue.length - 1 && pending > this._trimTarget) {
       pending -= this._queue[this._head].length - this._offset;
       this._head++;
       this._offset = 0;
     }
+    if (this._head === headBefore) return; // 实际什么都没丢 → 不报 trim
     this._trimmedSinceFlush = true;
+    diagCount('trimCount');
   }
 
   _schedule() {
@@ -106,6 +163,19 @@ export class TerminalWriteQueue {
     const term = this._getTerminal();
     if (!term) return;
 
+    // 软背压：xterm 内未消化字节超 2×chunk 时跳过本帧（仍续约 rAF，队列不滞留）。
+    // 仅在本 epoch 观察到 callback 正常回调后启用（mock/不回调的终端零变化）；
+    // callback 失联超 CB_FAIL_OPEN_MS 即清账恢复写——只 fail-open 不 fail-closed。
+    if (this._cbSeen && this._outstanding > 2 * this._chunkSize) {
+      if (now() - this._lastWriteSentAt > CB_FAIL_OPEN_MS) {
+        this._outstanding = 0;
+        this._fastStreak = 0;
+      } else {
+        if (this._head < this._queue.length) this._schedule();
+        return;
+      }
+    }
+
     // 积压丢弃过：先写提示行（独立于下方 out 的回滚语义；写失败保留标记下帧重试）
     if (this._trimmedSinceFlush) {
       try {
@@ -114,13 +184,18 @@ export class TerminalWriteQueue {
       } catch { /* 与下方 write 同等容错 */ }
     }
 
-    // 取出最多 CHUNK_SIZE 字符到 out。每帧仅一次 write，与原实现节奏等价。
+    // 取出最多 _chunkSize 字符到 out。每帧仅一次 write，节奏与原实现等价。
+    // 指针快照须在消费循环**之前**（原实现误在循环后快照，write 抛错时恢复的是
+    // 消费后指针 = 该 chunk 静默丢失，与下方注释的回滚契约相反——已修正）。
+    const headBefore = this._head;
+    const offsetBefore = this._offset;
+    const CHUNK = this._chunkSize;
     let out = '';
-    while (this._head < this._queue.length && out.length < CHUNK_SIZE) {
+    while (this._head < this._queue.length && out.length < CHUNK) {
       const head = this._queue[this._head];
       const offset = this._offset;
       const remaining = head.length - offset;
-      const need = CHUNK_SIZE - out.length;
+      const need = CHUNK - out.length;
       if (need <= 0) break;
 
       if (remaining <= need) {
@@ -153,13 +228,25 @@ export class TerminalWriteQueue {
     // 数据保留语义：head/offset 是逻辑指针，queue 项本身没被 splice，
     // 回滚到 write 之前就能让下次 _flush 重新组装相同的 out 重试。
     // GC 在 write 成功后才执行（见下方），确保失败回滚永远有效。
-    const headBefore = this._head;
-    const offsetBefore = this._offset;
+    const epoch = this._epoch;
+    const sentAt = now();
+    this._outstanding += out.length;
+    this._lastWriteSentAt = sentAt;
     try {
-      term.write(out);
+      // callback 仅做计时与记账（AIMD 输入），写出本身从不等待它
+      term.write(out, () => {
+        if (epoch !== this._epoch) return; // reset/dispose 后旧回调 → 丢弃防串台
+        this._cbSeen = true;
+        this._outstanding = Math.max(0, this._outstanding - out.length);
+        this._adapt(now() - sentAt);
+      });
     } catch {
+      // 双向记账守恒：成功路径由 callback 减账，失败路径在此立即回滚——
+      // 任何分支下 outstanding ≥0 且不累积。抛错后有意**不**续约 rAF
+      // （write 持续抛时 rAF 会 60fps 空转），数据保留在队列，下次 push 重触发。
       this._head = headBefore;
       this._offset = offsetBefore;
+      this._outstanding = Math.max(0, this._outstanding - out.length);
       return;
     }
 
@@ -169,7 +256,7 @@ export class TerminalWriteQueue {
     //   不会破坏 _offset 与 head 的语义对应。）
     if (
       this._head > GC_THRESHOLD_HEAD ||
-      (this._head > 8 && this._head * GC_RATIO_NUM > this._queue.length)
+      (this._head > GC_RATIO_MIN_HEAD && this._head * GC_CONSUMED_RATIO > this._queue.length)
     ) {
       this._queue = this._queue.slice(this._head);
       this._head = 0;
@@ -206,18 +293,29 @@ export class TerminalWriteQueue {
 
   /**
    * 清空队列但保持可用（服务端 data-resync 对齐时用，区别于 dispose 的终态）。
-   * 不取消在途 rAF：_flush 发现队列空会直接 return，无副作用。
+   * epoch++ 丢弃在途旧 write callback（terminal.reset 不清 xterm WriteBuffer）；
+   * chunk 复位到构造初值（保留平台保守初值：Windows 16KB / 其余 32KB——
+   * 快机 resync 后快照重放不必从 4KB 爬坡，慢机由 AIMD 重新收敛）；取消在途 rAF。
    */
   reset() {
     if (this._unmounted) return;
+    if (this._rafId) {
+      cancelAnimationFrame(this._rafId);
+      this._rafId = 0;
+    }
     this._queue.length = 0;
     this._head = 0;
     this._offset = 0;
     this._trimmedSinceFlush = false;
+    this._epoch++;
+    this._outstanding = 0;
+    this._cbSeen = false;
+    this._fastStreak = 0;
+    this._chunkSize = this._initialChunk;
   }
 
   /**
-   * 释放资源。dispose 后 push 静默忽略，rAF 取消。
+   * 释放资源。dispose 后 push 静默忽略，rAF 取消，在途 callback 按 epoch 丢弃。
    */
   dispose() {
     this._unmounted = true;
@@ -228,6 +326,8 @@ export class TerminalWriteQueue {
     this._queue.length = 0;
     this._head = 0;
     this._offset = 0;
+    this._epoch++;
+    this._outstanding = 0;
   }
 
   /** 测试用 —— 返回当前队列剩余字节数 */
@@ -242,7 +342,9 @@ export class TerminalWriteQueue {
 
 // 暴露常量给测试 / 外部参考（不要在生产代码读这些，行为是不变的契约）
 TerminalWriteQueue.CHUNK_SIZE = CHUNK_SIZE;
+TerminalWriteQueue.CHUNK_MIN = CHUNK_MIN;
 TerminalWriteQueue.GC_THRESHOLD_HEAD = GC_THRESHOLD_HEAD;
 TerminalWriteQueue.HIGH_WATER_BYTES = HIGH_WATER_BYTES;
 TerminalWriteQueue.TRIM_TARGET_BYTES = TRIM_TARGET_BYTES;
 TerminalWriteQueue.TRIM_NOTICE = TRIM_NOTICE;
+TerminalWriteQueue.CB_FAIL_OPEN_MS = CB_FAIL_OPEN_MS;

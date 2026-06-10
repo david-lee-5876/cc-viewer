@@ -204,11 +204,14 @@ export function mergeMainAgentSessions(prevSessions, entry, options = {}) {
       // (b) 同会话近似拷贝：末位原地替换 / 中段编辑，但服务端信号缺失（完成序倒置让无信号
       //     的 stale checkpoint 后落盘、或旧日志无信号）。此形态整段 append 会让对话翻倍
       //     （mainAgent 整段重复 bug 的翻倍终点），必须替换。
-      // 判定：对位 fp 严格多数（≥ floor(N/2)+1）→ 近似拷贝。近似拷贝逐位几乎全等；
-      // Plan Mode 新窗口对位相等 ≈ 0；N=2 时需两条全等才替换（保守保持旧 append 行为）。
       let aligned = 0;
-      const majority = Math.floor(newLen / 2) + 1;
-      for (let i = 0; i < newLen && aligned < majority; i++) {
+      // 严格多数（非简单 plurality）：对位 fp 相等数 ≥ floor(N/2)+1 才判近似拷贝→替换。
+      // 近似拷贝逐位几乎全等；Plan Mode 新窗口对位相等 ≈ 0。取严格多数是替换误判的
+      // 安全边界——N=2→需 2 条全等、N=3→2、N=4→3；宁可对"一半相同"的模糊形态保守
+      // append（残余形态：末位短暂陈旧），也不冒错杀新窗口历史的风险。调阈值前先想清
+      // 反例：近拷贝带 1 条中段编辑（N=2 时 1/2 不足多数 → append → 翻倍回归）。
+      const STRICT_MAJORITY = Math.floor(newLen / 2) + 1;
+      for (let i = 0; i < newLen && aligned < STRICT_MAJORITY; i++) {
         let cfp = curFpsCache[i];
         if (cfp === undefined) {
           cfp = messageFingerprint(lastSession.messages[i]);
@@ -216,7 +219,7 @@ export function mergeMainAgentSessions(prevSessions, entry, options = {}) {
         }
         if (newFps[i] === cfp) aligned++;
       }
-      if (aligned >= majority) {
+      if (aligned >= STRICT_MAJORITY) {
         // 近似拷贝 → 整段替换（等价于无信号版 in-place replace）。
         // 引用更换会使 ChatView WeakMap 渲染缓存失效一次性重渲染，预期内。
         for (let i = 0; i < newLen; i++) {

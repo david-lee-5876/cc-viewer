@@ -1,100 +1,21 @@
 /**
  * Permission prompt detection end-to-end test
- * Tests the complete chain: ANSI strip → buffer → regex detect → classify
+ * Tests the complete chain: ANSI strip → buffer → detect → classify
+ *
+ * Import 真实现（src/utils/promptDetect.js + promptClassifier.js），
+ * 不再内嵌副本——消除「双改同步」漂移隐患。
  */
 import assert from 'assert';
 import { describe, it } from 'node:test';
+import { stripAnsi, detectPromptInBuffer, isFalsePositiveQuestion } from '../src/utils/promptDetect.js';
+import { isPlanApprovalPrompt, isDangerousOperationPrompt } from '../src/utils/promptClassifier.js';
 
-// ── Extract logic from source (no JSX dependency) ──
-
-function stripAnsi(str) {
-  return str
-    .replace(/\x1b\[[0-9;]*[A-Za-z]/g, '')
-    .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')
-    .replace(/\x1b[^[\]](.|$)/g, '')
-    .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, '');
-}
-
+// 组合出与 ChatView._detectPrompt 等价的「检出 + false-positive 过滤」链
 function detectPrompt(rawBuf) {
-  const buf = rawBuf.trimEnd();
-  let question = null;
-  let options = null;
-
-  // Pattern 1: Numbered options (allows trailing blank lines + hint lines)
-  const match1 = buf.match(/([^\n]*\?)\s*\n((?:\s*[❯>]?\s*\d+\.\s+[^\n]+\n?){2,})(?:\n[^\d❯>\n][^\n]*|\n)*$/);
-  if (match1) {
-    question = match1[1].trim();
-    const optionLines = match1[2].match(/\s*([❯>])?\s*(\d+)\.\s+([^\n]+)/g);
-    if (optionLines) {
-      options = optionLines.map(line => {
-        const m = line.match(/\s*([❯>])?\s*(\d+)\.\s+(.+)/);
-        return { number: parseInt(m[2], 10), text: m[3].trim(), selected: !!m[1] };
-      });
-    }
-  }
-
-  // Pattern 2: Non-numbered cursor-based (Ink Select, allows trailing blank lines + hint lines)
-  if (!options) {
-    const match2 = buf.match(/([^\n]+)\n((?:\s+[❯>]?\s+[^\n]+\n?){2,})(?:\n[^\s❯>\n][^\n]*|\n)*$/);
-    if (match2) {
-      const candidateQ = match2[1].trim();
-      const block = match2[2];
-      const lines = block.split('\n').filter(l => l.trim());
-      const parsed = [];
-      for (const line of lines) {
-        const m = line.match(/^\s*([❯>])?\s+(.+)/);
-        if (m && m[2].trim()) {
-          parsed.push({ number: parsed.length + 1, text: m[2].trim(), selected: !!m[1] });
-        }
-      }
-      if (parsed.length >= 2 && parsed.some(p => p.selected)) {
-        question = candidateQ;
-        options = parsed;
-      }
-    }
-  }
-
-  if (question && options) {
-    // False positive filters
-    if (/^[■\s]*[~\/.:]/.test(question) && /\//.test(question)) return null;
-    if (/^[*■✦⏎]/.test(question)) return null;
-    return { question, options };
-  }
-  return null;
-}
-
-// promptClassifier.js logic
-function isPlanApprovalPrompt(prompt) {
-  if (!prompt || !prompt.question) return false;
-  const q = prompt.question.toLowerCase();
-  if (/plan/i.test(q) && (/approv/i.test(q) || /proceed/i.test(q) || /accept/i.test(q))) {
-    return true;
-  }
-  // Options 模式兜底（与 src/utils/promptClassifier.js 同步）
-  if (Array.isArray(prompt.options) && prompt.options.length === 3) {
-    const texts = prompt.options.map(o => (o.text || '').toLowerCase());
-    const hasApprove = texts.some(t => /\bapprov/i.test(t));
-    const hasEdit = texts.some(t => /\bedits?\b|\bmodify/i.test(t));
-    const hasReject = texts.some(t => /\breject\b|\bdeny\b|keep planning|\bno,/i.test(t));
-    if (hasApprove && hasEdit && hasReject) return true;
-  }
-  return false;
-}
-
-function isDangerousOperationPrompt(prompt) {
-  if (!prompt || !prompt.question) return false;
-  const q = prompt.question;
-  if (isPlanApprovalPrompt(prompt)) return false;
-  if (/do you want to (make this edit|write|proceed|create|delete)|allow\b.*\bto\b|want to allow|wants to (execute|run|read|write|access|create|delete|modify|use)|may .*(read|write|execute|run|access|create|delete|modify)|grant .*(access|permission)|permit/i.test(q)) {
-    return true;
-  }
-  if (prompt.options && prompt.options.length >= 2) {
-    const texts = prompt.options.map(o => (o.text || '').toLowerCase());
-    const hasAllow = texts.some(t => /^allow|^yes/i.test(t));
-    const hasDeny = texts.some(t => /^no$|^no[^a-z]|^deny|^reject/i.test(t));
-    if (hasAllow && hasDeny) return true;
-  }
-  return false;
+  const detected = detectPromptInBuffer(rawBuf);
+  if (!detected) return null;
+  if (isFalsePositiveQuestion(detected.question)) return null;
+  return detected;
 }
 
 // ── Test cases: Real Claude Code permission prompts ──

@@ -2,6 +2,7 @@ import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   spawnClaude,
+  spawnShell,
   writeToPty,
   writeToPtySequential,
   resizePty,
@@ -491,6 +492,119 @@ describe('pty-manager: writeToPtySequential delay rules', () => {
     const gap = writeTimestamps[1].t - writeTimestamps[0].t;
     assert.ok(gap >= 50, `expected regular char gap >=50ms, got ${gap}ms`);
     assert.ok(gap < 300, `expected regular char gap <300ms (not settleMs:500), got ${gap}ms`);
+  });
+});
+
+// ─── resize 钳制 + 非字符串 chunk 容错 + spawn 在途闸 ───
+
+describe('pty-manager: resize clamp / chunk validation / spawn guard', () => {
+  let spawned;
+  let resizeCalls;
+
+  beforeEach(() => {
+    spawned = [];
+    resizeCalls = [];
+    _setPtyImportForTests(() => ({
+      spawn(command, args, opts) {
+        const inst = {
+          pid: 23000 + spawned.length,
+          command, args, opts,
+          _killed: false,
+          write() {},
+          resize(c, r) { resizeCalls.push([c, r]); },
+          kill() { this._killed = true; },
+          onData() {},
+          onExit() {},
+        };
+        spawned.push(inst);
+        return inst;
+      },
+    }));
+  });
+
+  afterEach(() => {
+    killPty();
+    _setPtyImportForTests(null);
+  });
+
+  it('resizePty clamps NaN/0/negative/oversize to finite positive bounds', async () => {
+    await spawnClaude(9999, process.cwd(), [], '/bin/echo');
+    resizeCalls = [];
+    resizePty(NaN, NaN);     // 非有限 → 回退到上一个有效值（spawn 用的 120×30）
+    resizePty(0, 0);         // 0 → 下界 2×1
+    resizePty(-5, -9);       // 负 → 下界
+    resizePty(99999, 99999); // 超大 → 上界 1000
+    resizePty(120, 40);      // 正常透传
+    for (const [c, r] of resizeCalls) {
+      assert.ok(Number.isFinite(c) && c >= 2 && c <= 1000, `cols clamped: ${c}`);
+      assert.ok(Number.isFinite(r) && r >= 1 && r <= 1000, `rows clamped: ${r}`);
+    }
+    assert.deepEqual(resizeCalls[resizeCalls.length - 1], [120, 40], 'valid dims pass through');
+  });
+
+  it('writeToPtySequential with non-string chunk does not crash, reports failure', async () => {
+    await spawnClaude(9999, process.cwd(), [], '/bin/echo');
+    // 第 2 个是数字：sendNext 的非字符串守卫拦成失败上报，不冒泡成 uncaughtException
+    // （真实 pty.write 会抛 ERR_INVALID_ARG_TYPE，chunk.endsWith 也会抛）。
+    const ok = await new Promise((resolve) => {
+      writeToPtySequential(['a', 123, 'c'], resolve, { settleMs: 10 });
+    });
+    assert.equal(ok, false, 'non-string chunk reports failure, not crash');
+  });
+
+  it('writeToPtySequential survives a throwing write (cleanup + onComplete(false))', async () => {
+    // 用一个第 2 次 write 抛错的 pty，验证 sendNext 的 try/catch 兜住、不冒泡成 uncaught
+    let writeCount = 0;
+    _setPtyImportForTests(() => ({
+      spawn() {
+        return {
+          pid: 24000,
+          write() { if (++writeCount === 2) throw new Error('ERR_INVALID_ARG_TYPE'); },
+          resize() {}, kill() {}, onData() {}, onExit() {},
+        };
+      },
+    }));
+    await spawnClaude(9999, process.cwd(), [], '/bin/echo');
+    const ok = await new Promise((resolve) => {
+      writeToPtySequential(['a', 'b', 'c'], resolve, { settleMs: 10 });
+    });
+    assert.equal(ok, false, 'throwing mid-sequence reports failure, not crash');
+  });
+
+  it('concurrent spawnShell calls spawn exactly one shell (in-flight guard)', async () => {
+    // PTY 未运行态下两条同步到达的 input → 两次 spawnShell。无闸会双开（spawned.length===2）。
+    const [a, b] = await Promise.all([spawnShell(), spawnShell()]);
+    assert.equal(spawned.length, 1, 'only one shell spawned despite concurrent calls');
+    // 复用同一在途 promise：两个返回值一致
+    assert.equal(a, b);
+  });
+
+  it('3 concurrent spawnClaude calls never double-open (while-gate, ≥3 并发)', async () => {
+    // spawnClaude 是 kill+respawn 语义：串行化下每次 spawn 前先 kill 上一个，全程至多一个存活。
+    // 闸用 `if` 而非 `while` 时：A 完成后 B/C 都已过 if 检查 → implB/implC 并发双开，
+    // 出现两个同时存活的 PTY。这里在每次 spawn 时断言此前所有实例都已 _killed。
+    let maxLiveAtSpawn = 0;
+    _setPtyImportForTests(() => ({
+      spawn(command, args, opts) {
+        const liveBefore = spawned.filter((s) => !s._killed).length;
+        if (liveBefore > maxLiveAtSpawn) maxLiveAtSpawn = liveBefore;
+        const inst = {
+          pid: 25000 + spawned.length,
+          command, args, opts, _killed: false,
+          write() {}, resize() {}, kill() { this._killed = true; }, onData() {}, onExit() {},
+        };
+        spawned.push(inst);
+        return inst;
+      },
+    }));
+    await Promise.all([
+      spawnClaude(9999, process.cwd(), [], '/bin/echo'),
+      spawnClaude(9999, process.cwd(), [], '/bin/echo'),
+      spawnClaude(9999, process.cwd(), [], '/bin/echo'),
+    ]);
+    assert.equal(maxLiveAtSpawn, 0, 'no live PTY existed when a new impl spawned (no overlap)');
+    const live = spawned.filter((s) => !s._killed).length;
+    assert.equal(live, 1, 'exactly one PTY survives after serialized kill+respawn');
   });
 });
 

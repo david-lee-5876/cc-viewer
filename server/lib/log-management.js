@@ -171,6 +171,11 @@ export async function mergeLogFiles(logDir, files) {
         delete entry._totalMessageCount;
         delete entry._conversationId;
         delete entry._isCheckpoint;
+        // 信号对的另一半同剥：_isCheckpoint 已剥后，孤立的 _inPlaceReplaceDetected
+        // 永远无法触发双信号短路（applyInPlaceLastMsgReplace 要求两者同真），留着
+        // 只会误导未来读取；_eagerSnapshot 为已废弃字段（写入点已删），仅历史日志残留
+        delete entry._inPlaceReplaceDetected;
+        delete entry._eagerSnapshot;
         // 完成序倒置守卫的内部字段不落盘：合并产物是已重建的全量条目，
         // seq 序号与 stale/broken 标记只在重建期有意义，泄漏会让后续读取误判
         delete entry._seq;

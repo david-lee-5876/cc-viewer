@@ -302,6 +302,31 @@ describe('reconstructor 守卫细节', () => {
     assert.equal(d.body.messages.length, 8, '新 epoch 基线生效');
   });
 
+  it('stale 就地补偿内容 = 累积真值前缀（非裸 delta 切片、非错位前缀）', () => {
+    // 突变缺口：此前仅断言长度，_markStaleEntry 跳过 slice 回填也能全绿。
+    // 这里逐条 deep-equal 锁内容：stale 条目的 messages 必须等于 accumulated.slice(0, total)。
+    const base = conv(8);
+    const recon = createIncrementalReconstructor();
+    recon.reconstruct(deepCopy(checkpointEntry({ msgs: base, seq: 5 })));
+    // 迟到的慢请求：seq 2 < lastSeq 5 → stale；total 7 ≤ accumulated 8 → 就地补偿
+    const stale = recon.reconstruct(deepCopy(deltaEntry({ slice: [mkMsg(7, 'user')], total: 7, seq: 2 })));
+    assert.ok(stale._staleReorder, '乱序条目应标 stale');
+    assert.deepEqual(stale.body.messages, base.slice(0, 7),
+      '就地补偿内容必须 = 累积真值的前 total 条，不能是裸 delta 切片');
+  });
+
+  it('基线已建立后的不足长 delta（真断裂快 delta）：标 _reconstructBroken', () => {
+    // 与冷启动测试（不标 broken）配对，锁 baselineSeen 门的两端：
+    // 无基线 → 透传；有基线 → 长度不足即真断裂，必须冻结防错位拼接。
+    const base = conv(6);
+    const recon = createIncrementalReconstructor();
+    recon.reconstruct(deepCopy(checkpointEntry({ msgs: base, seq: 1 })));
+    // accumulated=6+1=7 < total=9：声称 9 条但累积只够 7 → 断裂
+    const d = recon.reconstruct(deepCopy(deltaEntry({ slice: [mkMsg(7, 'user')], total: 9, seq: 2 })));
+    assert.ok(d._reconstructBroken, '基线存在且重建长度不足 → 必须标 _reconstructBroken');
+    assert.ok(isMergeBlockedEntry(d), 'broken 条目必须被 merge 入口阻断');
+  });
+
   it('teammate 条目（mainAgent:true 双标）不得污染 accumulated', () => {
     const base = conv(6);
     const recon = createIncrementalReconstructor();
@@ -314,6 +339,43 @@ describe('reconstructor 守卫细节', () => {
     assert.equal(d.body.messages.length, 7, 'teammate 条目不应重置/污染 lead 的 accumulated');
     const f = fps(d.body.messages);
     assert.ok(!f.some(fp => fp.includes('msg-100')), 'lead 重建结果不得混入 teammate 消息');
+  });
+});
+
+describe('双层重建 load-bearing 不变量（server 打标 → client 二次重建）', () => {
+  it('client 中途接入缺 seq 高水位：server-stale 条目即便 client 判 ok 仍被 merge 阻断', () => {
+    // 双层重建的安全性依赖两条独立机制（缺一即翻车，详见 WIRE_FORMAT.md §3.7）：
+    // (1) server 就地补偿后 _totalMessageCount === messages.length → client 二次重建
+    //     走隐式 checkpoint 分支（不二次拼接）；
+    // (2) client 永不清除 server 广播来的 _staleReorder → 即便 client 自己的 seqState
+    //     缺高水位判 'ok'（中途接入场景），isMergeBlockedEntry 仍兜底阻断。
+    // 本测试钉死机制 (2)：把它从"恰好成立"变成"断言成立"。
+    const base = conv(8);
+    // 服务端视角：cp(seq5, 8条) 已落，迟到 stale delta(seq2, total7) 就地补偿 + 打标
+    const serverRecon = createIncrementalReconstructor();
+    serverRecon.reconstruct(deepCopy(checkpointEntry({ msgs: base, seq: 5 })));
+    const staleSrv = serverRecon.reconstruct(
+      deepCopy(deltaEntry({ slice: [mkMsg(7, 'user')], total: 7, seq: 2 })));
+    assert.ok(staleSrv._staleReorder, '前置：server 已标 stale');
+    assert.equal(staleSrv.body.messages.length, 7,
+      '前置：已就地补偿为全量 → total===length，client 将按隐式 checkpoint 处理');
+
+    // 客户端视角：SSE 中途接入（fresh reconstructor，seqState 无高水位），
+    // stale 广播是它收到的第一条 → 自己的 _seqGuardCheck 判 'ok' 而非 stale
+    const clientRecon = createIncrementalReconstructor();
+    const cEntry = clientRecon.reconstruct(deepCopy(staleSrv));
+    assert.ok(cEntry._staleReorder,
+      'client 二次重建不得清除 server 设的 _staleReorder（load-bearing 不变量）');
+    assert.ok(isMergeBlockedEntry(cEntry),
+      'client 独立判 ok 的 server-stale 条目必须仍被 merge 阻断');
+    let sessions = clientMergeSse([], cEntry);
+    assert.equal(sessions.length, 0, 'stale 内容不得进入 sessions');
+
+    // 后续正常 checkpoint 到达：client 收敛到真值，无重复
+    const cp2 = clientRecon.reconstruct(
+      deepCopy(checkpointEntry({ msgs: [...base, mkMsg(9, 'user')], seq: 6 })));
+    sessions = clientMergeSse(sessions, cp2);
+    assertNoDuplication(sessions, 9, '中途接入后收敛');
   });
 });
 
@@ -447,7 +509,7 @@ describe('mergeLogFiles 落盘清洗', () => {
 
       const target = await mergeLogFiles(dir, [f1, f2]);
       const rawOut = readFileSync(join(dir, target), 'utf-8');
-      for (const field of ['_seq', '_seqEpoch', '_staleReorder', '_reconstructBroken', '_deltaFormat', '_totalMessageCount', '_isCheckpoint']) {
+      for (const field of ['_seq', '_seqEpoch', '_staleReorder', '_reconstructBroken', '_deltaFormat', '_totalMessageCount', '_isCheckpoint', '_inPlaceReplaceDetected', '_eagerSnapshot']) {
         assert.ok(!rawOut.includes(`"${field}"`), `合并产物不得含内部字段 ${field}`);
       }
       // 产物中不得有裸 delta 切片伪装的全量条目：所有 mainAgent 条目 messages 数 ≥ 6
