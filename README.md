@@ -11,6 +11,8 @@ Based on Claude Code, a Vibe Coding tool that distills and accumulates real deve
 5. Native experience preserved: only enhances Claude Code's capabilities without making any substantive changes to the core, keeping the native experience intact;
 6. Third-party model support: compatible with deepseek-v4-\*, GLM 5.1, Kimi K2.6, with cc-switch built in so you can hot-swap third-party tools at any time;
 
+<img width="860" alt="cc-viewer — deploy once, share with every device" src="https://raw.githubusercontent.com/weiesky/cc-viewer/main/docs/cc-viewer-share.svg" />
+
 English | [简体中文](./docs/README.zh.md) | [繁體中文](./docs/README.zh-TW.md) | [한국어](./docs/README.ko.md) | [日本語](./docs/README.ja.md) | [Deutsch](./docs/README.de.md) | [Español](./docs/README.es.md) | [Français](./docs/README.fr.md) | [Italiano](./docs/README.it.md) | [Dansk](./docs/README.da.md) | [Polski](./docs/README.pl.md) | [Русский](./docs/README.ru.md) | [العربية](./docs/README.ar.md) | [Norsk](./docs/README.no.md) | [Português (Brasil)](./docs/README.pt-BR.md) | [ไทย](./docs/README.th.md) | [Türkçe](./docs/README.tr.md) | [Українська](./docs/README.uk.md)
 
 ## Usage
@@ -149,61 +151,6 @@ By default, remote (LAN) access requires the `?token=` query that ccv prints at 
 * MainAgent requests support Body Diff JSON, showing only the diff against the previous MainAgent request (only changed/added fields) in a collapsed view
 * Each request inlines Token usage stats (input/output tokens, cache creation/read, hit rate)
 * Compatible with Claude Code Router (CCR) and other proxy scenarios — falls back to matching requests by API path pattern
-
-### Conversation mode
-
-Click the "Conversation Mode" button at the top right to parse the Main Agent's full conversation history into a chat interface:
-
-<img height="764" width="1500" alt="image" src="https://github.com/user-attachments/assets/725b57c8-6128-4225-b157-7dba2738b1c6" />
-
-* Agent Team display is not yet supported
-* User messages are right-aligned (blue bubbles), Main Agent replies are left-aligned (dark bubbles)
-* `thinking` blocks are collapsed by default and rendered as Markdown — click to expand and view the reasoning; one-click translation is supported (still unstable)
-* User-selection messages (AskUserQuestion) are displayed in Q\&A form
-* Two-way mode sync: switching to Conversation mode auto-scrolls to the conversation that matches the selected request; switching back to the raw mode auto-scrolls to the selected request
-* Settings panel: toggle the default collapsed state of tool results and thinking blocks
-* Mobile conversation browsing: in mobile CLI mode, tap the "Conversation Browse" button in the top bar to slide out a read-only conversation view and browse the full history on your phone
-
-### Log management
-
-From the CC-Viewer dropdown menu in the top-left:
-
-<img height="760" width="1500" alt="image" src="https://github.com/user-attachments/assets/33295e2b-f2e0-4968-a6f1-6f3d1404454e" />
-
-**Log compression**
-Regarding logs, I want to state clearly that I haven't modified Anthropic's official definition — log integrity is guaranteed.
-However, individual log entries for the 1M Opus model can get extremely large in later stages. Thanks to some log optimizations applied to MainAgent, the size can be reduced by at least 66% even without gzip.
-The parser for these compressed logs can be extracted from the current repository.
-
-### More handy useful features
-
-<img height="767" width="1500" alt="image" src="https://github.com/user-attachments/assets/add558c5-9c4d-468a-ac6f-d8d64759fdbd" />
-
-You can quickly locate your prompts via the sidebar tools.
-
-***
-
-<img height="765" width="1500" alt="image" src="https://github.com/user-attachments/assets/82b8eb67-82f5-41b1-89d6-341c95a047ed" />
-
-The interesting KV-Cache-Text feature shows you exactly what Claude sees.
-
-***
-
-<img height="765" width="1500" alt="image" src="https://github.com/user-attachments/assets/54cdfa4e-677c-4aed-a5bb-5fd946600c46" />
-
-You can upload images and describe your needs — Claude's image understanding is remarkably strong, and as you know, you can paste images directly with Ctrl + V; the full content shows up in the conversation.
-
-***
-
-<img height="370" width="600" alt="image" src="https://github.com/user-attachments/assets/87d332ea-3e34-4957-b442-f9d070211fbf" />
-
-You can customize plugins directly, manage all cc-viewer processes, and cc-viewer supports hot-switching to third-party APIs (yes, you can use GLM, Kimi, MiniMax, Qwen, DeepSeek — though I think they're all rather weak at the moment).
-
-***
-
-<img height="746" width="1500" alt="image" src="https://github.com/user-attachments/assets/b1f60c7c-1438-4ecc-8c64-193d21ee3445" />
-
-More features waiting for you to discover... for example: the system supports Agent Team and ships with a built-in Code Reviewer. Codex Code Reviewer integration is coming very soon (I strongly recommend using Codex to review Claude Code's code).
 
 <a href="https://www.star-history.com/?repos=weiesky%2Fcc-viewer&type=date&legend=top-left">
  <picture>

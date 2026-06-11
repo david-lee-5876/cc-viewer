@@ -9,6 +9,8 @@ Une boîte à outils Vibe Coding distillée à partir de l'expérience de dével
 5. Expérience native préservée : étend uniquement les capacités de Claude Code, sans modifications substantielles du noyau, préservant l'expérience native ;
 6. Prise en charge des modèles tiers : compatible avec deepseek-v4-\*, GLM 5.1, Kimi K2.6, avec la capacité cc-switch intégrée pour commuter à chaud entre les outils tiers à tout moment.
 
+<img width="860" alt="cc-viewer — deploy once, share with every device" src="https://raw.githubusercontent.com/weiesky/cc-viewer/main/docs/cc-viewer-share.svg" />
+
 [English](../README.md) | [简体中文](./README.zh.md) | [繁體中文](./README.zh-TW.md) | [한국어](./README.ko.md) | [日本語](./README.ja.md) | [Deutsch](./README.de.md) | [Español](./README.es.md) | Français | [Italiano](./README.it.md) | [Dansk](./README.da.md) | [Polski](./README.pl.md) | [Русский](./README.ru.md) | [العربية](./README.ar.md) | [Norsk](./README.no.md) | [Português (Brasil)](./README.pt-BR.md) | [ไทย](./README.th.md) | [Türkçe](./README.tr.md) | [Українська](./README.uk.md)
 
 ## Utilisation
@@ -139,60 +141,15 @@ Réalisez votre imagination de la programmation mobile. Il existe également un 
 * Chaque requête affiche les statistiques d'utilisation des Token en ligne (Tokens d'entrée/sortie, création/lecture de cache, taux de succès)
 * Compatible avec Claude Code Router (CCR) et autres scénarios de proxy — recourt au modèle de chemin API
 
-### Mode Conversation
+<a href="https://www.star-history.com/?repos=weiesky%2Fcc-viewer&type=date&legend=top-left">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=weiesky/cc-viewer&type=date&theme=dark&legend=top-left" />
 
-Cliquez sur le bouton « Mode Conversation » dans le coin supérieur droit pour analyser l'historique complet des conversations du Main Agent dans une interface de chat :
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=weiesky/cc-viewer&type=date&legend=top-left" />
 
-<img height="764" width="1500" alt="image" src="https://github.com/user-attachments/assets/725b57c8-6128-4225-b157-7dba2738b1c6" />
-
-* L'affichage de l'Agent Team n'est pas encore pris en charge
-* Les messages utilisateur sont alignés à droite (bulles bleues), les réponses du Main Agent sont alignées à gauche (bulles sombres)
-* Les blocs `thinking` sont pliés par défaut, rendus en Markdown — cliquez pour développer et voir le processus de réflexion ; la traduction en un clic est prise en charge (la fonctionnalité est encore instable)
-* Les messages de sélection utilisateur (AskUserQuestion) sont affichés en format questions-réponses
-* Synchronisation bidirectionnelle des modes : passer en mode conversation positionne automatiquement sur la conversation correspondant à la requête sélectionnée ; revenir en mode texte brut positionne automatiquement sur la requête sélectionnée
-* Panneau de paramètres : basculer l'état de pliage par défaut pour les résultats d'outils et les blocs thinking
-* Navigation mobile des conversations : en mode mobile CLI, appuyez sur le bouton « Navigation des conversations » dans la barre supérieure pour faire glisser une vue de conversation en lecture seule afin de naviguer dans l'historique complet des conversations sur mobile
-
-### Gestion des journaux
-
-Via le menu déroulant CC-Viewer dans le coin supérieur gauche :
-
-<img height="760" width="1500" alt="image" src="https://github.com/user-attachments/assets/33295e2b-f2e0-4968-a6f1-6f3d1404454e" />
-
-**Compression des journaux**
-Concernant les journaux, l'auteur souhaite préciser que les définitions officielles d'Anthropic n'ont pas été modifiées, garantissant l'intégrité du journal.
-Cependant, étant donné que les entrées individuelles du journal du modèle 1M Opus peuvent devenir extrêmement volumineuses à un stade ultérieur, grâce à certaines optimisations de journalisation pour MainAgent, une réduction de taille d'au moins 66% est obtenue sans gzip.
-La méthode d'analyse pour ces journaux compressés peut être extraite du référentiel actuel.
-
-### Plus de fonctionnalités utiles
-
-<img height="767" width="1500" alt="image" src="https://github.com/user-attachments/assets/add558c5-9c4d-468a-ac6f-d8d64759fdbd" />
-
-Vous pouvez localiser rapidement vos prompts à l'aide des outils de la barre latérale.
-
-***
-
-<img height="765" width="1500" alt="image" src="https://github.com/user-attachments/assets/82b8eb67-82f5-41b1-89d6-341c95a047ed" />
-
-L'intéressante fonctionnalité KV-Cache-Text vous permet de voir exactement ce que voit Claude.
-
-***
-
-<img height="765" width="1500" alt="image" src="https://github.com/user-attachments/assets/54cdfa4e-677c-4aed-a5bb-5fd946600c46" />
-
-Vous pouvez télécharger des images et décrire vos besoins — la compréhension des images par Claude est incroyablement puissante. Et comme vous le savez, vous pouvez coller des images directement avec Ctrl+V, et leur contenu complet s'affichera dans la conversation.
-
-***
-
-<img height="370" width="600" alt="image" src="https://github.com/user-attachments/assets/87d332ea-3e34-4957-b442-f9d070211fbf" />
-
-Vous pouvez personnaliser des plugins, gérer tous les processus de cc-viewer, et cc-viewer prend en charge le basculement à chaud vers des API tierces (oui, vous pouvez utiliser GLM, Kimi, MiniMax, Qwen, DeepSeek — bien que l'auteur les considère tous comme assez faibles à l'heure actuelle).
-
-***
-
-<img height="746" width="1500" alt="image" src="https://github.com/user-attachments/assets/b1f60c7c-1438-4ecc-8c64-193d21ee3445" />
-
-D'autres fonctionnalités attendent d'être découvertes... Par exemple : le système prend en charge Agent Team, et dispose d'un Code Reviewer intégré. L'intégration de Codex Code Reviewer arrivera bientôt (l'auteur recommande vivement d'utiliser Codex pour réviser le code de Claude Code).
+    ![Star History Chart](https://api.star-history.com/chart?repos=weiesky/cc-viewer&type=date&legend=top-left)
+  </picture>
+</a>
 
 ## License
 

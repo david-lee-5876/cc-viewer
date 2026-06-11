@@ -9,6 +9,8 @@ Et Vibe Coding-værktøjssæt destilleret fra egen udviklingserfaring og bygget 
 5. Native oplevelse bevaret: Udvider kun Claude Codes evner uden væsentlige ændringer i kernen — den native oplevelse bevares;
 6. Tredjepartsmodeller understøttet: Kompatibel med deepseek-v4-\*, GLM 5.1, Kimi K2.6, med indbygget cc-switch-evne til hot-switching mellem tredjepartsværktøjer når som helst;
 
+<img width="860" alt="cc-viewer — deploy once, share with every device" src="https://raw.githubusercontent.com/weiesky/cc-viewer/main/docs/cc-viewer-share.svg" />
+
 [English](../README.md) | [简体中文](./README.zh.md) | [繁體中文](./README.zh-TW.md) | [한국어](./README.ko.md) | [日本語](./README.ja.md) | [Deutsch](./README.de.md) | [Español](./README.es.md) | [Français](./README.fr.md) | [Italiano](./README.it.md) | Dansk | [Polski](./README.pl.md) | [Русский](./README.ru.md) | [العربية](./README.ar.md) | [Norsk](./README.no.md) | [Português (Brasil)](./README.pt-BR.md) | [ไทย](./README.th.md) | [Türkçe](./README.tr.md) | [Українська](./README.uk.md)
 
 ## Brug
@@ -139,60 +141,15 @@ Opfyld din forestilling om mobil programmering. Der er også en plugin-mekanisme
 * Hver anmodning viser inline Token-forbrugsstatistik (input/output-Tokens, cache-oprettelse/-læsning, hitrate)
 * Kompatibel med Claude Code Router (CCR) og andre proxy-scenarier — falder tilbage til mønstermatchning af API-stier
 
-### Samtaletilstand
+<a href="https://www.star-history.com/?repos=weiesky%2Fcc-viewer&type=date&legend=top-left">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=weiesky/cc-viewer&type=date&theme=dark&legend=top-left" />
 
-Klik på knappen „Samtaletilstand" øverst til højre for at parse Main Agents fulde samtalehistorik til en chat-grænseflade:
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=weiesky/cc-viewer&type=date&legend=top-left" />
 
-<img height="764" width="1500" alt="image" src="https://github.com/user-attachments/assets/725b57c8-6128-4225-b157-7dba2738b1c6" />
-
-* Agent Team-visning understøttes endnu ikke
-* Brugerbeskeder er højrejusterede (blå bobler), Main Agent-svar er venstrejusterede (mørke bobler)
-* `thinking`-blokke er sammenklappede som standard og renderes som Markdown — klik for at udvide og se tankeprocessen; ét-klik-oversættelse understøttes (funktionen er endnu ustabil)
-* Brugervalgsbeskeder (AskUserQuestion) vises i Q&A-format
-* Tovejs tilstandssynkronisering: Skift til samtaletilstand scroller automatisk til den samtale, der svarer til den valgte anmodning; skift tilbage til råtilstand scroller automatisk til den valgte anmodning
-* Indstillingspanel: Skift standard-sammenklapningstilstand for værktøjsresultater og thinking-blokke
-* Mobil samtalegennemgang: I mobil CLI-tilstand kan du trykke på „Samtalegennemgang"-knappen i toplinjen for at folde en skrivebeskyttet samtalevisning ud til gennemgang af den fulde samtalehistorik på mobil
-
-### Loghåndtering
-
-Via CC-Viewer-rullemenuen øverst til venstre:
-
-<img height="760" width="1500" alt="image" src="https://github.com/user-attachments/assets/33295e2b-f2e0-4968-a6f1-6f3d1404454e" />
-
-**Logkomprimering**
-Hvad angår logs, vil forfatteren præcisere, at de officielle Anthropic-definitioner ikke er ændret, for at sikre logintegritet.
-Da enkelte logposter fra 1M Opus-modellen dog kan blive ekstremt store i senere faser, opnås takket være visse logoptimeringer for MainAgent en størrelsesreduktion på mindst 66 % uden gzip.
-Parsing-metoden for disse komprimerede logs kan udtrækkes fra det aktuelle repository.
-
-### Flere praktiske og nyttige funktioner
-
-<img height="767" width="1500" alt="image" src="https://github.com/user-attachments/assets/add558c5-9c4d-468a-ac6f-d8d64759fdbd" />
-
-Du kan hurtigt finde dine prompts via sidebar-værktøjerne.
-
-***
-
-<img height="765" width="1500" alt="image" src="https://github.com/user-attachments/assets/82b8eb67-82f5-41b1-89d6-341c95a047ed" />
-
-Den interessante KV-Cache-Text-funktion lader dig se nøjagtigt, hvad Claude ser.
-
-***
-
-<img height="765" width="1500" alt="image" src="https://github.com/user-attachments/assets/54cdfa4e-677c-4aed-a5bb-5fd946600c46" />
-
-Du kan uploade billeder og beskrive dine behov — Claudes billedforståelse er utrolig kraftfuld. Og som du ved, kan du indsætte billeder direkte med Ctrl+V, og dit fulde indhold vises i samtalen.
-
-***
-
-<img height="370" width="600" alt="image" src="https://github.com/user-attachments/assets/87d332ea-3e34-4957-b442-f9d070211fbf" />
-
-Du kan tilpasse plugins, administrere alle cc-viewer-processer, og cc-viewer understøtter hot-switching til tredjeparts-API'er (ja, du kan bruge GLM, Kimi, MiniMax, Qwen, DeepSeek — selvom forfatteren mener, at de alle er ret svage på nuværende tidspunkt).
-
-***
-
-<img height="746" width="1500" alt="image" src="https://github.com/user-attachments/assets/b1f60c7c-1438-4ecc-8c64-193d21ee3445" />
-
-Flere funktioner venter på at blive opdaget... For eksempel: Systemet understøtter Agent Team og har en indbygget Code Reviewer. Codex Code Reviewer-integration kommer snart (forfatteren anbefaler stærkt at bruge Codex til at gennemgå Claude Code-kode).
+    ![Star History Chart](https://api.star-history.com/chart?repos=weiesky/cc-viewer&type=date&legend=top-left)
+  </picture>
+</a>
 
 ## Licens
 

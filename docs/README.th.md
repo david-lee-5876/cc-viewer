@@ -9,6 +9,8 @@
 5. คงประสบการณ์เดิมไว้ — เพียงเสริมความสามารถของ claude code โดยไม่แก้ไขแกนกลางในเชิงสาระ คงประสบการณ์เนทีฟไว้
 6. รองรับโมเดลของบุคคลที่สาม — รองรับ deepseek-v4-\*, GLM 5.1, Kimi K2.6 มาพร้อมความสามารถ cc-switch ในตัว สามารถสลับเครื่องมือของบุคคลที่สามได้ตลอดเวลา
 
+<img width="860" alt="cc-viewer — deploy once, share with every device" src="https://raw.githubusercontent.com/weiesky/cc-viewer/main/docs/cc-viewer-share.svg" />
+
 [English](../README.md) | [简体中文](./README.zh.md) | [繁體中文](./README.zh-TW.md) | [한국어](./README.ko.md) | [日本語](./README.ja.md) | [Deutsch](./README.de.md) | [Español](./README.es.md) | [Français](./README.fr.md) | [Italiano](./README.it.md) | [Dansk](./README.da.md) | [Polski](./README.pl.md) | [Русский](./README.ru.md) | [العربية](./README.ar.md) | [Norsk](./README.no.md) | [Português (Brasil)](./README.pt-BR.md) | ไทย | [Türkçe](./README.tr.md) | [Українська](./README.uk.md)
 
 ## วิธีใช้งาน
@@ -139,60 +141,15 @@ ccv -h
 * แต่ละคำขอแสดงสถิติการใช้ Token แบบ inline (Token อินพุต/เอาต์พุต, การสร้าง/อ่านแคช, อัตราการ hit)
 * รองรับ Claude Code Router (CCR) และสถานการณ์พร็อกซีอื่น ๆ — ใช้การจับคู่รูปแบบเส้นทาง API เป็นแนวสำรอง
 
-### โหมดบทสนทนา
+<a href="https://www.star-history.com/?repos=weiesky%2Fcc-viewer&type=date&legend=top-left">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=weiesky/cc-viewer&type=date&theme=dark&legend=top-left" />
 
-คลิกปุ่ม "โหมดบทสนทนา" ที่มุมขวาบน เพื่อแยกประวัติบทสนทนาเต็มของ Main Agent ออกเป็นอินเทอร์เฟซแชต:
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=weiesky/cc-viewer&type=date&legend=top-left" />
 
-<img height="764" width="1500" alt="image" src="https://github.com/user-attachments/assets/725b57c8-6128-4225-b157-7dba2738b1c6" />
-
-* ยังไม่รองรับการแสดง Agent Team
-* ข้อความของผู้ใช้จัดชิดขวา (ฟองสีฟ้า) คำตอบของ Main Agent จัดชิดซ้าย (ฟองสีเข้ม)
-* บล็อก `thinking` จะพับเก็บโดยค่าเริ่มต้น แสดงผลด้วย Markdown คลิกเพื่อขยายดูกระบวนการคิด; รองรับการแปลด้วยคลิกเดียว (ฟีเจอร์ยังไม่เสถียร)
-* ข้อความเลือกของผู้ใช้ (AskUserQuestion) แสดงในรูปแบบถาม-ตอบ
-* การซิงค์โหมดสองทิศทาง: เมื่อสลับไปยังโหมดบทสนทนาจะเลื่อนไปยังบทสนทนาที่ตรงกับคำขอที่เลือกโดยอัตโนมัติ; เมื่อสลับกลับไปยังโหมดต้นฉบับจะเลื่อนไปยังคำขอที่เลือกโดยอัตโนมัติ
-* แผงการตั้งค่า: สามารถสลับสถานะการพับเก็บเริ่มต้นของผลลัพธ์เครื่องมือและบล็อก thinking ได้
-* การเรียกดูบทสนทนาบนมือถือ: ในโหมด CLI บนมือถือ แตะปุ่ม "การเรียกดูบทสนทนา" บนแถบด้านบน จะปรากฏมุมมองบทสนทนาแบบอ่านอย่างเดียวเลื่อนออกมา เพื่อเรียกดูประวัติบทสนทนาที่สมบูรณ์บนมือถือ
-
-### การจัดการ log
-
-ผ่านเมนูแบบดรอปดาวน์ของ CC-Viewer ที่มุมซ้ายบน:
-
-<img height="760" width="1500" alt="image" src="https://github.com/user-attachments/assets/33295e2b-f2e0-4968-a6f1-6f3d1404454e" />
-
-**การบีบอัด log**
-เกี่ยวกับส่วน log นี้ ผู้เขียนต้องแจ้งว่า ผู้เขียนยืนยันว่าไม่ได้แก้ไขนิยามอย่างเป็นทางการของ anthropic เพื่อรับประกันความสมบูรณ์ของ log
-อย่างไรก็ตาม เนื่องจาก log แต่ละรายการของ 1M opus ในช่วงหลังมีขนาดใหญ่มาก เพราะผู้เขียนได้ใช้การปรับปรุง log สำหรับ MainAgent บางอย่าง จึงสามารถลดขนาดได้อย่างน้อย 66% โดยไม่ต้องใช้ gzip
-วิธีการแยกวิเคราะห์ log ที่บีบอัดนี้สามารถสกัดออกมาจากรีโพปัจจุบันได้
-
-### ฟังก์ชันที่สะดวกและมีประโยชน์เพิ่มเติม
-
-<img height="767" width="1500" alt="image" src="https://github.com/user-attachments/assets/add558c5-9c4d-468a-ac6f-d8d64759fdbd" />
-
-คุณสามารถระบุตำแหน่ง prompt ได้อย่างรวดเร็วผ่านเครื่องมือในแถบด้านข้าง
-
-***
-
-<img height="765" width="1500" alt="image" src="https://github.com/user-attachments/assets/82b8eb67-82f5-41b1-89d6-341c95a047ed" />
-
-KV-Cache-Text ที่น่าสนใจ ช่วยให้คุณเห็นสิ่งที่ Claude เห็น
-
-***
-
-<img height="765" width="1500" alt="image" src="https://github.com/user-attachments/assets/54cdfa4e-677c-4aed-a5bb-5fd946600c46" />
-
-คุณสามารถอัปโหลดรูปภาพและบอกความต้องการของคุณได้ ความสามารถในการเข้าใจรูปภาพของ Claude นั้นทรงพลังมาก และอย่างที่คุณรู้ คุณสามารถจับภาพหน้าจอแล้ววางด้วย Ctrl + V ได้โดยตรง เนื้อหาทั้งหมดจะแสดงในบทสนทนา
-
-***
-
-<img height="370" width="600" alt="image" src="https://github.com/user-attachments/assets/87d332ea-3e34-4957-b442-f9d070211fbf" />
-
-คุณสามารถปรับแต่งปลั๊กอินได้โดยตรง จัดการโพรเซสทั้งหมดของ cc-viewer และ cc-viewer ยังมีความสามารถในการสลับ API ของบุคคลที่สามแบบ hot switch (ใช่ คุณสามารถใช้ GLM, Kimi, MiniMax, Qwen, DeepSeek ได้ แม้ผู้เขียนจะคิดว่าตอนนี้ทั้งหมดยังอ่อนแอมาก)
-
-***
-
-<img height="746" width="1500" alt="image" src="https://github.com/user-attachments/assets/b1f60c7c-1438-4ecc-8c64-193d21ee3445" />
-
-ยังมีฟีเจอร์อีกมากรอให้คุณค้นพบ... เช่น: ระบบนี้รองรับ Agent Team และมี Code Reviewer ในตัว กำลังจะรองรับการนำ Code Reviewer ของ Codex เข้ามาในเร็ว ๆ นี้ (ผู้เขียนแนะนำอย่างยิ่งให้ใช้ Codex รีวิวโค้ดให้ Claude Code)
+    ![Star History Chart](https://api.star-history.com/chart?repos=weiesky/cc-viewer&type=date&legend=top-left)
+  </picture>
+</a>
 
 ## License
 

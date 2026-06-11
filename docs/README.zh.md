@@ -9,6 +9,8 @@
 5. 保持原生体验，仅对claude code 能力上增强，对内核无任何实质性修改，保持原生体验；
 6. 适配三方模型，适配 deepseek-v4-\*、GLM 5.1、Kimi K2.6，内置cc-switch能力，可以随时热切三方工具；
 
+<img width="860" alt="cc-viewer — deploy once, share with every device" src="https://raw.githubusercontent.com/weiesky/cc-viewer/main/docs/cc-viewer-share.svg" />
+
 [English](../README.md) | [繁體中文](./README.zh-TW.md) | [한국어](./README.ko.md) | [日本語](./README.ja.md) | [Deutsch](./README.de.md) | [Español](./README.es.md) | [Français](./README.fr.md) | [Italiano](./README.it.md) | [Dansk](./README.da.md) | [Polski](./README.pl.md) | [Русский](./README.ru.md) | [العربية](./README.ar.md) | [Norsk](./README.no.md) | [Português (Brasil)](./README.pt-BR.md) | [ไทย](./README.th.md) | [Türkçe](./README.tr.md) | [Українська](./README.uk.md)
 
 ## 使用方法
@@ -113,8 +115,7 @@ ccv -h
 
 在cc-viewer中，大家可以尝试使用“代理热切换”的能力直接使用，或者把默认直接配置成 deepseek。
 
-<img width="1500" height="714" alt="image" src="https://github.com/user-attachments/assets/425452fe-d167-42b0-b339-a05a877ef493" />
-
+<img height="714" width="1500" alt="image" src="https://github.com/user-attachments/assets/425452fe-d167-42b0-b339-a05a877ef493" />
 
 ## 功能
 
@@ -149,6 +150,17 @@ ccv -h
 * MainAgent 请求支持 Body Diff JSON，折叠展示与上一次 MainAgent 请求的差异（仅显示变更/新增字段）
 * 每个请求内联显示 Token 用量统计（输入/输出 Token、缓存创建/读取、命中率）
 * 兼容 Claude Code Router（CCR）及其他代理场景 — 通过 API 路径模式兜底匹配请求
+
+<a href="https://www.star-history.com/?repos=weiesky%2Fcc-viewer&type=date&legend=top-left">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=weiesky/cc-viewer&type=date&theme=dark&legend=top-left" />
+
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=weiesky/cc-viewer&type=date&legend=top-left" />
+
+    ![Star History Chart](https://api.star-history.com/chart?repos=weiesky/cc-viewer&type=date&legend=top-left)
+  </picture>
+</a>
+
 
 ## License
 

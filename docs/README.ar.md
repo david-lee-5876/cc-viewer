@@ -9,6 +9,8 @@
 5. الحفاظ على التجربة الأصلية — يقتصر على تعزيز قدرات claude code دون أي تعديلات جوهرية على النواة، مع الحفاظ على التجربة الأصلية؛
 6. التوافق مع نماذج الطرف الثالث — يدعم deepseek-v4-\* وGLM 5.1 وKimi K2.6، مع قدرة cc-switch مدمجة، يمكنك التبديل الساخن بين أدوات الطرف الثالث في أي وقت؛
 
+<img width="860" alt="cc-viewer — deploy once, share with every device" src="https://raw.githubusercontent.com/weiesky/cc-viewer/main/docs/cc-viewer-share.svg" />
+
 [English](../README.md) | [简体中文](./README.zh.md) | [繁體中文](./README.zh-TW.md) | [한국어](./README.ko.md) | [日本語](./README.ja.md) | [Deutsch](./README.de.md) | [Español](./README.es.md) | [Français](./README.fr.md) | [Italiano](./README.it.md) | [Dansk](./README.da.md) | [Polski](./README.pl.md) | [Русский](./README.ru.md) | العربية | [Norsk](./README.no.md) | [Português (Brasil)](./README.pt-BR.md) | [ไทย](./README.th.md) | [Türkçe](./README.tr.md) | [Українська](./README.uk.md)
 
 ## طريقة الاستخدام
@@ -139,60 +141,15 @@ ccv -h
 * يعرض كل طلب إحصائيات استخدام Token مدمجة (Token الإدخال/الإخراج، إنشاء/قراءة التخزين المؤقت، معدل الإصابة)
 * متوافق مع Claude Code Router (CCR) وسيناريوهات الوكيل الأخرى — مع مطابقة أنماط مسار API كحل احتياطي
 
-### وضع المحادثة
+<a href="https://www.star-history.com/?repos=weiesky%2Fcc-viewer&type=date&legend=top-left">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=weiesky/cc-viewer&type=date&theme=dark&legend=top-left" />
 
-انقر فوق زر "وضع المحادثة" في الزاوية العلوية اليمنى لتحليل سجل المحادثة الكامل لـ Main Agent إلى واجهة دردشة:
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=weiesky/cc-viewer&type=date&legend=top-left" />
 
-<img height="764" width="1500" alt="image" src="https://github.com/user-attachments/assets/725b57c8-6128-4225-b157-7dba2738b1c6" />
-
-* عرض Agent Team غير مدعوم حاليًا
-* رسائل المستخدم محاذاة إلى اليمين (فقاعات زرقاء)، وردود Main Agent محاذاة إلى اليسار (فقاعات داكنة)
-* كتل `thinking` مطوية افتراضيًا، وتُعرض بصيغة Markdown، انقر للتوسيع لمشاهدة عملية التفكير؛ يدعم الترجمة بنقرة واحدة (الميزة غير مستقرة بعد)
-* رسائل اختيار المستخدم (AskUserQuestion) تُعرض بشكل سؤال وجواب
-* مزامنة الوضع ثنائية الاتجاه: عند التبديل إلى وضع المحادثة يتم التموضع تلقائيًا على المحادثة المقابلة للطلب المحدد؛ وعند التبديل مرة أخرى إلى وضع النص الأصلي يتم التموضع تلقائيًا على الطلب المحدد
-* لوحة الإعدادات: يمكن تبديل الحالة الافتراضية لطي نتائج الأدوات وكتل thinking
-* تصفح المحادثة على الهاتف المحمول: في وضع CLI على الهاتف، انقر فوق زر "تصفح المحادثة" في الشريط العلوي، وسيظهر عرض محادثة للقراءة فقط منزلق، يمكنك من خلاله تصفح سجل المحادثة الكامل على الهاتف
-
-### إدارة السجلات
-
-من خلال قائمة CC-Viewer المنسدلة في الزاوية العلوية اليسرى:
-
-<img height="760" width="1500" alt="image" src="https://github.com/user-attachments/assets/33295e2b-f2e0-4968-a6f1-6f3d1404454e" />
-
-**ضغط السجلات**
-بخصوص جزء السجلات، يحتاج المؤلف إلى التوضيح بأنه يضمن عدم تعديل التعريفات الرسمية لـ anthropic، لضمان سلامة السجلات.
-لكن نظرًا لأن كل سجل من سجلات 1M opus في المرحلة المتأخرة يصبح ضخمًا جدًا، وبفضل تطبيق المؤلف لبعض تحسينات السجلات لـ MainAgent، يمكن تقليل الحجم بنسبة لا تقل عن 66% بدون gzip.
-يمكن استخلاص طريقة تحليل هذه السجلات المضغوطة من المستودع الحالي.
-
-### المزيد من الميزات المريحة والمفيدة
-
-<img height="767" width="1500" alt="image" src="https://github.com/user-attachments/assets/add558c5-9c4d-468a-ac6f-d8d64759fdbd" />
-
-يمكنك تحديد موقع prompt الخاص بك بسرعة من خلال أدوات الشريط الجانبي
-
-***
-
-<img height="765" width="1500" alt="image" src="https://github.com/user-attachments/assets/82b8eb67-82f5-41b1-89d6-341c95a047ed" />
-
-KV-Cache-Text الممتعة تساعدك على رؤية ما يراه Claude
-
-***
-
-<img height="765" width="1500" alt="image" src="https://github.com/user-attachments/assets/54cdfa4e-677c-4aed-a5bb-5fd946600c46" />
-
-يمكنك تحميل الصور وذكر احتياجاتك، فقدرة Claude على فهم الصور قوية للغاية، وكما تعلم يمكنك أخذ لقطة شاشة ولصقها مباشرة بـ Ctrl + V، وسيتم عرض المحتوى الكامل في المحادثة
-
-***
-
-<img height="370" width="600" alt="image" src="https://github.com/user-attachments/assets/87d332ea-3e34-4957-b442-f9d070211fbf" />
-
-يمكنك تخصيص الإضافات مباشرة، وإدارة جميع عمليات cc-viewer، ويمتلك cc-viewer قدرة التبديل الساخن لواجهات الطرف الثالث (نعم، يمكنك استخدام GLM وKimi وMiniMax وQwen وDeepSeek، رغم أن المؤلف يرى أنها جميعًا ضعيفة جدًا في الوقت الحالي)
-
-***
-
-<img height="746" width="1500" alt="image" src="https://github.com/user-attachments/assets/b1f60c7c-1438-4ecc-8c64-193d21ee3445" />
-
-المزيد من الميزات بانتظار اكتشافك... على سبيل المثال: يدعم هذا النظام Agent Team ويتضمن Code Reviewer مدمجًا. وسيتم قريبًا دمج Code Reviewer الخاص بـ Codex (يوصي المؤلف بشدة باستخدام Codex لمراجعة كود Claude Code)
+    ![Star History Chart](https://api.star-history.com/chart?repos=weiesky/cc-viewer&type=date&legend=top-left)
+  </picture>
+</a>
 
 ## License
 

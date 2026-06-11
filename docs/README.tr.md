@@ -9,6 +9,8 @@ Claude Code üzerine inşa edilmiş, kendi geliştirme deneyiminden damıtılmı
 5. Native deneyimi korur — yalnızca Claude Code'un yeteneklerini geliştirir, çekirdekte herhangi bir önemli değişiklik yapmaz, native deneyimi korur;
 6. Üçüncü taraf model uyumu — deepseek-v4-\*, GLM 5.1, Kimi K2.6 ile uyumludur; yerleşik cc-switch yeteneği ile üçüncü taraf araçlar arasında istediğiniz zaman sıcak geçiş yapabilirsiniz;
 
+<img width="860" alt="cc-viewer — deploy once, share with every device" src="https://raw.githubusercontent.com/weiesky/cc-viewer/main/docs/cc-viewer-share.svg" />
+
 [English](../README.md) | [简体中文](./README.zh.md) | [繁體中文](./README.zh-TW.md) | [한국어](./README.ko.md) | [日本語](./README.ja.md) | [Deutsch](./README.de.md) | [Español](./README.es.md) | [Français](./README.fr.md) | [Italiano](./README.it.md) | [Dansk](./README.da.md) | [Polski](./README.pl.md) | [Русский](./README.ru.md) | [العربية](./README.ar.md) | [Norsk](./README.no.md) | [Português (Brasil)](./README.pt-BR.md) | [ไทย](./README.th.md) | Türkçe | [Українська](./README.uk.md)
 
 ## Kullanım
@@ -139,60 +141,15 @@ Mobil programlamaya dair hayallerinizi gerçekleştirin. Ayrıca bir eklenti mek
 * Her istek satır içinde Token kullanım istatistiklerini gösterir (giriş/çıkış Token, önbellek oluşturma/okuma, isabet oranı)
 * Claude Code Router (CCR) ve diğer proxy senaryolarıyla uyumludur — API yol kalıbı eşleştirmesi ile yedek bir yol sağlar
 
-### Konuşma modu
+<a href="https://www.star-history.com/?repos=weiesky%2Fcc-viewer&type=date&legend=top-left">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=weiesky/cc-viewer&type=date&theme=dark&legend=top-left" />
 
-Sağ üst köşedeki "Konuşma modu" düğmesine tıklayarak Main Agent'ın tam konuşma geçmişini sohbet arayüzü olarak ayrıştırın:
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=weiesky/cc-viewer&type=date&legend=top-left" />
 
-<img height="764" width="1500" alt="image" src="https://github.com/user-attachments/assets/725b57c8-6128-4225-b157-7dba2738b1c6" />
-
-* Agent Team gösterimi henüz desteklenmiyor
-* Kullanıcı mesajları sağa hizalı (mavi balonlar), Main Agent yanıtları sola hizalı (koyu balonlar)
-* `thinking` blokları varsayılan olarak katlıdır, Markdown olarak işlenir; düşünme sürecini görüntülemek için tıklayın; tek tıkla çeviri desteği vardır (özellik henüz kararsız)
-* Kullanıcı seçim mesajları (AskUserQuestion) soru-cevap biçiminde gösterilir
-* Çift yönlü mod senkronizasyonu: konuşma moduna geçildiğinde seçili isteğe karşılık gelen konuşmaya otomatik olarak konumlanır; orijinal moda geri dönüldüğünde seçili isteğe otomatik olarak konumlanır
-* Ayarlar paneli: araç sonuçları ve thinking bloklarının varsayılan katlama durumu değiştirilebilir
-* Mobilde konuşma görüntüleme: mobil CLI modunda üst çubuktaki "Konuşma görüntüleme" düğmesine dokunarak salt okunur konuşma görünümünü kaydırarak açın ve telefonda tam konuşma geçmişine göz atın
-
-### Log yönetimi
-
-Sol üst köşedeki CC-Viewer açılır menüsü aracılığıyla:
-
-<img height="760" width="1500" alt="image" src="https://github.com/user-attachments/assets/33295e2b-f2e0-4968-a6f1-6f3d1404454e" />
-
-**Log sıkıştırma**
-Loglar konusunda yazar şunu belirtmek ister: Anthropic'in resmi tanımları değiştirilmemiştir; bu, logların bütünlüğünü garanti eder.
-Ancak, 1M opus'un geç aşamalarda ürettiği tek bir log girdisi çok büyük olabildiğinden, MainAgent için uygulanan bazı log optimizasyonları sayesinde gzip olmadan bile boyut en az %66 oranında azaltılabilir.
-Bu sıkıştırılmış logların ayrıştırma yöntemi mevcut depodan çıkarılabilir.
-
-### Daha fazla pratik ve faydalı özellik
-
-<img height="767" width="1500" alt="image" src="https://github.com/user-attachments/assets/add558c5-9c4d-468a-ac6f-d8d64759fdbd" />
-
-Kenar çubuğu araçlarıyla prompt'larınızı hızlıca bulabilirsiniz
-
-***
-
-<img height="765" width="1500" alt="image" src="https://github.com/user-attachments/assets/82b8eb67-82f5-41b1-89d6-341c95a047ed" />
-
-İlginç bir özellik olan KV-Cache-Text, Claude'un ne gördüğünü tam olarak görmenize yardımcı olur
-
-***
-
-<img height="765" width="1500" alt="image" src="https://github.com/user-attachments/assets/54cdfa4e-677c-4aed-a5bb-5fd946600c46" />
-
-Resim yükleyip ihtiyaçlarınızı anlatabilirsiniz; Claude'un görüntüleri anlama yeteneği çok güçlüdür. Ayrıca biliyorsunuz, ekran görüntüsünü doğrudan Ctrl + V ile yapıştırabilirsiniz ve içeriğin tamamı konuşmada görüntülenir
-
-***
-
-<img height="370" width="600" alt="image" src="https://github.com/user-attachments/assets/87d332ea-3e34-4957-b442-f9d070211fbf" />
-
-Eklentileri doğrudan özelleştirebilir, cc-viewer'ın tüm süreçlerini yönetebilirsiniz; cc-viewer ayrıca üçüncü taraf arayüzler için sıcak geçiş yeteneğine sahiptir (evet, GLM, Kimi, MiniMax, Qwen, DeepSeek kullanabilirsiniz, ancak yazar şu anda hepsinin oldukça zayıf olduğunu düşünüyor)
-
-***
-
-<img height="746" width="1500" alt="image" src="https://github.com/user-attachments/assets/b1f60c7c-1438-4ecc-8c64-193d21ee3445" />
-
-Keşfetmenizi bekleyen daha fazla özellik var... Örneğin: bu sistem Agent Team'i destekler ve yerleşik bir Code Reviewer içerir. Yakında Codex Code Reviewer entegrasyonu da gelecek (yazar, Claude Code için kod review'ında Codex kullanmayı şiddetle tavsiye ediyor)
+    ![Star History Chart](https://api.star-history.com/chart?repos=weiesky/cc-viewer&type=date&legend=top-left)
+  </picture>
+</a>
 
 ## License
 

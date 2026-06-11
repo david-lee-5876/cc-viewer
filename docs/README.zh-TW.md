@@ -9,6 +9,8 @@
 5. 保持原生體驗，僅對 Claude Code 能力進行增強，對核心無任何實質性修改，保持原生體驗；
 6. 適配三方模型，已適配 deepseek-v4-\*、GLM 5.1、Kimi K2.6，內建 cc-switch 能力，可隨時熱切第三方工具；
 
+<img width="860" alt="cc-viewer — deploy once, share with every device" src="https://raw.githubusercontent.com/weiesky/cc-viewer/main/docs/cc-viewer-share.svg" />
+
 [English](../README.md) | [简体中文](./README.zh.md) | 繁體中文 | [한국어](./README.ko.md) | [日本語](./README.ja.md) | [Deutsch](./README.de.md) | [Español](./README.es.md) | [Français](./README.fr.md) | [Italiano](./README.it.md) | [Dansk](./README.da.md) | [Polski](./README.pl.md) | [Русский](./README.ru.md) | [العربية](./README.ar.md) | [Norsk](./README.no.md) | [Português (Brasil)](./README.pt-BR.md) | [ไทย](./README.th.md) | [Türkçe](./README.tr.md) | [Українська](./README.uk.md)
 
 ## 使用方式
@@ -139,60 +141,15 @@ ccv -h
 * 每個請求行內顯示 Token 用量統計（輸入/輸出 Token、快取建立/讀取、命中率）
 * 相容 Claude Code Router（CCR）及其他代理場景 — 透過 API 路徑模式兜底匹配請求
 
-### 對話模式
+<a href="https://www.star-history.com/?repos=weiesky%2Fcc-viewer&type=date&legend=top-left">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=weiesky/cc-viewer&type=date&theme=dark&legend=top-left" />
 
-點擊右上角「對話模式」按鈕，將 Main Agent 的完整對話歷史解析為聊天介面：
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=weiesky/cc-viewer&type=date&legend=top-left" />
 
-<img height="764" width="1500" alt="image" src="https://github.com/user-attachments/assets/725b57c8-6128-4225-b157-7dba2738b1c6" />
-
-* 暫不支援 Agent Team 的顯示
-* 使用者訊息靠右對齊（藍色泡泡），Main Agent 回覆靠左對齊（深色泡泡）
-* `thinking` 區塊預設折疊，以 Markdown 渲染，點擊展開可查看思考過程；支援一鍵翻譯（功能尚不穩定）
-* 使用者選擇型訊息（AskUserQuestion）以問答形式呈現
-* 雙向模式同步：切換到對話模式時自動定位到所選請求對應的對話；切回原文模式時自動定位到所選的請求
-* 設定面板：可切換工具結果與思考區塊的預設折疊狀態
-* 手機端對話瀏覽：在手機端 CLI 模式下，點擊頂部列的「對話瀏覽」按鈕，即可滑出唯讀對話檢視，在手機上瀏覽完整對話歷史
-
-### 日誌管理
-
-透過左上角 CC-Viewer 下拉選單：
-
-<img height="760" width="1500" alt="image" src="https://github.com/user-attachments/assets/33295e2b-f2e0-4968-a6f1-6f3d1404454e" />
-
-**日誌的壓縮**
-關於日誌這部分，我需要聲明，我保證沒有修改 Anthropic 的官方定義，以確保日誌的完整性。
-但是由於 1M Opus 後期產生的單條日誌過於龐大，得益於我採取了對 MainAgent 的一些日誌最佳化，在沒有 gzip 的情況下，可以降低至少 66% 的體積。
-這個壓縮日誌的解析方法，可以從目前儲存庫中抽取出來。
-
-### 更多便捷有用的功能
-
-<img height="767" width="1500" alt="image" src="https://github.com/user-attachments/assets/add558c5-9c4d-468a-ac6f-d8d64759fdbd" />
-
-你可以透過側邊欄工具快速定位你的 prompt
-
-***
-
-<img height="765" width="1500" alt="image" src="https://github.com/user-attachments/assets/82b8eb67-82f5-41b1-89d6-341c95a047ed" />
-
-有趣的 KV-Cache-Text，能幫你看見 Claude 看到的東西是什麼
-
-***
-
-<img height="765" width="1500" alt="image" src="https://github.com/user-attachments/assets/54cdfa4e-677c-4aed-a5bb-5fd946600c46" />
-
-你可以上傳圖片並描述你的需求，Claude 對圖片的理解能力非常強大，同時你知道，你可以截圖直接 ctrl + V 黏貼圖片，對話中可以顯示完整內容
-
-***
-
-<img height="370" width="600" alt="image" src="https://github.com/user-attachments/assets/87d332ea-3e34-4957-b442-f9d070211fbf" />
-
-你可以直接客製化外掛、管理 cc-viewer 所有行程，且 cc-viewer 具備對第三方介面的熱切換能力（沒錯，你可以使用 GLM、Kimi、MiniMax、Qwen、DeepSeek，雖然我認為他們現在都很弱）
-
-***
-
-<img height="746" width="1500" alt="image" src="https://github.com/user-attachments/assets/b1f60c7c-1438-4ecc-8c64-193d21ee3445" />
-
-更多功能等你發掘…比如：本系統支援 Agent Team，並內建了 Code Reviewer。馬上就要適配 Codex 的 Code Reviewer 引入（我非常推崇使用 Codex 為 Claude Code Review 程式碼）
+    ![Star History Chart](https://api.star-history.com/chart?repos=weiesky/cc-viewer&type=date&legend=top-left)
+  </picture>
+</a>
 
 ## License
 
