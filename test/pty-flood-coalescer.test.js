@@ -45,6 +45,7 @@ function makeHarness(opts = {}) {
     findSafeSliceStart,
     onFloodStart: (b) => events.push(['start', b]),
     onFloodEnd: () => events.push(['end']),
+    onTruncate: (n) => events.push(['truncate', n]),
     flushMs: 33,
     floodThresholdBytesPerWin: 100,
     fallbackWins: 3,
@@ -296,6 +297,52 @@ describe('pty-flood-coalescer', () => {
       z.c.offer('a');
       z.c.offer('b');
       assert.deepEqual(z.sent, ['a', 'b']);
+    });
+  });
+
+  describe('onTruncate（截断终态对齐通知，server 端接 data-resync 快照）', () => {
+    const drainToFallback = (hh) => {
+      // 结算超阈值的首桶 + 连续 fallbackWins(3) 个 calm 桶 → 回落直通
+      for (let i = 0; i < 4; i++) hh.clock.tick();
+    };
+
+    it('pendingCap 截断 → 回落后紧随 onFloodEnd 触发一次，携带累计丢弃量', () => {
+      h.c.offer('x'.repeat(200));   // 进限流（onFloodStart）
+      h.c.offer('y'.repeat(300));   // pending=500 > cap(400) → 截到尾部 ~200，丢 ~300
+      drainToFallback(h);
+      assert.equal(h.c.isFlooding(), false);
+      const truncates = h.events.filter((e) => e[0] === 'truncate');
+      assert.equal(truncates.length, 1, '每轮洪泛至多一次');
+      assert.ok(truncates[0][1] >= 300, `携带累计丢弃量，got ${truncates[0][1]}`);
+      assert.deepEqual(h.events.at(-2), ['end'], 'onFloodEnd 在前');
+      assert.equal(h.events.at(-1)[0], 'truncate', 'onTruncate 紧随其后');
+    });
+
+    it('flush 预算截断同样计入', () => {
+      const hh = makeHarness({ overrides: { flushBudgetBytes: 150, pendingCap: 1000, trimTo: 500 } });
+      hh.c.offer('x'.repeat(120));  // 进限流
+      hh.c.offer('y'.repeat(180));  // pending=300，flush 时超预算 150 → 丢 ~150
+      drainToFallback(hh);
+      const truncates = hh.events.filter((e) => e[0] === 'truncate');
+      assert.equal(truncates.length, 1);
+      assert.ok(truncates[0][1] >= 150, `预算截断丢弃量计入，got ${truncates[0][1]}`);
+    });
+
+    it('洪泛全程未丢字节 → 回落只有 onFloodEnd，不触发 onTruncate', () => {
+      h.c.offer('x'.repeat(200));   // pending=200 < cap(400)，flush 也低于预算
+      drainToFallback(h);
+      assert.equal(h.c.isFlooding(), false);
+      assert.deepEqual(h.events, [['start', 200], ['end']]);
+    });
+
+    it('reset() 清零累计：resync 路径已快照对齐，后续回落不补发', () => {
+      h.c.offer('x'.repeat(200));
+      h.c.offer('y'.repeat(300));   // cap 截断，丢 ~300
+      h.c.reset();                  // bpGate onBehind/onResume 场景
+      h.c.offer('z'.repeat(200));   // 新一轮洪泛，本轮无截断
+      drainToFallback(h);
+      assert.equal(h.events.filter((e) => e[0] === 'truncate').length, 0,
+        'reset 后旧丢弃量不跨轮泄漏');
     });
   });
 

@@ -81,6 +81,12 @@ const DEFAULT_PT_COALESCE_MS = envIntAllowZero('CCV_FLOOD_PT_COALESCE_MS', 16);
  * @param {(buf: string, rawStart: number) => number} opts.findSafeSliceStart - ANSI 安全截断（pty-manager 导出）
  * @param {(buffered: number) => void} [opts.onFloodStart] - 进入限流态（observability 埋点）
  * @param {() => void} [opts.onFloodEnd] - 回落直通态
+ * @param {(droppedChars: number) => void} [opts.onTruncate] - 本轮洪泛**实际丢过字节**且已回落直通时触发
+ *   （紧随 onFloodEnd 之后，每轮洪泛至多一次，携带累计丢弃量）。安全切片只保证残片不上屏，
+ *   被截掉的中段对增量 TUI 流（macOS/Linux forkpty）不会自愈——调用方应在此用权威快照
+ *   （getOutputBuffer → data-resync）对齐客户端画面。洪泛进行中不触发：中途 resync 快照
+ *   立刻过期且加重负载，回落时一次终态对齐即可。reset()/dispose() 清零累计（resync 路径
+ *   自身就是快照对齐，无需重复触发）。
  * @param {number} [opts.flushMs]
  * @param {number} [opts.floodThresholdBytesPerWin]
  * @param {number} [opts.fallbackWins]
@@ -97,6 +103,7 @@ export function createFloodCoalescer({
   findSafeSliceStart,
   onFloodStart,
   onFloodEnd,
+  onTruncate,
   flushMs = DEFAULT_FLUSH_MS,
   floodThresholdBytesPerWin = DEFAULT_FLOOD_THRESHOLD,
   fallbackWins = DEFAULT_FALLBACK_WINS,
@@ -111,6 +118,7 @@ export function createFloodCoalescer({
   let pending = '';
   let winBytes = 0;       // 当前桶累计字节（直通态由 offer 累计，限流态由 flush 结算）
   let calmWins = 0;       // 连续低于阈值的桶数
+  let droppedChars = 0;   // 本轮洪泛累计实际丢弃的字符数（>0 时回落触发 onTruncate）
   let flushTimer = null;  // 限流态周期 flush；直通态下亦作为桶边界 timer（见 offer）
   let ptBuffer = '';      // 直通态微合并缓冲（窗口开启期间到达的后续 chunk）
   let ptTimer = null;     // 直通态微合并窗口 timer（16ms），与 flushTimer（33ms 字节桶）并存、职责正交
@@ -157,7 +165,9 @@ export function createFloodCoalescer({
     // 保证洪泛期送达客户端的字节率 ≤ flushBudgetBytes/flushMs，与前端消化速率同量级。
     if (pending.length > flushBudgetBytes) {
       const rawStart = pending.length - flushBudgetBytes;
-      pending = pending.slice(findSafeSliceStart(pending, rawStart));
+      const safeStart = findSafeSliceStart(pending, rawStart);
+      droppedChars += safeStart;
+      pending = pending.slice(safeStart);
     }
     const merged = SYNC_BEGIN + pending + SYNC_END;
     pending = '';
@@ -179,6 +189,13 @@ export function createFloodCoalescer({
       flooding = false;
       calmWins = 0;
       try { onFloodEnd?.(); } catch { }
+      // 本轮洪泛丢过字节 → 回落后通知一次终态对齐（见 opts.onTruncate doc）。
+      // 置零在调用**前**：回调内若同步 reset()/re-offer 不会重复触发。
+      if (droppedChars > 0) {
+        const dropped = droppedChars;
+        droppedChars = 0;
+        try { onTruncate?.(dropped); } catch { }
+      }
       return; // 不再续约 timer，回直通
     }
     flushTimer = setTimer(onFloodTick, flushMs);
@@ -227,6 +244,7 @@ export function createFloodCoalescer({
       if (pending.length > pendingCap) {
         const rawStart = pending.length - trimTo;
         const safeStart = findSafeSliceStart(pending, rawStart);
+        droppedChars += safeStart;
         pending = pending.slice(safeStart);
       }
     },
@@ -239,6 +257,7 @@ export function createFloodCoalescer({
       winBytes = 0;
       calmWins = 0;
       flooding = false;
+      droppedChars = 0; // resync 路径调用本方法，快照即对齐，不再补发 onTruncate
     },
     isFlooding() {
       return flooding;
@@ -250,6 +269,7 @@ export function createFloodCoalescer({
       stopPtTimer();
       pending = '';
       ptBuffer = '';
+      droppedChars = 0;
     },
   };
 }

@@ -662,6 +662,8 @@ class TerminalPanel extends React.Component {
       {
         ...((isMobile && !isPad) ? { highWaterBytes: 1024 * 1024, trimTargetBytes: 256 * 1024 } : null),
         ...(isWindows ? { initialChunkBytes: 16 * 1024 } : null),
+        // 积压丢弃后向服务端请求权威快照对齐（整项丢弃的中段对增量输出流不会自愈）
+        onTrim: () => this._requestResync(),
       }
     );
 
@@ -958,6 +960,17 @@ class TerminalPanel extends React.Component {
       this.terminal?.reset();
     }
   };
+
+  // write-queue 积压丢弃后请求服务端快照对齐（服务端回 data-resync，见上方分支）。
+  // 持续过载期 _maybeTrim 每次 push 都可能触发——2s 节流防请求风暴（服务端另有冷却兜底）。
+  _requestResync() {
+    const nowTs = Date.now();
+    if (nowTs - (this._lastResyncReqAt || 0) < 2000) return;
+    this._lastResyncReqAt = nowTs;
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      try { this.ws.send(JSON.stringify({ type: 'resync-request' })); } catch {}
+    }
+  }
 
   sendResize() {
     if (this.ws && this.ws.readyState === WebSocket.OPEN && this.terminal) {

@@ -31,9 +31,24 @@ class ScratchTerminal extends React.Component {
     // Windows DOM 渲染器 chunk 初值保守起步，AIMD 自适应（与 TerminalPanel 同策略）
     this._writeQ = new TerminalWriteQueue(
       () => this.terminal,
-      isWindows ? { initialChunkBytes: 16 * 1024 } : undefined
+      {
+        ...(isWindows ? { initialChunkBytes: 16 * 1024 } : null),
+        // 积压丢弃后向服务端请求权威快照对齐（同 TerminalPanel，2s 节流见 _requestResync）
+        onTrim: () => this._requestResync(),
+      }
     );
     this._closing = false;
+  }
+
+  // write-queue 积压丢弃后请求服务端快照对齐（服务端回 data-resync）。
+  // 持续过载期 _maybeTrim 每次 push 都可能触发——2s 节流防请求风暴（服务端另有冷却兜底）。
+  _requestResync() {
+    const nowTs = Date.now();
+    if (nowTs - (this._lastResyncReqAt || 0) < 2000) return;
+    this._lastResyncReqAt = nowTs;
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      try { this.ws.send(JSON.stringify({ type: 'resync-request' })); } catch {}
+    }
   }
 
   componentDidMount() {

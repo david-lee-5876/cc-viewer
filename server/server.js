@@ -1166,6 +1166,9 @@ async function setupTerminalWebSocket(httpServer) {
 
     // resync nudge 冷却（CCV_RESYNC_NUDGE_COOLDOWN_MS，0 = 不冷却；详见 lib/resync-nudge-gate.js）
     const RESYNC_NUDGE_COOLDOWN_MS = envIntAllowZero('CCV_RESYNC_NUDGE_COOLDOWN_MS', 3000);
+    // 客户端 resync-request 的服务端冷却兜底（客户端 write-queue trim 后自带节流，这里防风暴；
+    // 复用 nudge 门实现，0 = 不冷却）
+    const RESYNC_REQ_COOLDOWN_MS = envIntAllowZero('CCV_RESYNC_REQ_COOLDOWN_MS', 1000);
 
     // 洪泛限流器状态日志（与 makeBpLogger 同款 5s 节流，独立实例不共享计数）。
     // Windows 实机排"切主题/大流量卡死"时据此确认 ConPTY 洪泛是否触发、几次、量级。
@@ -1228,6 +1231,13 @@ async function setupTerminalWebSocket(httpServer) {
       // floodGate 在 bpGate 之后构造（send 闭包依赖 bpGate），onBehind/onResume 经 let 前向引用 reset：
       // resync 快照是唯一真相源，coalescer 残留 pending 不清会把早于快照的旧字节回灌导致画面回退。
       let floodGate = null;
+      // 权威快照对齐：bpGate.onResume / floodGate.onTruncate / 客户端 resync-request 三路共用。
+      // 调用前须 floodGate.reset()（快照已含 pending 字节，残留会在快照后回灌重复）。
+      const sendScratchResync = () => {
+        if (ws.readyState !== 1) return;
+        try { ws.send(JSON.stringify({ type: 'data-resync', data: getScratchOutputBuffer(id) })); } catch {}
+      };
+      const resyncReqGate = createResyncNudgeGate({ cooldownMs: RESYNC_REQ_COOLDOWN_MS });
       const bpGate = createBackpressureGate({
         getBufferedAmount: () => ws.bufferedAmount,
         onBehind: (buffered) => {
@@ -1237,8 +1247,7 @@ async function setupTerminalWebSocket(httpServer) {
         onResume: (buffered) => {
           _bpLog('resume', buffered);
           floodGate?.reset();
-          if (ws.readyState !== 1) return;
-          try { ws.send(JSON.stringify({ type: 'data-resync', data: getScratchOutputBuffer(id) })); } catch {}
+          sendScratchResync();
         },
         onTimeout: (buffered) => {
           _bpLog('timeout', buffered);
@@ -1260,6 +1269,12 @@ async function setupTerminalWebSocket(httpServer) {
         findSafeSliceStart,
         onFloodStart: (bytes) => _floodLog('start', bytes),
         onFloodEnd: () => _floodLog('end', 0),
+        // 洪泛期丢过中段：增量输出流不会自愈，回落直通后用权威快照对齐一次
+        onTruncate: (dropped) => {
+          _floodLog('truncate', dropped);
+          floodGate.reset();
+          sendScratchResync();
+        },
       });
 
       const removeDataListener = onScratchData(id, (data) => {
@@ -1283,6 +1298,12 @@ async function setupTerminalWebSocket(httpServer) {
             writeScratch(id, msg.data);
           } else if (msg.type === 'resize') {
             resizeScratch(id, msg.cols, msg.rows);
+          } else if (msg.type === 'resync-request') {
+            // 客户端 write-queue 积压丢弃后请求快照对齐（utils/terminalWriteQueue.js onTrim）
+            if (resyncReqGate.shouldNudge()) {
+              floodGate.reset();
+              sendScratchResync();
+            }
           } else if (msg.type === 'kill') {
             // 用户主动关闭 tab：杀 pty（killScratch 内部 ptys.delete 后配额自动释放）；前端会随后 close ws
             killScratch(id);
@@ -1352,6 +1373,34 @@ async function setupTerminalWebSocket(httpServer) {
       // 走冷却——nudge 让 ConPTY 再吐全屏重绘 = 新洪泛燃料，紧 behind→resume 循环里反复
       // nudge 会自我维持（客户端每轮 reset+重放快照 = 永久冻结表象）。详见 lib/resync-nudge-gate.js。
       const nudgeGate = createResyncNudgeGate({ cooldownMs: RESYNC_NUDGE_COOLDOWN_MS });
+      const resyncReqGate = createResyncNudgeGate({ cooldownMs: RESYNC_REQ_COOLDOWN_MS });
+      // 权威快照对齐：data-resync 快照无条件发，全屏重绘 nudge 走 nudgeGate 冷却。
+      // bpGate.onResume / floodGate.onTruncate / 客户端 resync-request 三路共用；
+      // 调用前须 floodGate.reset()（快照已含 pending/微合并缓冲字节，残留会在快照后回灌重复）。
+      const sendResync = (buffered = 0) => {
+        if (ws.readyState !== 1) return;
+        try { ws.send(JSON.stringify({ type: 'data-resync', data: getOutputBuffer() })); } catch {}
+        if (!nudgeGate.shouldNudge()) { _bpLog('nudge-skip', buffered); return; }
+        try {
+          if (process.platform !== 'win32') {
+            // POSIX：与下方 _needRedrawBootstrap 同款 SIGWINCH 兜底
+            const pid = getClaudePid();
+            if (pid && pid !== process.pid) process.kill(pid, 'SIGWINCH');
+          } else {
+            // Windows 无 SIGWINCH：resize 抖动经 ConPTY 通知重绘（恢复路径偶发，闪烁可接受）。
+            // 尺寸仲裁与 resize 消息处理一致：移动端优先，否则活跃客户端（activeWs 为 null 时
+            // 本 ws 视为所有者）——恢复的 ws 可能是非权威的慢后台 tab，用它自己的尺寸抖动会把
+            // 共享 PTY 永久改成它的尺寸、挤掉活跃/移动端画面；无权威尺寸则跳过抖动。
+            const mSize = getMobileSize();
+            const size = mSize
+              || ((activeWs === ws || activeWs === null) ? clientSizes.get(ws) : clientSizes.get(activeWs));
+            if (size) {
+              resizePty(size.cols, size.rows + 1);
+              resizePty(size.cols, size.rows);
+            }
+          }
+        } catch {}
+      };
       const bpGate = createBackpressureGate({
         getBufferedAmount: () => ws.bufferedAmount,
         onBehind: (buffered) => {
@@ -1361,28 +1410,7 @@ async function setupTerminalWebSocket(httpServer) {
         onResume: (buffered) => {
           _bpLog('resume', buffered);
           floodGate?.reset();
-          if (ws.readyState !== 1) return;
-          try { ws.send(JSON.stringify({ type: 'data-resync', data: getOutputBuffer() })); } catch {}
-          if (!nudgeGate.shouldNudge()) { _bpLog('nudge-skip', buffered); return; }
-          try {
-            if (process.platform !== 'win32') {
-              // POSIX：与下方 _needRedrawBootstrap 同款 SIGWINCH 兜底
-              const pid = getClaudePid();
-              if (pid && pid !== process.pid) process.kill(pid, 'SIGWINCH');
-            } else {
-              // Windows 无 SIGWINCH：resize 抖动经 ConPTY 通知重绘（恢复路径偶发，闪烁可接受）。
-              // 尺寸仲裁与 resize 消息处理一致：移动端优先，否则活跃客户端（activeWs 为 null 时
-              // 本 ws 视为所有者）——恢复的 ws 可能是非权威的慢后台 tab，用它自己的尺寸抖动会把
-              // 共享 PTY 永久改成它的尺寸、挤掉活跃/移动端画面；无权威尺寸则跳过抖动。
-              const mSize = getMobileSize();
-              const size = mSize
-                || ((activeWs === ws || activeWs === null) ? clientSizes.get(ws) : clientSizes.get(activeWs));
-              if (size) {
-                resizePty(size.cols, size.rows + 1);
-                resizePty(size.cols, size.rows);
-              }
-            }
-          } catch {}
+          sendResync(buffered);
         },
         onTimeout: (buffered) => {
           _bpLog('timeout', buffered);
@@ -1404,6 +1432,13 @@ async function setupTerminalWebSocket(httpServer) {
         findSafeSliceStart,
         onFloodStart: (bytes) => _floodLog('start', bytes),
         onFloodEnd: () => _floodLog('end', 0),
+        // 洪泛期丢过中段：安全切片只保证残片不上屏，被截掉的内容对增量 TUI 流
+        // （macOS/Linux forkpty）不会自愈——回落直通后用权威快照对齐一次
+        onTruncate: (dropped) => {
+          _floodLog('truncate', dropped);
+          floodGate.reset();
+          sendResync();
+        },
       });
 
       // PTY 输出 → WebSocket(合并 ws 后客户端自行按 msg.type 分发,server 端不再 role 过滤)
@@ -1487,6 +1522,12 @@ async function setupTerminalWebSocket(httpServer) {
               writeToPtySequential(chunks, replyDone, { settleMs: msg.settleMs || 150 });
             } else {
               replyDone(false);
+            }
+          } else if (msg.type === 'resync-request') {
+            // 客户端 write-queue 积压丢弃后请求快照对齐（utils/terminalWriteQueue.js onTrim）
+            if (resyncReqGate.shouldNudge()) {
+              floodGate.reset();
+              sendResync();
             }
           } else if (msg.type === 'ask-hook-answer') {
             // Client answered AskUserQuestion via hook bridge.

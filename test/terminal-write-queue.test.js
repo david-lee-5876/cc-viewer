@@ -358,6 +358,42 @@ describe('TerminalWriteQueue 积压自保（trim）', { concurrency: false }, ()
     smallQ.dispose();
   });
 
+  it('onTrim：实际丢弃整项时回调（调用方借此发 resync-request 请求快照对齐）', () => {
+    let trims = 0;
+    const smallQ = new TerminalWriteQueue(() => term, {
+      highWaterBytes: 1000, trimTargetBytes: 300,
+      onTrim: () => { trims++; },
+    });
+    smallQ.push('a'.repeat(600));
+    assert.equal(trims, 0, '未越线不触发');
+    smallQ.push('b'.repeat(600));   // 越线 → 丢 'a' 整项
+    assert.equal(trims, 1, '实际丢弃触发一次');
+    smallQ.dispose();
+  });
+
+  it('onTrim：单项超大（最新项永不丢）什么都没丢 → 不触发（与假 trim 提示同一守卫）', () => {
+    let trims = 0;
+    const smallQ = new TerminalWriteQueue(() => term, {
+      highWaterBytes: 1000, trimTargetBytes: 300,
+      onTrim: () => { trims++; },
+    });
+    smallQ.push('x'.repeat(5000));  // 单项越线但 length-1 守卫一项都不丢
+    assert.equal(trims, 0);
+    smallQ.dispose();
+  });
+
+  it('onTrim：回调抛异常不污染 push 路径，数据照常交付', () => {
+    const smallQ = new TerminalWriteQueue(() => term, {
+      highWaterBytes: 1000, trimTargetBytes: 300,
+      onTrim: () => { throw new Error('callback boom'); },
+    });
+    smallQ.push('a'.repeat(600));
+    smallQ.push('b'.repeat(600));   // 触发 trim，回调抛错被吞
+    flushAllFrames(200);
+    assert.ok(term.receivedString().includes('b'.repeat(600)), 'newest data still delivered');
+    smallQ.dispose();
+  });
+
   it('trim 只丢整项：消费中项（offset>0）的剩余部分按剩余字节计入', () => {
     // 先推一个 40KB 项并消费一帧（32KB），留 offset>0 的部分项
     q.push('p'.repeat(40 * 1024));

@@ -74,10 +74,13 @@ const TRIM_NOTICE = '\x18\x1b[?2026l\r\n\x1b[33m[cc-viewer] output trimmed (rend
 export class TerminalWriteQueue {
   /**
    * @param {() => any | null} getTerminal - 返回当前 xterm 实例（或 null）
-   * @param {{ highWaterBytes?: number, trimTargetBytes?: number, initialChunkBytes?: number }} [opts]
+   * @param {{ highWaterBytes?: number, trimTargetBytes?: number, initialChunkBytes?: number, onTrim?: () => void }} [opts]
    *   - 积压自保水位，移动端可传更小值（内存预算低）
    *   - initialChunkBytes：自适应 chunk 初值（Windows DOM 渲染器建议 16KB），
    *     运行期按消化耗时在 [CHUNK_MIN, CHUNK_SIZE] 内 AIMD 调节
+   *   - onTrim：积压**实际丢弃**队列项时回调（每次 trim 触发，调用方自行节流）。
+   *     整项丢弃不撕裂 ANSI/surrogate，但丢掉的内容对增量输出流不会自愈——
+   *     调用方应借此向服务端发 resync-request 请求权威快照对齐。
    */
   constructor(getTerminal, opts) {
     this._getTerminal = getTerminal;
@@ -89,6 +92,7 @@ export class TerminalWriteQueue {
     this._highWater = opts?.highWaterBytes || HIGH_WATER_BYTES;
     this._trimTarget = opts?.trimTargetBytes || TRIM_TARGET_BYTES;
     this._trimmedSinceFlush = false;
+    this._onTrim = typeof opts?.onTrim === 'function' ? opts.onTrim : null;
     // ── 消化力自适应状态 ──
     const init = opts?.initialChunkBytes || CHUNK_SIZE;
     this._initialChunk = Math.max(CHUNK_MIN, Math.min(CHUNK_SIZE, init)); // reset() 复位基准
@@ -150,6 +154,10 @@ export class TerminalWriteQueue {
     if (this._head === headBefore) return; // 实际什么都没丢 → 不报 trim
     this._trimmedSinceFlush = true;
     diagCount('trimCount');
+    // 通知调用方丢弃已发生（见构造 opts.onTrim doc）。回调异常不得污染 push 路径。
+    if (this._onTrim) {
+      try { this._onTrim(); } catch { }
+    }
   }
 
   _schedule() {
