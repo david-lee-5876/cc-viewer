@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.6.312 (2026-06-13)
 
 - fix(terminal): 乱码根治补全——截断后主动快照对齐（关闭交接文档 §4 的 P2 结构性缺口：安全切片只保证残片不上屏，被截掉的中段对增量 TUI 流不会自愈）。`pty-flood-coalescer` 新增 `onTruncate`（每轮洪泛实际丢字节时、回落直通后触发一次，携带累计丢弃量）；server.js 把 onResume 的「data-resync 快照 + nudge 冷却门」抽成 `sendResync()`，bpGate.onResume / floodGate.onTruncate / 客户端 `resync-request` 三路共用（主终端 + scratch 两条 ws 路径）；前端 `TerminalWriteQueue` 新增 `onTrim` 回调，积压整项丢弃后经新 ws 消息 `resync-request` 请求权威快照（客户端 2s 节流 + 服务端 `CCV_RESYNC_REQ_COOLDOWN_MS` 冷却兜底，默认 1s）。真实进程线上压测验证（CLI 模式起真 server + node-pty shell，5MB 真彩 SGR+CJK+emoji 洪泛）：零转义残片、零孤立代理对、截断后 data-resync 自动到达
 - feat(chat): 对话视图 Write 工具内容改为 git diff 新增行渲染（绿底 + 行号 + `+` 前缀 + `+N` 统计 + 折叠），复用 Edit 的 DiffView（新增 label prop）
