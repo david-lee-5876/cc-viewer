@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- feat(chat): 对话视图 Write 工具内容改为 git diff 新增行渲染（绿底 + 行号 + `+` 前缀 + `+N` 统计 + 折叠），复用 Edit 的 DiffView（新增 label prop）
+- fix(terminal): 根治终端偶现 `[9m`/`?2026l`/`6;136;136m` 类乱码——输出缓冲/洪泛限流截断起点改为锚点扫描（锚到下一个 ESC/LF，回看兜底跳过被切断的 CSI/OSC），实现收编 `server/lib/ansi-safe-slice.js` 三处调用同源（pty-manager / scratch-pty-manager / pty-flood-coalescer）；裁剪加滞回（200K→180K / 50K→45K）降低 slice 重分配频率；stripAnsi 与撕裂缓带正则补 DEC 私有模式（`\x1b[?…`）
+- fix(mobile): 上下文抽屉内容区去掉 PC 弹层的 max-height 限高（zoom 0.6 下被压到半屏 + 嵌套双滚动），滚动交还抽屉本体
+- chore(i18n): 清空上下文确认弹窗移除"此操作不可撤销"句（全部 17 语言）
+
 ## 1.6.311 (2026-06-12)
 
 - feat(network): Context 标签页右侧新增「原文」switch——原地切换查看选中节点（工具/系统提示词/消息轮次）在请求体中的原始 JSON 纯文本，附复制按钮；当前轮次 assistant 原文为完整 response body
