@@ -160,6 +160,12 @@ describe('promptDetect equivalence with legacy regex (on fast-terminating sample
     assert.strictEqual(p2.options[0].selected, true);
   });
 
+  it('stripAnsi 剥离 DEC 私有模式序列（?2026 同步输出等），不残留 [?2026l', () => {
+    assert.strictEqual(stripAnsi('\x1b[?2026l'), '');
+    assert.strictEqual(stripAnsi('\x1b[?2026h'), '');
+    assert.strictEqual(stripAnsi('\x1b[?25h\x1b[?2004hready'), 'ready');
+  });
+
   it('false-positive filter parity (path / status-bar questions)', () => {
     assert.ok(isFalsePositiveQuestion('~/projects/cc-viewer/src/components/'));
     assert.ok(isFalsePositiveQuestion('*Crunched for 2m18s · 15k tokens'));
@@ -176,6 +182,15 @@ describe('splitTrailingAnsiCarry (跨 write 撕裂防护)', () => {
     const [safe2, carry2] = splitTrailingAnsiCarry(carry1 + '6m❯ Yes');
     assert.strictEqual(carry2, '');
     assert.strictEqual(stripAnsi(safe2), '❯ Yes', 'rejoined sequence strips cleanly');
+  });
+
+  it('尾部半截私有模式 CSI（\\x1b[?20）也被缓带', () => {
+    const [safe, carry] = splitTrailingAnsiCarry('hello \x1b[?20');
+    assert.strictEqual(safe, 'hello ');
+    assert.strictEqual(carry, '\x1b[?20');
+    const [safe2, carry2] = splitTrailingAnsiCarry(carry + '26l❯ Yes');
+    assert.strictEqual(carry2, '');
+    assert.strictEqual(stripAnsi(safe2), '❯ Yes');
   });
 
   it('完整序列结尾不缓带（CSI 终止字节 / OSC BEL / OSC ST）', () => {

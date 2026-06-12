@@ -36,7 +36,7 @@ import { now } from './monotime.js';
 export function stripAnsi(str) {
   // Remove CSI sequences (ESC [ ... final byte), OSC sequences (ESC ] ... ST), and other escape sequences
   return str
-    .replace(/\x1b\[[0-9;]*[A-Za-z]/g, '')
+    .replace(/\x1b\[[?0-9;]*[A-Za-z]/g, '')
     .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')
     .replace(/\x1b[^[\]](.|$)/g, '')
     .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, '');
@@ -47,7 +47,7 @@ export function stripAnsi(str) {
 // 残字污染 buffer 致漏检；调用方把 carry 缓带到下一片拼接后再 strip。
 // maxCarry 上限防畸形流（如 OSC 永不终结）让 carry 无限囤积——超限放弃缓带按原样剥。
 export function splitTrailingAnsiCarry(data, maxCarry = 512) {
-  const m = data.match(/\x1b(?:\[[0-9;]*|\][^\x07\x1b]*)?$/);
+  const m = data.match(/\x1b(?:\[[?0-9;]*|\][^\x07\x1b]*)?$/);
   if (m && m[0].length < maxCarry) return [data.slice(0, m.index), m[0]];
   return [data, ''];
 }

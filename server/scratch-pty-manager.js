@@ -5,6 +5,7 @@ import { platform, arch, homedir } from 'node:os';
 import { createRequire } from 'node:module';
 import { prepareEmbeddedShellSpawn } from './lib/terminal-env.js';
 import { killPtyTree } from './lib/term-signals.js';
+import { findSafeSliceStart } from './lib/ansi-safe-slice.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -21,6 +22,8 @@ const STARTUP_CWD = (() => {
 })();
 
 const MAX_BUFFER = 50000;
+// 裁剪滞回：超 MAX_BUFFER 后一次裁到 TRIM_TO，降低每 chunk slice 重分配频率（同 pty-manager.js）
+const BUFFER_TRIM_TO = 45000;
 
 // id -> { ptyProcess, dataListeners, exitListeners, lastExitCode, outputBuffer, lastCols, lastRows, batchBuffer, batchScheduled }
 const ptys = new Map();
@@ -69,26 +72,6 @@ function maybeReap(id, s) {
   if (!s.ptyProcess && s.dataListeners.length === 0 && s.exitListeners.length === 0) {
     ptys.delete(id);
   }
-}
-
-function findSafeSliceStart(buf, rawStart) {
-  const scanLimit = Math.min(rawStart + 64, buf.length);
-  let i = rawStart;
-  while (i < scanLimit) {
-    const ch = buf.charCodeAt(i);
-    if (ch === 0x1b) {
-      let j = i + 1;
-      while (j < scanLimit && !((buf.charCodeAt(j) >= 0x40 && buf.charCodeAt(j) <= 0x7e) && j > i + 1)) {
-        j++;
-      }
-      if (j < scanLimit) return j + 1;
-      i = j;
-      continue;
-    }
-    if (ch >= 0x20 && ch <= 0x3f) { i++; continue; }
-    break;
-  }
-  return i < buf.length ? i : rawStart;
 }
 
 function flushBatch(s) {
@@ -164,7 +147,7 @@ export async function spawnScratch(id) {
     s.ptyProcess.onData((data) => {
       s.outputBuffer += data;
       if (s.outputBuffer.length > MAX_BUFFER) {
-        const rawStart = s.outputBuffer.length - MAX_BUFFER;
+        const rawStart = s.outputBuffer.length - BUFFER_TRIM_TO;
         const safeStart = findSafeSliceStart(s.outputBuffer, rawStart);
         s.outputBuffer = s.outputBuffer.slice(safeStart);
       }
