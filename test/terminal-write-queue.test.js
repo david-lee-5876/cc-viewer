@@ -13,7 +13,7 @@
  */
 import { describe, it, before, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { TerminalWriteQueue } from '../src/utils/terminalWriteQueue.js';
+import { TerminalWriteQueue, INBAND_RESET } from '../src/utils/terminalWriteQueue.js';
 
 // ==== 测试夹具：mock requestAnimationFrame + xterm ====
 
@@ -302,6 +302,11 @@ describe('TerminalWriteQueue 积压自保（trim）', { concurrency: false }, ()
     assert.equal(noticeCount, 1);
   });
 
+  it('INBAND_RESET 形状:BEL(终结 OSC)+CAN(中止 CSI)+RIS(全量重置),RIS 必须殿后', () => {
+    assert.equal(INBAND_RESET, '\x07\x18\x1bc');
+    assert.ok(INBAND_RESET.endsWith('\x1bc'), 'RIS 殿后——前两字节仅为解析器状态脱困');
+  });
+
   it('TRIM_NOTICE 形状:CAN 开头,?2026l 先于可见提示(防 DEC 2026 配对撕裂)', () => {
     const n = TerminalWriteQueue.TRIM_NOTICE;
     assert.ok(n.startsWith('\x18'), 'CAN first to abort half escape seq');
@@ -328,6 +333,50 @@ describe('TerminalWriteQueue 积压自保（trim）', { concurrency: false }, ()
     assert.ok(!received.includes('bbb'), 'item carrying the original ?2026l was dropped');
     assert.ok(lIdx !== -1 && lIdx > hIdx, 'notice supplies a ?2026l after the orphan h');
     assert.ok(tailIdx !== -1 && lIdx < tailIdx, '?2026l must arrive before post-trim content renders');
+  });
+
+  it('trim 撕裂防护：被丢项以半截序列结尾 → 新 head 项的孤儿尾巴不按字面交付（锚点推进）', () => {
+    const smallQ = new TerminalWriteQueue(() => term, { highWaterBytes: 1000, trimTargetBytes: 300 });
+    // 项 A 以半截真彩 SGR 结尾，项 B 以它的尾巴开头（PTY 分块切断场景）
+    smallQ.push('a'.repeat(600) + '\x1b[38;2;1');
+    smallQ.push('02;145;178mREAL\x1b[0m' + 'b'.repeat(600));   // 越线 → 丢 A 整项
+    flushAllFrames(200);
+    const received = term.receivedString();
+    assert.ok(!received.includes('02;145;178m'), '孤儿参数尾巴不得按字面交付');
+    assert.ok(received.includes('\x1b[0m'), '锚点（B 项内下一个 ESC）之后的内容完整保留');
+    smallQ.dispose();
+  });
+
+  it('trim 撕裂防护：新 head 项无 ESC 有 LF → 推进到首个 LF 之后', () => {
+    const smallQ = new TerminalWriteQueue(() => term, { highWaterBytes: 1000, trimTargetBytes: 300 });
+    smallQ.push('a'.repeat(600) + '\x1b[38;2;1');
+    smallQ.push('02;145m-tail\nclean line\n' + 'b'.repeat(600));
+    flushAllFrames(200);
+    const received = term.receivedString();
+    assert.ok(!received.includes('02;145m'), '孤儿尾巴不交付');
+    assert.ok(received.includes('clean line'), 'LF 之后内容保留');
+    smallQ.dispose();
+  });
+
+  it('trim 撕裂防护：新 head 项纯文本无锚点 → offset 保持 0 全量交付（无撕裂风险不丢数据）', () => {
+    const smallQ = new TerminalWriteQueue(() => term, { highWaterBytes: 1000, trimTargetBytes: 300 });
+    smallQ.push('a'.repeat(600));
+    smallQ.push('plain'.repeat(130));   // 650 字节纯文本，无 ESC/LF
+    flushAllFrames(200);
+    assert.ok(term.receivedString().includes('plain'.repeat(130)), '纯文本项全量保留');
+    smallQ.dispose();
+  });
+
+  it('trim 撕裂防护：新 head 项以孤立低代理开头且无锚点 → 跳过 1 字符', () => {
+    const smallQ = new TerminalWriteQueue(() => term, { highWaterBytes: 1000, trimTargetBytes: 300 });
+    const emoji = '😀';
+    smallQ.push('a'.repeat(600) + emoji[0]);            // 高代理收尾（整项被丢）
+    smallQ.push(emoji[1] + 'plain'.repeat(130));        // 低代理开头 + 纯文本无 ESC/LF
+    flushAllFrames(200);
+    const received = term.receivedString();
+    assert.ok(!received.includes(emoji[1]), '孤立低代理不交付');
+    assert.ok(received.includes('plain'.repeat(130)), '其余纯文本全量保留');
+    smallQ.dispose();
   });
 
   it('1MB 单次 push 不触发 trim（防误伤 /resume 大流量）', () => {

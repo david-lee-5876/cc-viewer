@@ -87,7 +87,12 @@ export class TerminalWsProvider extends React.Component {
 
     ws.onmessage = (ev) => {
       let msg;
-      try { msg = JSON.parse(ev.data); } catch { return; }
+      try { msg = JSON.parse(ev.data); } catch {
+        // 整条消息丢弃 = 数据流中间挖洞且无路径补发（概率极低：ws 帧不会截断 JSON）
+        // → 请求权威快照对齐兜底（服务端有冷却，不会风暴）
+        try { ws.send(JSON.stringify({ type: 'resync-request' })); } catch {}
+        return;
+      }
       // 单点 onmessage 派发给所有 handler;handler 抛错被吞,不影响其他。
       for (const h of this.messageHandlers) {
         try { h(msg); } catch (e) { console.warn('[TerminalWsProvider] handler error:', e); }

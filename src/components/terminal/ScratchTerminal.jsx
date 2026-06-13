@@ -12,7 +12,7 @@ import '@xterm/xterm/css/xterm.css';
 import { darkTerminalTheme, lightTerminalTheme, terminalFontFamily } from './terminalThemes';
 import { isWindows } from '../../env';
 import styles from './TerminalPanel.module.css';
-import { TerminalWriteQueue } from '../../utils/terminalWriteQueue';
+import { TerminalWriteQueue, INBAND_RESET } from '../../utils/terminalWriteQueue';
 import { diagCount } from '../../utils/termDiag';
 import { sanitizeBracketPasteText } from '../../utils/ptyChunkBuilder';
 import { appendToken, getBasePath } from '../../utils/apiUrl';
@@ -187,11 +187,11 @@ class ScratchTerminal extends React.Component {
         if (msg.type === 'data') {
           this._throttledWrite(msg.data);
         } else if (msg.type === 'data-resync') {
-          // 服务端反压恢复:丢弃积压、重置、写快照对齐(reset 清 scrollback 的取舍见 TerminalPanel 同分支注释)
+          // 服务端反压恢复:丢弃积压、带内重置、写快照对齐(reset 清 scrollback 的取舍 +
+          // 带内 INBAND_RESET 防 WriteBuffer 残留撕裂,见 TerminalPanel 同分支注释)
           diagCount('resyncCount');
           this._writeQ.reset();
-          try { this.terminal?.reset(); } catch {}
-          this._writeQ.push('\x1b[33m[cc-viewer] output skipped during congestion\x1b[0m\r\n');
+          this._writeQ.push(INBAND_RESET + '\x1b[33m[cc-viewer] output skipped during congestion\x1b[0m\r\n');
           if (msg.data) this._writeQ.push(msg.data);
         } else if (msg.type === 'state') {
           // 后端首条 state 消息携带 shellBasename，给父组件渲染 tab 标签
@@ -204,15 +204,19 @@ class ScratchTerminal extends React.Component {
         } else if (msg.type === 'toast') {
           try { if (this.terminal) this.terminal.write(`\r\n\x1b[33m⚠ ${msg.message}\x1b[0m\r\n`); } catch {}
         }
-      } catch {}
+      } catch {
+        // 解析失败/handler 抛错 = 该条消息整体丢弃（流中间挖洞）→ 请求快照对齐兜底
+        try { this.ws?.send(JSON.stringify({ type: 'resync-request' })); } catch {}
+      }
     };
 
     this.ws.onclose = () => {
       if (this._closing) return;
       // 重连前清屏 + 清写队列（同 TerminalPanel 的 close 处理）：服务端每次新连接都无条件
       // 重发完整 replay buffer(≤50KB)，不 reset 会让旧内容整段在 scrollback 重复渲染。
+      // 重置走带内序列防 WriteBuffer 残留撕裂（见 terminalWriteQueue.INBAND_RESET doc）。
       this._writeQ.reset();
-      try { this.terminal?.reset(); } catch {}
+      this._writeQ.push(INBAND_RESET);
       this._wsReconnectTimer = setTimeout(() => {
         if (!this._closing && this.containerRef.current) {
           this.connectWebSocket();

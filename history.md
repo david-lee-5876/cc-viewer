@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- fix(terminal): 终端乱码残片根治——flushBatch 批边界半截序列缓带（新增 `splitTrailingIncomplete`，SYNC 包裹不再劈开序列）+ resync/重连重置改带内 `\x07\x18\x1bc` 替代 `terminal.reset()` + 写队列积压丢弃锚点推进 + send 抛错/消息解析失败接入 resync 兜底
+- fix(terminal): `ccv -c` 打开页面终端持续空白修复——SIGWINCH 重绘兜底改为数据感知延迟重试（PTY 零输出时 2s/6s 补发）
+- test(terminal): 端到端管线 oracle 测试——真实 coalescer/写队列 + VT 状态机裁判，九场景断言零残片不变量
+
 ## 1.6.312 (2026-06-13)
 
 - fix(terminal): 乱码根治补全——截断后主动快照对齐（关闭交接文档 §4 的 P2 结构性缺口：安全切片只保证残片不上屏，被截掉的中段对增量 TUI 流不会自愈）。`pty-flood-coalescer` 新增 `onTruncate`（每轮洪泛实际丢字节时、回落直通后触发一次，携带累计丢弃量）；server.js 把 onResume 的「data-resync 快照 + nudge 冷却门」抽成 `sendResync()`，bpGate.onResume / floodGate.onTruncate / 客户端 `resync-request` 三路共用（主终端 + scratch 两条 ws 路径）；前端 `TerminalWriteQueue` 新增 `onTrim` 回调，积压整项丢弃后经新 ws 消息 `resync-request` 请求权威快照（客户端 2s 节流 + 服务端 `CCV_RESYNC_REQ_COOLDOWN_MS` 冷却兜底，默认 1s）。真实进程线上压测验证（CLI 模式起真 server + node-pty shell，5MB 真彩 SGR+CJK+emoji 洪泛）：零转义残片、零孤立代理对、截断后 data-resync 自动到达

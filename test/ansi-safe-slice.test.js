@@ -5,7 +5,7 @@
 // 而非旧实现的"跳过序列"（return j+1）。
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { findSafeSliceStart } from '../server/lib/ansi-safe-slice.js';
+import { findSafeSliceStart, splitTrailingIncomplete } from '../server/lib/ansi-safe-slice.js';
 
 describe('ansi-safe-slice: 锚点命中', () => {
   it('rawStart 恰落在完整 ESC 序列起点 → 返回 rawStart，序列完整保留', () => {
@@ -158,5 +158,65 @@ describe('ansi-safe-slice: fallback 语义', () => {
   it('自定义扫描窗口参数生效', () => {
     const buf = 'y'.repeat(1000);
     assert.equal(findSafeSliceStart(buf, 10, 100), 110);
+  });
+});
+
+describe('ansi-safe-slice: splitTrailingIncomplete（批边界半截序列缓带）', () => {
+  it('尾部半截 CSI 被缓带（裸 ESC / ESC[ / 参数中 各形态）', () => {
+    for (const tail of ['\x1b', '\x1b[', '\x1b[38;2;1', '\x1b[?20']) {
+      const [safe, carry] = splitTrailingIncomplete('hello' + tail);
+      assert.equal(safe, 'hello', `tail=${JSON.stringify(tail)}`);
+      assert.equal(carry, tail);
+    }
+  });
+
+  it('尾部完整序列不缓带（CSI 终字节 / OSC BEL / 短转义）', () => {
+    for (const s of ['x\x1b[31m', 'x\x1b]0;t\x07', 'x\x1b(B', 'plain text']) {
+      const [safe, carry] = splitTrailingIncomplete(s);
+      assert.equal(safe, s);
+      assert.equal(carry, '');
+    }
+  });
+
+  it('尾部半截 OSC（无 BEL）/ DCS 被缓带', () => {
+    const [s1, c1] = splitTrailingIncomplete('x\x1b]0;half title');
+    assert.equal(s1, 'x');
+    assert.equal(c1, '\x1b]0;half title');
+    const [s2, c2] = splitTrailingIncomplete('x\x1bPq#0;half');
+    assert.equal(s2, 'x');
+    assert.equal(c2, '\x1bPq#0;half');
+  });
+
+  it('尾部孤立高代理被缓带（不劈 emoji 码点）', () => {
+    const emoji = '😀';
+    const [safe, carry] = splitTrailingIncomplete('abc' + emoji[0]);
+    assert.equal(safe, 'abc');
+    assert.equal(carry, emoji[0]);
+    const [s2, c2] = splitTrailingIncomplete('abc' + emoji);
+    assert.equal(s2, 'abc' + emoji, '完整代理对不缓带');
+    assert.equal(c2, '');
+  });
+
+  it('短转义半截（ESC+中间字节结尾）被缓带；ESC+终字节完整不缓带', () => {
+    for (const tail of ['\x1b ', '\x1b(', '\x1b#']) { // 中间字节 0x20-0x2f 收尾 = 半截
+      const [safe, carry] = splitTrailingIncomplete('text' + tail);
+      assert.equal(safe, 'text', `tail=${JSON.stringify(tail)}`);
+      assert.equal(carry, tail);
+    }
+    const [s, c] = splitTrailingIncomplete('text\x1b='); // ESC= 是完整两字符转义
+    assert.equal(s, 'text\x1b=');
+    assert.equal(c, '');
+  });
+
+  it('超 maxCarry 的悬挂放弃缓带（畸形流防无界延迟）', () => {
+    const s = 'x\x1b]' + 'y'.repeat(5000);
+    const [safe, carry] = splitTrailingIncomplete(s);
+    assert.equal(safe, s);
+    assert.equal(carry, '');
+  });
+
+  it('空串与纯缓带输入', () => {
+    assert.deepEqual(splitTrailingIncomplete(''), ['', '']);
+    assert.deepEqual(splitTrailingIncomplete('\x1b[38;2;1'), ['', '\x1b[38;2;1']);
   });
 });

@@ -1,5 +1,14 @@
 /**
- * 在输出缓冲区从头部截断时，找到安全的截断起点，
+ * ANSI 转义序列安全边界工具（纯函数、零依赖，乱码残片不变量的语义基准）。
+ * 两个导出：
+ *   findSafeSliceStart(buf, rawStart)  —— 缓冲区"掐头"裁剪的安全起点（锚点扫描）
+ *   splitTrailingIncomplete(buf)       —— 批边界"截尾"缓带：[安全前段, 半截序列尾巴]
+ * 共同保证：xterm 收到的字节流中，任何删除/分批的续点都是合法解析起点，
+ * 半截序列永不以字面渲染。端到端验证见 test/terminal-pipeline-oracle.test.js。
+ */
+
+/**
+ * findSafeSliceStart：在输出缓冲区从头部截断时，找到安全的截断起点，
  * 避免切片落在 ANSI 转义序列中间——丢掉 ESC[ 前缀后剩余字节
  * 会被 xterm.js 当普通文本渲染（表现为 `[9m`、`?2026l`、`6;136;136m` 类乱码）。
  *
@@ -20,8 +29,54 @@
  * 孤儿化 END（?2026l，xterm 下无害 no-op），不可能产生无 END 的 BEGIN；
  * 跨 2026 块截断的配平由调用方负责（见 pty-flood-coalescer.js 的标记剥离）。
  */
+// 前向锚点扫描窗：TUI 流 ESC 密集（几十字节内必中锚点），上限只在纯文本流生效——
+// 多丢 ≤4KB 且发生在 ≥45KB 保留尾部的头部，不可感知。
 const DEFAULT_SCAN_WINDOW = 4096;
+// 回看判定窗：CSI 实际长度有界（最长常见真彩 SGR ≈20 字节），64 足以覆盖
+// "rawStart 是否落在某序列内部"的判定；OSC 超长场景由前向 ESC 锚兜住。
 const BACK_SCAN = 64;
+// 缓带上限：正常序列远小于此；超限视为畸形流（永不终结的 OSC/DCS），
+// 放弃缓带按原样发出，防半截尾巴无界滞留内存/延迟。
+const DEFAULT_MAX_CARRY = 4096;
+
+/**
+ * 把 buf 切成 [可安全发出的前段, 尾部未终结的半截转义序列]。
+ * 用途：flushBatch 给每批输出包裹 DEC 2026 SYNC 标记——若批边界劈开一条序列，
+ * 注入的标记会吃掉它的 ESC，让后半段以字面渲染（`[9m`/`8;2;102m` 类残片的总根源）。
+ * 半截尾巴缓带到下一批（PTY 续写必然补全）即可保证每个被包裹的批序列完整。
+ * 尾部孤立高代理同样缓带（不劈 emoji 码点）。超 maxCarry 的悬挂（畸形流如
+ * 永不终结的 OSC）放弃缓带按原样发出，防止无界延迟/内存。
+ */
+export function splitTrailingIncomplete(buf, maxCarry = DEFAULT_MAX_CARRY) {
+  if (!buf) return ['', ''];
+  const k = buf.lastIndexOf('\x1b');
+  if (k !== -1 && buf.length - k <= maxCarry) {
+    const intro = k + 1 < buf.length ? buf.charCodeAt(k + 1) : -1;
+    let complete;
+    if (intro === -1) {
+      complete = false;                       // 裸 ESC 收尾
+    } else if (intro === 0x5b) {              // CSI：任何 0x40-0x7e 终字节即终结
+      complete = false;
+      for (let j = k + 2; j < buf.length; j++) {
+        const c = buf.charCodeAt(j);
+        if (c >= 0x40 && c <= 0x7e) { complete = true; break; }
+      }
+    } else if (intro === 0x5d) {              // OSC：k 是最后一个 ESC → ST 不可能，只看 BEL
+      complete = buf.indexOf('\x07', k + 2) !== -1;
+    } else if (intro === 0x50) {              // DCS：ST 终结需要 ESC，而 k 已是最后一个
+      complete = false;
+    } else {                                  // 短转义：ESC + 中间字节(0x20-0x2f)* + 终字节
+      let j = k + 1;
+      while (j < buf.length && buf.charCodeAt(j) >= 0x20 && buf.charCodeAt(j) <= 0x2f) j++;
+      complete = j < buf.length;
+    }
+    if (!complete) return [buf.slice(0, k), buf.slice(k)];
+  }
+  // 尾部孤立高代理：配对的低代理还在路上
+  const last = buf.charCodeAt(buf.length - 1);
+  if (last >= 0xd800 && last <= 0xdbff) return [buf.slice(0, -1), buf.slice(-1)];
+  return [buf, ''];
+}
 
 export function findSafeSliceStart(buf, rawStart, scanWindow = DEFAULT_SCAN_WINDOW) {
   if (rawStart <= 0) return 0;

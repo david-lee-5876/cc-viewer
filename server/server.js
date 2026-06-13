@@ -1262,7 +1262,8 @@ async function setupTerminalWebSocket(httpServer) {
       floodGate = createFloodCoalescer({
         send: (data) => {
           if (ws.readyState === 1 && bpGate.offer()) {
-            try { ws.send(JSON.stringify({ type: 'data', data })); } catch {}
+            // send 抛错 = 该条数据永久丢失（流中间挖洞且无路径补发）→ 立即快照对齐兜底
+            try { ws.send(JSON.stringify({ type: 'data', data })); } catch { sendScratchResync(); return; }
             _countMsg();
           }
         },
@@ -1359,6 +1360,26 @@ async function setupTerminalWebSocket(httpServer) {
       // 该 ws 收到第一条 resize 时（见 ws.on('message')），抖动 (rows+1) → (rows) 触发 SIGWINCH。
       // 注：仅 PTY 已运行时才需要兜底；shell 不在 alternate-screen 不需要。
       let _needRedrawBootstrap = state.running === true;
+      // 加载期免疫补救：claude -c 大会话有数秒加载期，首发 SIGWINCH 若打在 TUI 渲染器
+      // 挂载前会被忽略且兜底是一次性的 → 画面空白持续到用户敲键盘。数据感知延迟重试：
+      // 连接以来 PTY 零输出（= 画面必然空白）才补发，有数据流过即作罢；ws close 清理。
+      let _ptyDataSeen = false;
+      const _redrawRetryTimers = [];
+      const _nudgeRedraw = () => {
+        try {
+          if (process.platform !== 'win32') {
+            const pid = getClaudePid();
+            if (pid && pid !== process.pid) process.kill(pid, 'SIGWINCH');
+          }
+        } catch {}
+      };
+      const _armRedrawRetries = () => {
+        for (const delay of [2000, 6000]) {
+          const t = setTimeout(() => { if (!_ptyDataSeen) _nudgeRedraw(); }, delay);
+          t.unref?.();
+          _redrawRetryTimers.push(t);
+        }
+      };
 
       // 反压闸门：写缓冲堆积时停发 data，恢复后用 outputBuffer 快照 resync 追赶；
       // resync 后强制 claude TUI 全屏重绘，避免洪泛结束于 TUI 静止态时画面停在快照
@@ -1425,7 +1446,8 @@ async function setupTerminalWebSocket(httpServer) {
       floodGate = createFloodCoalescer({
         send: (data) => {
           if (ws.readyState === 1 && bpGate.offer()) {
-            try { ws.send(JSON.stringify({ type: 'data', data })); } catch {}
+            // send 抛错 = 该条数据永久丢失（流中间挖洞且无路径补发）→ 立即快照对齐兜底
+            try { ws.send(JSON.stringify({ type: 'data', data })); } catch { sendResync(); return; }
             _countMsg();
           }
         },
@@ -1443,6 +1465,7 @@ async function setupTerminalWebSocket(httpServer) {
 
       // PTY 输出 → WebSocket(合并 ws 后客户端自行按 msg.type 分发,server 端不再 role 过滤)
       const removeDataListener = onPtyData((data) => {
+        _ptyDataSeen = true;
         floodGate.offer(data);
       });
 
@@ -1819,20 +1842,18 @@ async function setupTerminalWebSocket(httpServer) {
             // 让 PTY 短暂处于错误尺寸再回滚（避免 50-100ms 闪烁）
             if (_needRedrawBootstrap) {
               _needRedrawBootstrap = false;
-              try {
-                // Windows 无 SIGWINCH；ConPTY 在前面的 resizePty 调用里已经处理过 resize 通知，
-                // 这里仅是 POSIX 上的"等尺寸 noop 不发信号"兜底，Win 上跳过避免抛异常。
-                if (process.platform !== 'win32') {
-                  const pid = getClaudePid();
-                  if (pid && pid !== process.pid) process.kill(pid, 'SIGWINCH');
-                }
-              } catch {}
+              // Windows 无 SIGWINCH；ConPTY 在前面的 resizePty 调用里已经处理过 resize 通知，
+              // _nudgeRedraw 仅是 POSIX 上的"等尺寸 noop 不发信号"兜底（内部跳过 win32）。
+              _nudgeRedraw();
+              // claude -c 加载期免疫 SIGWINCH → 零输出时延迟补发（见上方声明处注释）
+              _armRedrawRetries();
             }
           }
         } catch {}
       });
 
       ws.on('close', () => {
+        for (const t of _redrawRetryTimers) clearTimeout(t);
         bpGate.dispose();
         floodGate.dispose();
         removeDataListener();

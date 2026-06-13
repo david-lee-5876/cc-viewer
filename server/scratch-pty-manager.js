@@ -5,7 +5,7 @@ import { platform, arch, homedir } from 'node:os';
 import { createRequire } from 'node:module';
 import { prepareEmbeddedShellSpawn } from './lib/terminal-env.js';
 import { killPtyTree } from './lib/term-signals.js';
-import { findSafeSliceStart } from './lib/ansi-safe-slice.js';
+import { findSafeSliceStart, splitTrailingIncomplete } from './lib/ansi-safe-slice.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -74,11 +74,17 @@ function maybeReap(id, s) {
   }
 }
 
-function flushBatch(s) {
+function flushBatch(s, force = false) {
   s.batchScheduled = false;
   if (!s.batchBuffer) return;
-  const chunk = s.batchBuffer;
-  s.batchBuffer = '';
+  // 批边界半截序列缓带（同 pty-manager.flushBatch）：scratch chunk 本身不包 SYNC 标记，
+  // 但洪泛限流器会按 flush 包裹——chunk 尾部序列完整才能保证 flush 边界不撕裂。
+  // force=true（进程退出）时不缓带，冲洗全部残余。
+  let chunk = s.batchBuffer;
+  let carry = '';
+  if (!force) [chunk, carry] = splitTrailingIncomplete(s.batchBuffer);
+  s.batchBuffer = carry;
+  if (!chunk) return;
   // snapshot 防 listener 在迭代中卸载产生跳号
   for (const cb of [...s.dataListeners]) {
     try { cb(chunk); } catch { }
@@ -159,7 +165,7 @@ export async function spawnScratch(id) {
     });
 
     s.ptyProcess.onExit(({ exitCode }) => {
-      flushBatch(s);
+      flushBatch(s, true);
       s.lastExitCode = exitCode;
       s.ptyProcess = null;
       for (const cb of [...s.exitListeners]) {
@@ -208,7 +214,7 @@ export function killScratch(id) {
   const s = ptys.get(id);
   if (!s) return;
   if (s.ptyProcess) {
-    flushBatch(s);
+    flushBatch(s, true);
     s.batchBuffer = '';
     s.batchScheduled = false;
     // 与 pty-manager.killPty 同款：win32 用 taskkill /T 收割 ConPTY 树，

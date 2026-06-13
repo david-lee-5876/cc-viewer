@@ -24,7 +24,7 @@ import { buildBracketPasteSubmitChunks, BRACKET_PASTE_SUBMIT_SETTLE_MS, sanitize
 import CustomUltraplanEditModal from './CustomUltraplanEditModal';
 import UltraplanExpertManagerModal from './UltraplanExpertManagerModal';
 import { visibleExpertKeys } from '../../utils/ultraplanExperts';
-import { TerminalWriteQueue } from '../../utils/terminalWriteQueue';
+import { TerminalWriteQueue, INBAND_RESET } from '../../utils/terminalWriteQueue';
 import { installTermDiag, diagCount } from '../../utils/termDiag';
 import { downscaleForRetina } from '../../utils/imageDownscale';
 import { buildPresetShortcutsPayload } from '../../utils/presetShortcuts';
@@ -919,13 +919,15 @@ class TerminalPanel extends React.Component {
       } else if (msg.type === 'data-resync') {
         // 服务端反压恢复:丢弃本地积压、重置 xterm、写快照一步对齐到服务端当前末态
         // (与 ws close→重连全量 replay 的既有恢复惯例同款;TUI 重绘由服务端 SIGWINCH/resize 抖动驱动)。
-        // 有意取舍:terminal.reset() 会连洪泛前的 scrollback 一起清掉——保留 scrollback 改写
+        // 有意取舍:全量重置会连洪泛前的 scrollback 一起清掉——保留 scrollback 改写
         // 分隔条+追加快照的方案会让快照开头与已渲染内容重叠重复,且洪泛流的半截转义残留可能
         // 卡坏 ANSI 状态机;reset 换取干净对齐,黄字提示已向用户明示发生过跳过。
+        // 重置必须走带内 INBAND_RESET 而非带外 terminal.reset()——后者不清 xterm 内部
+        // WriteBuffer,残留字节在 reset 后以 ground state 续解析,半截序列按字面渲染成
+        // `0;134m` 类残片且永久留在新 scrollback(见 terminalWriteQueue.INBAND_RESET doc)。
         diagCount('resyncCount');
         this._writeQ.reset();
-        this.terminal?.reset();
-        this._writeQ.push('\x1b[33m[cc-viewer] output skipped during congestion\x1b[0m\r\n');
+        this._writeQ.push(INBAND_RESET + '\x1b[33m[cc-viewer] output skipped during congestion\x1b[0m\r\n');
         if (msg.data) this._writeQ.push(msg.data);
       } else if (msg.type === 'exit') {
         this._flushWrite();
@@ -956,8 +958,9 @@ class TerminalPanel extends React.Component {
     } else if (state === 'close') {
       // writeQ 与 terminal 都要 reset（同 data-resync 分支）：close 时队列若有积压，
       // 重连 replay 会把这些字节再发一遍 → 局部重复。只 reset xterm 漏了写队列。
+      // 重置走带内序列防 WriteBuffer 残留撕裂（同 data-resync 分支注释）。
       this._writeQ?.reset();
-      this.terminal?.reset();
+      this._writeQ?.push(INBAND_RESET);
     }
   };
 

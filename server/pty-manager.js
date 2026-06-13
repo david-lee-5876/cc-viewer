@@ -6,7 +6,7 @@ import { platform, arch, homedir } from 'node:os';
 import { createRequire } from 'node:module';
 import { prepareEmbeddedShellSpawn, stripClaudeNoFlickerUnlessOptedIn } from './lib/terminal-env.js';
 import { killPtyTree } from './lib/term-signals.js';
-import { findSafeSliceStart } from './lib/ansi-safe-slice.js';
+import { findSafeSliceStart, splitTrailingIncomplete } from './lib/ansi-safe-slice.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -65,11 +65,18 @@ export { findSafeSliceStart };
 const SYNC_BEGIN = '\x1b[?2026h';
 const SYNC_END   = '\x1b[?2026l';
 
-function flushBatch() {
+function flushBatch(force = false) {
   batchScheduled = false;
   if (!batchBuffer) return;
-  const chunk = SYNC_BEGIN + batchBuffer + SYNC_END;
-  batchBuffer = '';
+  // 批边界半截序列缓带：每批都包 SYNC 标记，若批边界劈开一条转义序列，注入的标记
+  // 会吃掉它的 ESC、让后半段以字面渲染（`[9m`/`8;2;102m` 类残片的总根源）。半截尾巴
+  // 留到下一批（PTY 续写必然补全）；force=true（进程退出）时不缓带，冲洗全部残余。
+  let safe = batchBuffer;
+  let carry = '';
+  if (!force) [safe, carry] = splitTrailingIncomplete(batchBuffer);
+  batchBuffer = carry;
+  if (!safe) return;
+  const chunk = SYNC_BEGIN + safe + SYNC_END;
   for (const cb of dataListeners) {
     try { cb(chunk); } catch { }
   }
@@ -275,7 +282,7 @@ async function _spawnClaudeImpl(proxyPort, cwd, extraArgs = [], claudePath = nul
   });
 
   ptyProcess.onExit(({ exitCode }) => {
-    flushBatch();
+    flushBatch(true);
     lastExitCode = exitCode;
     ptyProcess = null;
     ptyKind = null;
@@ -455,7 +462,7 @@ async function _spawnShellImpl() {
   });
 
   ptyProcess.onExit(({ exitCode }) => {
-    flushBatch();
+    flushBatch(true);
     lastExitCode = exitCode;
     ptyProcess = null;
     ptyKind = null;
@@ -488,7 +495,7 @@ export function resizePty(cols, rows) {
 
 export function killPty() {
   if (ptyProcess) {
-    flushBatch();
+    flushBatch(true);
     batchBuffer = '';
     batchScheduled = false;
     // Windows：node-pty 的 ConPTY kill 有已知同步挂起问题（microsoft/node-pty#454），
