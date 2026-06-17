@@ -8,8 +8,9 @@
  *   服务端 createFloodCoalescer（真）+ createBackpressureGate（真）+
  *   findSafeSliceStart（真）+ pty-manager 同款 outputBuffer 滚动裁剪与 SYNC 包裹；
  *   客户端 TerminalWriteQueue（真）+ TerminalPanel 同款 data/data-resync 处理。
- * 裁判：忠实的 DEC VT 解析状态机（GROUND/ESC/CSI/OSC/DCS + CAN/BEL/ST/RIS 语义，
- *   RIS 清空可见文本 = terminal 全量重置），输出"最终可见文本"。
+ * 裁判：忠实的 DEC VT 解析状态机（GROUND/ESC/CSI/OSC/DCS + CAN/BEL/ST/RIS/ED2 语义，
+ *   RIS 与 ED2(\x1b[2J) 均清空可见文本；scrollback 保留契约由 terminal-scrollback-preserve.test.js 另测），
+ *   输出"最终可见文本"。
  * 断言：可见文本的每一行 ∈ { 合法内容行, 已知提示行, 空行 }——任何序列残片
  *   （`[9m`/`2;8;145m`/`5C` 类）都会形成非法行而失败。
  *
@@ -29,6 +30,7 @@ import { TerminalWriteQueue, INBAND_RESET } from '../src/utils/terminalWriteQueu
 // ── 裁判：迷你 VT 解析器（xterm 状态机语义子集，足以判定"残片是否上屏"）──
 function vtVisibleText(payloads) {
   let visible = '';
+  let csiParams = '';
   let st = 'GROUND';
   const reprocessEsc = (ch) => { // OSC/DCS 中 ESC+非\ → 中止并按新 ESC 序列处理
     st = 'ESC';
@@ -36,8 +38,8 @@ function vtVisibleText(payloads) {
   };
   const stepEsc = (ch) => {
     const c = ch.charCodeAt(0);
-    if (ch === 'c') { visible = ''; st = 'GROUND'; return; } // RIS：全量重置（清屏+scrollback）
-    if (ch === '[') { st = 'CSI'; return; }
+    if (ch === 'c') { visible = ''; st = 'GROUND'; return; } // RIS（历史；现 INBAND_RESET 已不含，仅防御保留）：清屏
+    if (ch === '[') { st = 'CSI'; csiParams = ''; return; }
     if (ch === ']') { st = 'OSC'; return; }
     if (ch === 'P') { st = 'DCS'; return; }
     if (c === 0x1b) { st = 'ESC'; return; }
@@ -62,8 +64,14 @@ function vtVisibleText(payloads) {
         case 'CSI':
           if (c === 0x1b) st = 'ESC';                       // ESC 中止 CSI
           else if (c === 0x18) st = 'GROUND';               // CAN 中止
-          else if (c >= 0x40 && c <= 0x7e) st = 'GROUND';   // 终止符
-          // 0x20-0x3f 参数/中间字节 + 其余 C0：停留
+          else if (c >= 0x40 && c <= 0x7e) {                // 终止符
+            // ED2(\x1b[2J)：清可视区。真实 xterm 保留 scrollback（见 terminal-scrollback-preserve.test.js），
+            // 本扁平模型无 viewport/scrollback 之分，按"清可见文本"处理——足以判定残片不变量。
+            if (ch === 'J' && csiParams.split(';')[0] === '2') visible = ''; // 含多参数 \x1b[2;…J 形式
+            st = 'GROUND';
+          }
+          else if (c >= 0x20 && c <= 0x3f) csiParams += ch;  // 参数/私有/中间字节累积（用于识别 2J）
+          // 其余 C0：停留
           break;
         case 'OSC':
           if (c === 0x07 || c === 0x18) st = 'GROUND';      // BEL 终止 / CAN 中止

@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.6.314 (2026-06-17)
+
+- fix(terminal): 复位保留 scrollback——ws 重连 / 反压 resync 的带内复位 `INBAND_RESET` 由 `\x07\x18\x1bc`（RIS，连 scrollback 一起清空，致重连/resync 后"只剩一页、历史上拉不到"）改为 `\x07\x18\x1b[2J\x1b[H\x1b[!p`（BEL+CAN 中止半截序列保零残片 + ED2 仅清可视区 + DECSTR 软复位属性，均不清 scrollback）；新增 `terminal-scrollback-preserve` 真实 xterm headless 测试断言 scrollback 保留 + RIS 清空回归守卫 + 零残片，oracle VT 模型补 ED2 语义
+
 ## 1.6.313 (2026-06-13)
 
 - fix(terminal): 终端乱码残片根治——flushBatch 批边界半截序列缓带（新增 `splitTrailingIncomplete`，SYNC 包裹不再劈开序列）+ resync/重连重置改带内 `\x07\x18\x1bc` 替代 `terminal.reset()` + 写队列积压丢弃锚点推进 + send 抛错/消息解析失败接入 resync 兜底

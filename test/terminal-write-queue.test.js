@@ -302,9 +302,12 @@ describe('TerminalWriteQueue 积压自保（trim）', { concurrency: false }, ()
     assert.equal(noticeCount, 1);
   });
 
-  it('INBAND_RESET 形状:BEL(终结 OSC)+CAN(中止 CSI)+RIS(全量重置),RIS 必须殿后', () => {
-    assert.equal(INBAND_RESET, '\x07\x18\x1bc');
-    assert.ok(INBAND_RESET.endsWith('\x1bc'), 'RIS 殿后——前两字节仅为解析器状态脱困');
+  it('INBAND_RESET 形状:BEL+CAN 脱困在前,且不含任何清 scrollback 序列(保历史)', () => {
+    assert.equal(INBAND_RESET, '\x07\x18\x1b[2J\x1b[H\x1b[!p');
+    assert.ok(INBAND_RESET.startsWith('\x07\x18'), 'BEL+CAN 打头——零残片防线靠这两字节中止半截序列');
+    // 关键回归守卫:绝不能含 RIS(\x1bc) 或 ED3(\x1b[3J)——它们会清 scrollback,正是"只剩一页"病根。
+    assert.ok(!INBAND_RESET.includes('\x1bc'), '不得含 RIS(\\x1bc):会清 scrollback');
+    assert.ok(!INBAND_RESET.includes('\x1b[3J'), '不得含 ED3(\\x1b[3J):会清 scrollback');
   });
 
   it('TRIM_NOTICE 形状:CAN 开头,?2026l 先于可见提示(防 DEC 2026 配对撕裂)', () => {
