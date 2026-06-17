@@ -5,6 +5,7 @@ import { renderMarkdown } from '../../utils/markdown';
 import { t } from '../../i18n';
 import { getContextSidebarArrowNavigation } from '../../utils/contextSidebarNavigation';
 import { buildContextItemRawText } from '../../utils/contextRaw';
+import { computeToolsDiff } from '../../utils/toolsDiff';
 import JsonViewer from '../viewers/JsonViewer';
 import ConceptHelp from '../common/ConceptHelp';
 
@@ -308,10 +309,12 @@ function TurnContent({ turn }) {
 
 // ── Accordion ─────────────────────────────────────────────────────────────────
 
-function AccordionSection({ sectionKey, title, items, historyItems = [], onSelect, onSelectById, selectedId, sidebarRef }) {
+function AccordionSection({ sectionKey, title, items, historyItems = [], onSelect, onSelectById, selectedId, sidebarRef, countOverride }) {
   const [open, setOpen] = useState(sectionKey !== 'tools');
   const [historyOpen, setHistoryOpen] = useState(false);
-  const totalCount = items.length + historyItems.length;
+  // countOverride 存在时（如 tools 区：移除项是 diff 占位、不计入实际数量）按其统计，
+  // 否则用列表项总数。
+  const totalCount = countOverride != null ? countOverride : items.length + historyItems.length;
   const historyToggleId = `${sectionKey}__history_toggle`;
 
   function focusControl(controlId) {
@@ -410,7 +413,7 @@ function AccordionSection({ sectionKey, title, items, historyItems = [], onSelec
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export default function ContextTab({ body, response }) {
+export default function ContextTab({ body, response, prevTools }) {
   const [selectedItem, setSelectedItem] = useState(null);
   // 「原文」模式：右侧面板显示选中节点的原始 JSON 纯文本；切换节点时保持
   const [rawMode, setRawMode] = useState(false);
@@ -465,15 +468,51 @@ export default function ContextTab({ body, response }) {
 
   // Tools (collapsed by default, shown first to match API cache prefix order)
   if (Array.isArray(body.tools) && body.tools.length > 0) {
-    accordionSections.push({
-      key: 'tools',
-      title: <>{t('ui.context.tools')} <ConceptHelp doc="ToolsFirst" /></>,
-      items: body.tools.map((tool, i) => ({
+    // 相对上一条 MainAgent 请求的 tools diff：tools_search 等场景下 tools 列表逐请求变化，
+    // 这里高亮新增/移除，让"变化时机/内容"可见。prevTools 为空（无上一条/非 MainAgent）时不显示 diff。
+    const diff = computeToolsDiff(prevTools, body.tools);
+
+    const toolItems = body.tools.map((tool, i) => {
+      const name = tool?.name || `Tool ${i}`;
+      const isAdded = diff.isAdded(tool?.name);
+      return {
         id: `tool__${i}`,
-        label: tool?.name || `Tool ${i}`,
+        label: isAdded
+          ? <span className={styles.toolAdded}>{name}<span className={styles.toolDiffTag}>{t('ui.context.toolAdded')}</span></span>
+          : name,
         blocks: parseToolBlocks(tool),
         raw: tool,
-      })),
+      };
+    });
+
+    // 移除的 tool 在当前请求里已不存在，追加为只读条目展示。id 用 name 派生（稳定，
+    // 数据刷新/重排时不会让选中态漂移到别的项）。
+    diff.removedNames.forEach((name) => {
+      toolItems.push({
+        id: `tool_removed__${name}`,
+        label: <span className={styles.toolRemoved}>{name}<span className={styles.toolDiffTag}>{t('ui.context.toolRemoved')}</span></span>,
+        blocks: [{ type: 'markdown', text: t('ui.context.toolRemovedNote') }],
+        raw: { name, _removed: true },
+      });
+    });
+
+    accordionSections.push({
+      key: 'tools',
+      // 数量徽标只算当前请求实际携带的 tools（少了工具就按少了之后算）；
+      // 移除项是相对上一条的 diff 占位，不计入数量。
+      countOverride: body.tools.length,
+      title: (
+        <>
+          {t('ui.context.tools')} <ConceptHelp doc="ToolsFirst" />
+          {diff.changed && (
+            <span className={styles.toolDiffSummary}>
+              {diff.addedCount > 0 && <span className={styles.toolDiffSummaryAdd}>+{diff.addedCount}</span>}
+              {diff.removedCount > 0 && <span className={styles.toolDiffSummaryRemove}>-{diff.removedCount}</span>}
+            </span>
+          )}
+        </>
+      ),
+      items: toolItems,
     });
   }
 
@@ -534,6 +573,7 @@ export default function ContextTab({ body, response }) {
             title={sec.title}
             items={sec.items}
             historyItems={sec.historyItems}
+            countOverride={sec.countOverride}
             selectedId={currentSelectedItem?.id}
             onSelect={(item) => setSelectedItem(item)}
             onSelectById={(itemId) => {

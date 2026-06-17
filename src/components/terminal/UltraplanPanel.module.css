@@ -201,10 +201,9 @@
   padding: 6px 10px;
   font-size: 12px;
   line-height: 1.6;
-  /* --border-color / --bg-main 全局未定义(沿 UltraPlanModal 迁移而来),补已定义 token 兜底 */
-  border: 1px solid var(--border-color, var(--border-primary));
+  border: 1px solid var(--border-color);
   border-radius: 14px;
-  background: var(--bg-main, var(--bg-container));
+  background: var(--bg-main);
   color: var(--text-secondary);
   cursor: pointer;
   transition: all 0.2s;

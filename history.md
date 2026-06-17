@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.6.315 (2026-06-18)
+
+- feat(network): Context 标签页 tools 区显示相对上一条 MainAgent 请求的 tools 变化——新增项绿色高亮、移除项追加只读占位（删除线），标题附 `+N/-N` 徽标；RequestList 时间线 tools 变化单独紫点标记
+- feat(network): Footer 国旗 IP 地理改多源按序兜底（ipinfo.io → ipwho.is → ipapi.co），单源限流 / 不可达时自动切换
+- fix(network): entry-slim 不再降级 `body.tools`——改由 intern pool 按内容签名去重控内存；修复 tools_search 等 tools 逐请求变化场景下历史请求误继承末位请求 tools、变化时机丢失
+
 ## 1.6.314 (2026-06-17)
 
 - fix(terminal): 复位保留 scrollback——ws 重连 / 反压 resync 的带内复位 `INBAND_RESET` 由 `\x07\x18\x1bc`（RIS，连 scrollback 一起清空，致重连/resync 后"只剩一页、历史上拉不到"）改为 `\x07\x18\x1b[2J\x1b[H\x1b[!p`（BEL+CAN 中止半截序列保零残片 + ED2 仅清可视区 + DECSTR 软复位属性，均不清 scrollback）；新增 `terminal-scrollback-preserve` 真实 xterm headless 测试断言 scrollback 保留 + RIS 清空回归守卫 + 零残片，oracle VT 模型补 ED2 语义

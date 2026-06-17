@@ -7015,6 +7015,42 @@ const i18nData = {
     "ar": "الأدوات", "no": "Verktøy", "pt-BR": "Ferramentas",
     "th": "เครื่องมือ", "tr": "Araçlar", "uk": "Інструменти"
   },
+  "ui.context.toolAdded": {
+    "zh": "新增", "en": "Added", "zh-TW": "新增",
+    "ko": "추가됨", "ja": "追加", "de": "Neu",
+    "es": "Añadido", "fr": "Ajouté", "it": "Aggiunto",
+    "da": "Tilføjet", "pl": "Dodano", "ru": "Добавлено",
+    "ar": "أُضيف", "no": "Lagt til", "pt-BR": "Adicionado",
+    "th": "เพิ่ม", "tr": "Eklendi", "uk": "Додано"
+  },
+  "ui.context.toolRemoved": {
+    "zh": "移除", "en": "Removed", "zh-TW": "移除",
+    "ko": "제거됨", "ja": "削除", "de": "Entfernt",
+    "es": "Eliminado", "fr": "Supprimé", "it": "Rimosso",
+    "da": "Fjernet", "pl": "Usunięto", "ru": "Удалено",
+    "ar": "أُزيل", "no": "Fjernet", "pt-BR": "Removido",
+    "th": "ลบแล้ว", "tr": "Kaldırıldı", "uk": "Видалено"
+  },
+  "ui.context.toolRemovedNote": {
+    "zh": "该工具在上一条请求中存在，本次请求已移除。",
+    "en": "This tool was present in the previous request and removed in this one.",
+    "zh-TW": "此工具在上一條請求中存在，本次請求已移除。",
+    "ko": "이 도구는 이전 요청에 있었으나 이번 요청에서 제거되었습니다.",
+    "ja": "このツールは前のリクエストには存在しましたが、今回のリクエストで削除されました。",
+    "de": "Dieses Tool war in der vorherigen Anfrage vorhanden und wurde in dieser entfernt.",
+    "es": "Esta herramienta estaba en la solicitud anterior y se eliminó en esta.",
+    "fr": "Cet outil était présent dans la requête précédente et a été supprimé ici.",
+    "it": "Questo strumento era presente nella richiesta precedente ed è stato rimosso in questa.",
+    "da": "Dette værktøj fandtes i den forrige anmodning og er fjernet i denne.",
+    "pl": "To narzędzie było obecne w poprzednim żądaniu i zostało usunięte w tym.",
+    "ru": "Этот инструмент присутствовал в предыдущем запросе и удалён в текущем.",
+    "ar": "كانت هذه الأداة موجودة في الطلب السابق وتمت إزالتها في هذا الطلب.",
+    "no": "Dette verktøyet fantes i forrige forespørsel og er fjernet i denne.",
+    "pt-BR": "Esta ferramenta estava na solicitação anterior e foi removida nesta.",
+    "th": "เครื่องมือนี้มีอยู่ในคำขอก่อนหน้า และถูกลบออกในคำขอนี้",
+    "tr": "Bu araç önceki istekte vardı ve bu istekte kaldırıldı.",
+    "uk": "Цей інструмент був у попередньому запиті та вилучений у цьому."
+  },
   "ui.context.noData": {
     "zh": "暂无 Context 数据", "en": "No context data", "zh-TW": "暫無 Context 資料",
     "ko": "컨텍스트 데이터 없음", "ja": "コンテキストデータなし", "de": "Keine Kontextdaten",

@@ -486,3 +486,38 @@
   word-break: break-all;
   margin: 0;
 }
+
+/* ── tools diff（相对上一条请求的新增/移除）────────────────────────────────── */
+.toolAdded {
+  color: var(--color-success);
+}
+
+.toolRemoved {
+  color: var(--color-error);
+  text-decoration: line-through;
+}
+
+.toolDiffTag {
+  margin-left: 6px;
+  font-size: 9px;
+  font-family: sans-serif;
+  text-decoration: none;
+  opacity: 0.85;
+}
+
+.toolDiffSummary {
+  margin-left: 6px;
+  font-size: 11px;
+  font-family: monospace;
+  display: inline-flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.toolDiffSummaryAdd {
+  color: var(--color-success);
+}
+
+.toolDiffSummaryRemove {
+  color: var(--color-error);
+}

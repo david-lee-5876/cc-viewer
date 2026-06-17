@@ -302,7 +302,7 @@ describe('restoreSlimmedEntry', () => {
     assert.equal(restoreSlimmedEntry(entry, requests), entry);
   });
 
-  it('should restore tools/system/metadata/tool_choice from fullEntry', () => {
+  it('should restore system/metadata/tool_choice from fullEntry (tools preserved, not slimmed)', () => {
     const slimmer = createIncrementalSlimmer(isMainAgent);
     const requests = [];
 
@@ -314,12 +314,12 @@ describe('restoreSlimmedEntry', () => {
     slimmer.processEntry(e1, requests, 1);
     requests.push(e1);
 
-    // entry 0 现在已被 slim 且 body.tools 仅保留 name
+    // §tools 修复：entry 0 被 slim，但 body.tools 完整保留（description/input_schema 不再剥离）
     assert.equal(requests[0]._slimmed, true);
     assert.equal(requests[0].body.tools.length, 2);
     assert.equal(requests[0].body.tools[0].name, 'Bash');
-    assert.equal(requests[0].body.tools[0].description, undefined, 'description should be stripped');
-    assert.equal(requests[0].body.tools[0].input_schema, undefined, 'input_schema should be stripped');
+    assert.equal(requests[0].body.tools[0].description.length, 20000, 'tools description must NOT be stripped');
+    assert.equal(requests[0].body.tools[0].input_schema.type, 'object', 'tools input_schema must NOT be stripped');
 
     // system text 被截断
     assert.ok(requests[0].body.system[0].text.length <= 2048);
@@ -333,13 +333,94 @@ describe('restoreSlimmedEntry', () => {
     // tool_choice 被删除
     assert.equal('tool_choice' in requests[0].body, false);
 
-    // restore 后从 fullEntry 还原所有字段
+    // restore 后：system/metadata/tool_choice 从 fullEntry 还原；tools 保留 entry 自身
     const restored = restoreSlimmedEntry(requests[0], requests);
     assert.equal(restored.body.tools[0].description.length, 20000);
     assert.equal(restored.body.tools[0].input_schema.type, 'object');
     assert.equal(restored.body.system[0].text.length > 2048, true);
     assert.equal(restored.body.metadata.request_id, requests[1].body.metadata.request_id);
     assert.deepEqual(restored.body.tool_choice, { type: 'auto' });
+  });
+
+  it('should keep each request\'s OWN tools when tools vary per request (tools_search regression)', () => {
+    // 复现用户场景：tools_search 开启时 tools 列表逐请求变化。
+    // 修复前：slim 把非末位请求的 tools 降级 + restore 从末位 fullEntry 继承 →
+    //         所有历史请求都显示最后一条的 tools。
+    const slimmer = createIncrementalSlimmer(isMainAgent);
+    const requests = [];
+
+    // e0：3 个 tool
+    const e0 = makeMainAgent(10, {
+      tools: [
+        { name: 'Bash', description: 'B'.repeat(3000) },
+        { name: 'Read', description: 'R'.repeat(3000) },
+        { name: 'ToolSearch', description: 'S'.repeat(3000) },
+      ],
+    });
+    slimmer.processEntry(e0, requests, 0);
+    requests.push(e0);
+
+    // e1：ToolSearch 加载出 2 个新 tool（5 个），移除 Read → tools 列表变化
+    const e1 = makeMainAgent(15, {
+      tools: [
+        { name: 'Bash', description: 'B'.repeat(3000) },
+        { name: 'ToolSearch', description: 'S'.repeat(3000) },
+        { name: 'WebFetch', description: 'W'.repeat(3000) },
+        { name: 'WebSearch', description: 'X'.repeat(3000) },
+      ],
+    });
+    slimmer.processEntry(e1, requests, 1);
+    requests.push(e1);
+
+    // e0 已被 slim，但还原后必须是它自己的 tools（含 Read，不含 WebFetch/WebSearch）
+    assert.equal(requests[0]._slimmed, true);
+    const restored0 = restoreSlimmedEntry(requests[0], requests);
+    const names0 = restored0.body.tools.map(tt => tt.name).sort();
+    assert.deepEqual(names0, ['Bash', 'Read', 'ToolSearch'], 'slimmed e0 must keep its OWN tools, not inherit e1');
+
+    // e1（fullEntry）保持自己的 tools
+    const names1 = requests[1].body.tools.map(tt => tt.name).sort();
+    assert.deepEqual(names1, ['Bash', 'ToolSearch', 'WebFetch', 'WebSearch']);
+  });
+
+  it('intern→slim→restore: distinct tools each pooled once, both restore to their OWN tools', () => {
+    // 钉死「内存由 intern pool 兜底」的承诺：模拟生产链路(intern 先于 slim，见 AppBase SSE 路径)，
+    // 两份不同 tools 各入池一份(去重有界)，slim+restore 后仍各自还原真实 tools。
+    _resetInternPoolsForTest();
+    const slimmer = createIncrementalSlimmer(isMainAgent);
+    const requests = [];
+
+    const i0 = internEntryBigFields(makeMainAgent(10, {
+      tools: [
+        { name: 'Bash', description: 'B'.repeat(3000) },
+        { name: 'Read', description: 'R'.repeat(3000) },
+        { name: 'ToolSearch', description: 'S'.repeat(3000) },
+      ],
+    }));
+    slimmer.processEntry(i0, requests, 0);
+    requests.push(i0);
+
+    const i1 = internEntryBigFields(makeMainAgent(15, {
+      tools: [
+        { name: 'Bash', description: 'B'.repeat(3000) },
+        { name: 'ToolSearch', description: 'S'.repeat(3000) },
+        { name: 'WebFetch', description: 'W'.repeat(3000) },
+        { name: 'WebSearch', description: 'X'.repeat(3000) },
+      ],
+    }));
+    slimmer.processEntry(i1, requests, 1);
+    requests.push(i1);
+
+    // 两份不同 tools-set 各入池一份(签名不同 → 不共享、不无限增长)
+    assert.equal(_getInternPoolStatsForTest().toolsPoolSize, 2, 'distinct tools-sets should each be pooled once');
+
+    // slim 后的 e0 还原出自己的 tools，未继承末位 e1
+    assert.equal(requests[0]._slimmed, true);
+    const restored0 = restoreSlimmedEntry(requests[0], requests);
+    assert.deepEqual(restored0.body.tools.map(tt => tt.name).sort(), ['Bash', 'Read', 'ToolSearch']);
+    // 还原出的 description 完整(slim 不再降级 tools，pool 持完整数据)
+    assert.equal(restored0.body.tools.find(tt => tt.name === 'Read').description.length, 3000);
+    assert.equal(requests[1].body.tools.length, 4);
   });
 
   it('should not mutate fullEntry body when slim runs (incremental path)', () => {
@@ -359,12 +440,12 @@ describe('restoreSlimmedEntry', () => {
     // 增量路径 clone 后 e0 实例本身的 body 不应被替换（关键：React state 引用不变）
     assert.equal(e0.body.tools, origToolsRef, 'original e0.body.tools reference must not be mutated');
     assert.equal(e0.body.system, origSystemRef, 'original e0.body.system reference must not be mutated');
-    // 而 requests[0] 是 cloned slimmed entry
+    // 而 requests[0] 是 cloned slimmed entry；§tools 修复后 tools 完整保留
     assert.notEqual(requests[0], e0, 'requests[0] should be the cloned slimmed entry, not e0');
-    assert.equal(requests[0].body.tools[0].description, undefined);
+    assert.equal(requests[0].body.tools[0].description.length, 20000, 'slimmed clone must keep full tools');
   });
 
-  it('should slim body.tools/system in batch slimmer', () => {
+  it('should slim body.system in batch slimmer but preserve body.tools', () => {
     const entries = [];
     const e0 = makeMainAgent(10);
     const e1 = makeMainAgent(15);
@@ -376,7 +457,7 @@ describe('restoreSlimmedEntry', () => {
     slimmer.finalize(entries);
 
     assert.equal(entries[0]._slimmed, true);
-    assert.equal(entries[0].body.tools[0].description, undefined);
+    assert.equal(entries[0].body.tools[0].description.length, 20000, 'tools must NOT be slimmed');
     assert.ok(entries[0].body.system[0].text.length <= 2048);
     assert.equal('tool_choice' in entries[0].body, false);
     // entry 1 是 fullEntry，未变
@@ -453,27 +534,20 @@ describe('slimBodyBigFields edge cases', () => {
     assert.equal(slimBodyBigFields(shortBody).system, 'short text');
   });
 
-  it('should normalize tools entries that lack a name', () => {
+  it('should preserve body.tools fully (no longer slimmed)', () => {
+    const tools = [
+      { name: 'Bash', description: 'X'.repeat(5000), input_schema: { type: 'object' } },
+      { name: 'Read', description: 'Y'.repeat(5000) },
+    ];
     const body = {
       messages: [{ role: 'user', content: 'x' }],
-      tools: [
-        { name: 'Bash', description: 'X'.repeat(5000) },
-        { description: 'no-name tool', input_schema: { type: 'object' } },
-        null,
-        { name: '', description: 'empty-name tool' },
-      ],
+      tools,
     };
     const slimmed = slimBodyBigFields(body);
-    assert.equal(slimmed.tools.length, 4);
-    // tool with name: { name } only
-    assert.deepEqual(slimmed.tools[0], { name: 'Bash' });
-    // no-name tool: 不能保留 description（避免变相绕过 slim）
-    assert.deepEqual(slimmed.tools[1], { name: null });
-    assert.equal('description' in slimmed.tools[1], false, 'no-name tool must not retain description');
-    // null entry: 也降级为 { name: null }
-    assert.deepEqual(slimmed.tools[2], { name: null });
-    // empty-string name 视为无 name
-    assert.deepEqual(slimmed.tools[3], { name: null });
+    // §tools 修复：tools 引用与内容完整透传（由 internEntryBigFields 的 pool 控内存，slim 不碰）
+    assert.equal(slimmed.tools, tools, 'tools reference must be preserved');
+    assert.equal(slimmed.tools[0].description.length, 5000, 'description must NOT be stripped');
+    assert.equal(slimmed.tools[0].input_schema.type, 'object', 'input_schema must NOT be stripped');
   });
 
   it('should handle body.metadata when null/undefined', () => {

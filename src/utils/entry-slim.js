@@ -7,8 +7,8 @@
  * 核心机制：同 session 内只保留最新一条 MainAgent 的完整 messages 与 body 大字段，
  * 前一条立即释放。被剪枝的 entry 记录 _fullEntryIndex 供按需还原。
  *
- * v2: 除 messages 外，body.tools / body.system / body.metadata / body.tool_choice 也参与 slim。
- *     - body.tools: 每个 tool 仅保留 name（删除 description 与 input_schema）
+ * v2: 除 messages 外，body.system / body.metadata / body.tool_choice 也参与 slim。
+ *     - body.tools: 不再 slim（见下方 §tools 修复）。tools 完整保留，由 v3 pool 去重控内存。
  *     - body.system: 每个 text block 仅保留前 SYSTEM_TEXT_KEEP_PREFIX 字符
  *     - body.metadata: 仅保留 user_id（slim session boundary 检测依赖）
  *     - body.tool_choice: 直接删除
@@ -233,9 +233,12 @@ export function slimBodyBigFields(body) {
   if (!body) return body;
   const next = { ...body, messages: [] };
 
-  if (Array.isArray(body.tools)) {
-    next.tools = body.tools.map(t => ({ name: (t && t.name) || null }));
-  }
+  // §tools 修复：body.tools 不再降级。
+  // 旧逻辑把非末位请求的 tools 降级为 [{name}]，并在 restoreSlimmedEntry 时从末位
+  // fullEntry 继承 tools。在 tools_search 等"tools 列表逐请求变化"的场景下，这会让所有
+  // 历史请求都显示最后一条的 tools、变化时机彻底丢失。这里完整保留 tools（next 已从
+  // body 浅拷贝携带原引用）：internEntryBigFields 先把 tools 走 module-level pool 按内容
+  // 签名去重，相同 tools 共享同一引用、内存仍有界；不同 tools 各自保留，才能还原真实变化。
 
   if (Array.isArray(body.system)) {
     next.system = body.system.map(blk => {
@@ -403,9 +406,12 @@ export function restoreSlimmedEntry(entry, requests) {
   const fullEntry = requests[entry._fullEntryIndex];
   if (!fullEntry?.body?.messages) return entry;
   if (fullEntry.body.messages.length < entry._messageCount) return entry;
-  // 从 fullEntry 还原所有被 slim 掉/降级的大字段（messages/tools/system/metadata/tool_choice）。
-  // entry.body 自身的非 big-field（model、max_tokens、stream 等）保留。
+  // 从 fullEntry 还原被 slim 降级的大字段；entry.body 自身的非 big-field（model、max_tokens、stream 等）保留。
   const fullBody = fullEntry.body;
+  // messages 是累积量：fullEntry 的 messages 前缀 slice 即本 entry 的原始 messages。
+  // system / metadata / tool_choice 仍被 slim 降级，故从 fullEntry 还原。
+  // tools 不在此还原（§tools 修复）：slim 已不降级 tools，entry 自身的 body.tools
+  // 即该请求真实的（pool 完整）tools；从 fullEntry 取会错误继承末位请求的 tools。
   return {
     ...entry,
     _slimmed: false,
@@ -413,7 +419,6 @@ export function restoreSlimmedEntry(entry, requests) {
     body: {
       ...entry.body,
       messages: fullBody.messages.slice(0, entry._messageCount),
-      tools: fullBody.tools,
       system: fullBody.system,
       metadata: fullBody.metadata,
       tool_choice: fullBody.tool_choice,

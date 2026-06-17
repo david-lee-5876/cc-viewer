@@ -9,9 +9,42 @@ function countryToFlag(code) {
   return code.toUpperCase().split('').map(c => String.fromCodePoint(0x1F1E6 + c.charCodeAt(0) - 65)).join('');
 }
 
+// 多源兜底：ipinfo.io 免 token 有限流、部分网络不可达，单一源易请求失败。
+// 按序逐个尝试，先成功者生效；各源字段不一致，normalize 统一为 ipinfo 形状
+// { ip, country(ISO-3166 alpha-2), region, city, org } 供 render 直接消费。
+const GEO_SOURCES = [
+  {
+    url: 'https://ipinfo.io/json',
+    normalize: d => ({ ip: d.ip, country: d.country, region: d.region, city: d.city, org: d.org }),
+  },
+  {
+    url: 'https://ipwho.is/',
+    normalize: d => (d.success === false ? null : {
+      ip: d.ip, country: d.country_code, region: d.region, city: d.city,
+      org: d.connection?.org || d.connection?.isp,
+    }),
+  },
+  {
+    url: 'https://ipapi.co/json/',
+    normalize: d => ({ ip: d.ip, country: d.country_code || d.country, region: d.region, city: d.city, org: d.org }),
+  },
+];
+
+async function fetchGeoInfo() {
+  for (const src of GEO_SOURCES) {
+    try {
+      const r = await fetch(src.url, { signal: AbortSignal.timeout(5000) });
+      if (!r.ok) continue;
+      const info = src.normalize(await r.json());
+      if (info?.country?.length === 2) return info;
+    } catch { /* 超时/网络错误/JSON 解析失败 → 下一个源 */ }
+  }
+  return null;
+}
+
 /**
  * Footer 左下角的地理位置指示。
- * 自带 ipinfo.io 请求 + hover Popover。未拿到 data / country=CN 时不渲染。
+ * 自带 IP 地理请求（多源兜底，见 GEO_SOURCES）+ hover Popover。未拿到 data / country=CN 时不渲染。
  * 原本挂在 AppHeader 的右侧控件区，1.6.200 移到 App.jsx footer 左端，
  * 只显示紧凑的国旗，hover 才展开地区详情。
  */
@@ -23,15 +56,10 @@ export default class CountryFlag extends React.Component {
   }
 
   componentDidMount() {
-    fetch('https://ipinfo.io/json', { signal: AbortSignal.timeout(5000) })
-      .then(r => r.json())
-      .then(data => {
-        if (this._aborted) return;
-        if (data && data.country) {
-          this.setState({ flag: countryToFlag(data.country), info: data });
-        }
-      })
-      .catch(() => { });
+    fetchGeoInfo().then(info => {
+      if (this._aborted || !info) return;
+      this.setState({ flag: countryToFlag(info.country), info });
+    });
   }
 
   componentWillUnmount() {

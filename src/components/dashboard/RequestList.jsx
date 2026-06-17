@@ -148,7 +148,9 @@ class RequestList extends React.Component {
                             // 完全无法触发,会让用户看不到 cache-loss reason。Tooltip 富内容仅在
                             // 悬停/点击时渲染,数百个 dot 也只有可见的几个会创建 wrapper。
                             const tooltipText = allReasons.map(r => t(reasonI18nMap[r] || reasonI18nMap.key_change)).join('\n');
-                            dot = <Tooltip title={<span className={styles.tooltipPreLine}>{tooltipText}</span>}><span className={`${styles.cacheDot} ${styles.cacheDotLoss}`} /></Tooltip>;
+                            // tools 变化在时间线上单独着色，便于一眼定位"tools 在哪一步变了"
+                            const toolsCls = allReasons.includes('tools_change') ? ` ${styles.cacheDotTools}` : '';
+                            dot = <Tooltip title={<span className={styles.tooltipPreLine}>{tooltipText}</span>}><span className={`${styles.cacheDot} ${styles.cacheDotLoss}${toolsCls}`} /></Tooltip>;
                           } else {
                             dot = <span className={`${styles.cacheDot} ${styles.cacheDotNormal}`} />;
                           }

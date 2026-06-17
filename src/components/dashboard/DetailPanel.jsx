@@ -415,10 +415,14 @@ class DetailPanel extends React.Component {
     const time = new Date(request.timestamp).toLocaleString('zh-CN');
     const statusOk = request.response && request.response.status < 400;
 
+    // 一次 render 只解析一次上一条 MainAgent 请求——Body Diff 与 ContextTab 的 tools diff 复用同一结果，
+    // 避免 getPrevMainAgentRequest()（内部可能跑 restoreSlimmedEntry 重建）被重复调用两次。
+    const prevMainAgent = isMainAgent(request) ? this.getPrevMainAgentRequest() : null;
+
     // Diff logic for mainAgent requests
     let diffBlock = null;
-    if (isMainAgent(request)) {
-      const prevRequest = this.getPrevMainAgentRequest();
+    if (prevMainAgent) {
+      const prevRequest = prevMainAgent;
       if (prevRequest) {
         const currSize = JSON.stringify(request.body).length;
         const prevSize = JSON.stringify(prevRequest.body).length;
@@ -748,7 +752,11 @@ class DetailPanel extends React.Component {
         label: 'Context',
         children: (
           <div className={`${styles.tabContent} ${styles.cacheTabContent}`}>
-            <ContextTab body={request.body} response={request.response?.body} />
+            <ContextTab
+              body={request.body}
+              response={request.response?.body}
+              prevTools={prevMainAgent?.body?.tools}
+            />
           </div>
         ),
       },
