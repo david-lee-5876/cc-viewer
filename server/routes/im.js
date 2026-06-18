@@ -19,13 +19,13 @@ import { findRecentLog } from '../lib/interceptor-core.js';
 import { readSenders } from '../lib/im-senders.js';
 import { readImClaudeMd, writeImClaudeMd, MAX_CLAUDE_MD_CHARS } from '../lib/im-claude-md.js';
 import { imDir } from '../lib/im-lock.js';
-import { listSkills, moveSkill } from '../lib/skills-api.js';
+import { listSkills, moveSkill, deleteSkill } from '../lib/skills-api.js';
 import { importSkillTo } from './skills.js';
 import { LOG_DIR } from '../../findcc.js';
 import { join, basename } from 'node:path';
 
 const JSON_HEADERS = { 'Content-Type': 'application/json' };
-const IM_RE = /^\/api\/im\/([a-z0-9_-]+)\/(status|config|test|process|logs|senders|claude-md|skills|skills\/toggle|skills\/import)$/;
+const IM_RE = /^\/api\/im\/([a-z0-9_-]+)\/(status|config|test|process|logs|senders|claude-md|skills|skills\/toggle|skills\/delete|skills\/import)$/;
 
 /** Resolve a known platform id from the URL, or null (→ 404) for an unknown one. */
 function platformOf(url) {
@@ -307,7 +307,28 @@ function imSkillsToggle(req, res, parsedUrl, isLocal, deps) {
       res.writeHead(200, JSON_HEADERS);
       res.end(JSON.stringify({ ok: true }));
     } catch (err) {
-      const statusMap = { INVALID_NAME: 400, INVALID_SOURCE: 400, PATH_ESCAPE: 400, SYMLINK: 400, SOURCE_MISSING: 404, DEST_CONFLICT: 409 };
+      const statusMap = { INVALID_NAME: 400, INVALID_SOURCE: 400, PATH_ESCAPE: 400, SYMLINK: 400, SOURCE_MISSING: 404, DUPLICATE: 409 };
+      const status = statusMap[err?.code] || 500;
+      res.writeHead(status, JSON_HEADERS);
+      res.end(JSON.stringify({ error: err?.message || 'internal_error', code: err?.code || 'unknown' }));
+    }
+  });
+}
+
+function imSkillsDelete(req, res, parsedUrl, isLocal, deps) {
+  const id = platformOf(parsedUrl.pathname);
+  if (!id) { notFound(res); return; }
+  if (!isLocal) { loopbackOnly(res); return; }
+  readBody(req, deps, (body) => {
+    let incoming;
+    try { incoming = JSON.parse(body); }
+    catch { res.writeHead(400, JSON_HEADERS); res.end(JSON.stringify({ error: 'Invalid JSON' })); return; }
+    try {
+      deleteSkill({ source: 'project', name: incoming.name, enabled: !!incoming.enabled, projectDir: imDir(id) });
+      res.writeHead(200, JSON_HEADERS);
+      res.end(JSON.stringify({ ok: true }));
+    } catch (err) {
+      const statusMap = { INVALID_NAME: 400, INVALID_SOURCE: 400, PATH_ESCAPE: 400, SYMLINK: 400, NOT_FOUND: 404 };
       const status = statusMap[err?.code] || 500;
       res.writeHead(status, JSON_HEADERS);
       res.end(JSON.stringify({ error: err?.message || 'internal_error', code: err?.code || 'unknown' }));
@@ -333,5 +354,6 @@ export const imRoutes = [
   { predicate: imPredicate('claude-md', 'POST'), handler: imClaudeMdPost },
   { predicate: imPredicate('skills', 'GET'), handler: imSkills },
   { predicate: imPredicate('skills/toggle', 'POST'), handler: imSkillsToggle },
+  { predicate: imPredicate('skills/delete', 'POST'), handler: imSkillsDelete },
   { predicate: imPredicate('skills/import', 'POST'), handler: imSkillsImport },
 ];

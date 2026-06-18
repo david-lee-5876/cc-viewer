@@ -16,6 +16,35 @@ export function skillToDisplayName(s) {
   return s.name;
 }
 
+// Skill 的稳定唯一标识——用于开关弹窗的 toggling Set key、乐观更新匹配、reload 排序 orderMap、
+// 以及 React 渲染 key。可切换 skill（user/project）用其磁盘 path：同名两份分别住在 skills/ 与
+// skills-skip/，路径天然不同，避免「同名同 source」共用 key 导致两行串台（一起转圈/一起翻转）。
+// builtin（path:null）回落 source-name（名字唯一），仍稳定，供只读 chip 的排序兜底。
+export function skillKey(s) {
+  return (s && s.path) ? s.path : `${s?.source}-${s?.name}`;
+}
+
+// 跨「开关」稳定的标识——只用 source+name（开关把 skill 在 skills/ ↔ skills-skip/ 间搬，path 会变，
+// 但 source/name 不变）。专用于「toggle 后保位」：开关一个 skill 后它在列表里原地不动，不会因为 path
+// 变了而被 orderMap 当成新条目甩到末尾。与 skillKey（含 path、用于重复态去重）刻意不同。
+export function skillOrderKey(s) {
+  return `${s?.source}-${s?.name}`;
+}
+
+// 弹窗「默认排序」——仅在打开面板时套用（开关期间不重排，避免抖动让用户找不到 skill）。
+// 规则：项目级(project) 排在用户级(user) 之前，其余源其后；同源按名字 localeCompare 保证确定性
+// （彻底消除每次刷新 readdir 顺序漂移导致的乱序）。返回新数组，不改入参。
+const SKILL_SOURCE_RANK = { project: 0, user: 1, plugin: 2, builtin: 3 };
+export function sortSkillsDefault(skills) {
+  if (!Array.isArray(skills)) return [];
+  return [...skills].sort((a, b) => {
+    const ra = SKILL_SOURCE_RANK[a?.source] ?? 9;
+    const rb = SKILL_SOURCE_RANK[b?.source] ?? 9;
+    if (ra !== rb) return ra - rb;
+    return String(a?.name || '').localeCompare(String(b?.name || ''));
+  });
+}
+
 // 把 /api/skills 的权威结果与历史 system-reminder 解析结果合并为「当前在用」chip 列表。
 // - fsSkills=null  → 返回 null，由调用方回退到历史解析
 // - 只保留 enabled=true 且非 builtin 的条目

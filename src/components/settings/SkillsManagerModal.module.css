@@ -32,7 +32,33 @@
 
 .skillCardActions {
   flex-shrink: 0;
-  /* 预留未来操作按钮位置（⋯ 菜单：禁用 / 删除 / 编辑），现状为空 */
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* 永久删除图标按钮：无边框、默认 muted、hover 转危险红。包在 ConfirmRemoveButton 里（二次确认）。 */
+.skillDeleteBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 4px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: 4px;
+  font-size: 14px;
+  line-height: 1;
+  transition: color 0.15s, background 0.15s;
+}
+.skillDeleteBtn:hover {
+  color: #cf1322;
+  background: #fff1f0;
+}
+[data-theme="dark"] .skillDeleteBtn:hover {
+  color: #ff7875;
+  background: #2a1215;
 }
 
 .skillCardDesc {
@@ -96,3 +122,22 @@
 [data-theme="dark"] .skillSource_project { background: #162312; color: #73d13d; }
 [data-theme="dark"] .skillSource_plugin  { background: #2b1d11; color: #ffa940; }
 [data-theme="dark"] .skillSource_builtin { background: #1a1325; color: #b37feb; }
+
+/* 重复警示徽标：同名 skill 在 skills/ 与 skills-skip/ 各有一份（启用+禁用），需手动清理。
+   仿 skillSourceBadge 的尺寸，用警示色；hover 给 Tooltip 说明 + 如何处理。 */
+.skillDuplicateBadge {
+  font-size: 11px;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: 3px;
+  flex-shrink: 0;
+  cursor: help;
+  background: #fff1f0;
+  color: #cf1322;
+  border: 1px solid #ffccc7;
+}
+[data-theme="dark"] .skillDuplicateBadge {
+  background: #2a1215;
+  color: #ff7875;
+  border-color: #58181c;
+}

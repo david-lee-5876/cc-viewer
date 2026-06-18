@@ -285,3 +285,68 @@ describe('稳定性', () => {
     assert.equal(flag, true);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// skillsDelete 路由 + toggle 的 DUPLICATE 臂（删除是不可逆操作，按仓库 ≥95% 分支约定补齐）。
+describe('skillsDelete 路由 + toggle DUPLICATE 臂', () => {
+  function postDelete(bodyStr, isLocal = true) {
+    const handler = routeHandler('POST', '/api/skills/delete');
+    const req = new EventEmitter();
+    req.destroy = () => {};
+    const { res, done } = makeRes();
+    handler(req, res, { pathname: '/api/skills/delete' }, isLocal, {});
+    req.emit('data', Buffer.from(bodyStr));
+    req.emit('end');
+    return done;
+  }
+  function postToggle(bodyStr) {
+    const handler = routeHandler('POST', '/api/skills/toggle');
+    const req = new EventEmitter();
+    req.destroy = () => {};
+    const { res, done } = makeRes();
+    handler(req, res, { pathname: '/api/skills/toggle' }, true, {});
+    req.emit('data', Buffer.from(bodyStr));
+    req.emit('end');
+    return done;
+  }
+  function mkSkill(dir, name, desc) {
+    const d = join(PROJ, '.claude', dir, name);
+    mkdirSync(d, { recursive: true });
+    writeFileSync(join(d, 'SKILL.md'), `---\ndescription: ${desc}\n---\n`);
+    return d;
+  }
+
+  it('!isLocal → 403 Loopback only（不可逆删除不暴露局域网）', async () => {
+    const out = await postDelete(JSON.stringify({ source: 'project', name: 'whatever', enabled: true }), false);
+    assert.equal(out.status, 403);
+    assert.equal(out.data.error, 'Loopback only');
+  });
+
+  it('删除已禁用项 → 200 + 目录被永久移除', async () => {
+    const d = mkSkill('skills-skip', 'route-del-off', 'x');
+    const out = await postDelete(JSON.stringify({ source: 'project', name: 'route-del-off', enabled: false }));
+    assert.equal(out.status, 200);
+    assert.equal(out.data.ok, true);
+    assert.equal(existsSync(d), false);
+  });
+
+  it('不存在 → 404 NOT_FOUND', async () => {
+    const out = await postDelete(JSON.stringify({ source: 'project', name: 'route-del-absent', enabled: true }));
+    assert.equal(out.status, 404);
+    assert.equal(out.data.code, 'NOT_FOUND');
+  });
+
+  it('非法 source（builtin）→ 400 INVALID_SOURCE', async () => {
+    const out = await postDelete(JSON.stringify({ source: 'builtin', name: 'simplify', enabled: true }));
+    assert.equal(out.status, 400);
+    assert.equal(out.data.code, 'INVALID_SOURCE');
+  });
+
+  it('toggle 同名在 skills/ 与 skills-skip/ 各一份 → 409 DUPLICATE', async () => {
+    mkSkill('skills', 'route-dup-tog', 'a');
+    mkSkill('skills-skip', 'route-dup-tog', 'b');
+    const out = await postToggle(JSON.stringify({ source: 'project', name: 'route-dup-tog', enable: false }));
+    assert.equal(out.status, 409);
+    assert.equal(out.data.code, 'DUPLICATE');
+  });
+});

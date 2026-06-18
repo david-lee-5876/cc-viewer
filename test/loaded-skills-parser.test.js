@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { parseLoadedSkills } from '../src/utils/skillsParser.js';
+import { parseLoadedSkills, skillKey, skillOrderKey, sortSkillsDefault } from '../src/utils/skillsParser.js';
 
 describe('parseLoadedSkills', () => {
   it('returns [] when header sentence is missing', () => {
@@ -111,5 +111,64 @@ describe('parseLoadedSkills', () => {
     assert.equal(res[3].name, 'plugin:skill-creator:skill-creator');
     assert.equal(res[3].description, 'Create new skills');
     assert.equal(res[4].name, 'init');
+  });
+});
+
+describe('skillKey — 含 path 的去重标识', () => {
+  it('有 path 时返回 path —— 同名重复两份 path 不同 → key 不同（不串台）', () => {
+    const enabled = { source: 'project', name: 'foo', enabled: true, path: '/p/.claude/skills/foo' };
+    const disabled = { source: 'project', name: 'foo', enabled: false, path: '/p/.claude/skills-skip/foo' };
+    assert.equal(skillKey(enabled), '/p/.claude/skills/foo');
+    assert.notEqual(skillKey(enabled), skillKey(disabled)); // 重复对两行 key 各异
+  });
+
+  it('无 path（builtin）回落 source-name', () => {
+    assert.equal(skillKey({ source: 'builtin', name: 'simplify', path: null }), 'builtin-simplify');
+  });
+});
+
+describe('skillOrderKey — toggle 稳定标识', () => {
+  it('只取 source+name，开关（enabled / path 变化）不影响 key', () => {
+    const enabled = { source: 'project', name: 'foo', enabled: true, path: '/p/.claude/skills/foo' };
+    const disabled = { source: 'project', name: 'foo', enabled: false, path: '/p/.claude/skills-skip/foo' };
+    assert.equal(skillOrderKey(enabled), skillOrderKey(disabled)); // 同一 skill 开/关 key 不变 → 保位
+    assert.equal(skillOrderKey(enabled), 'project-foo');
+  });
+
+  it('不同 scope 同名 key 不同', () => {
+    assert.notEqual(
+      skillOrderKey({ source: 'user', name: 'foo' }),
+      skillOrderKey({ source: 'project', name: 'foo' }),
+    );
+  });
+});
+
+describe('sortSkillsDefault — 默认排序（项目级优先于用户级）', () => {
+  it('project 排在 user 之前；同源按名字确定性排序', () => {
+    const input = [
+      { source: 'user', name: 'banana' },
+      { source: 'project', name: 'cherry' },
+      { source: 'user', name: 'apple' },
+      { source: 'project', name: 'avocado' },
+    ];
+    const out = sortSkillsDefault(input).map(s => `${s.source}/${s.name}`);
+    assert.deepEqual(out, ['project/avocado', 'project/cherry', 'user/apple', 'user/banana']);
+  });
+
+  it('plugin/builtin 排在 user 之后，且不改入参', () => {
+    const input = [
+      { source: 'builtin', name: 'z' },
+      { source: 'user', name: 'u' },
+      { source: 'plugin', name: 'p' },
+      { source: 'project', name: 'a' },
+    ];
+    const out = sortSkillsDefault(input).map(s => s.source);
+    assert.deepEqual(out, ['project', 'user', 'plugin', 'builtin']);
+    assert.equal(input[0].source, 'builtin'); // 原数组未被原地改动
+  });
+
+  it('非数组返回空数组', () => {
+    assert.deepEqual(sortSkillsDefault(null), []);
+    assert.deepEqual(sortSkillsDefault(undefined), []);
   });
 });

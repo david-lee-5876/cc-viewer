@@ -1,8 +1,8 @@
 // Skills routes (moved verbatim from server.js handleRequest).
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync, existsSync } from 'node:fs';
 import { join, resolve, sep, dirname } from 'node:path';
 import { getClaudeConfigDir } from '../../findcc.js';
-import { listSkills, moveSkill, validateSkillName } from '../lib/skills-api.js';
+import { listSkills, moveSkill, deleteSkill, validateSkillName } from '../lib/skills-api.js';
 
 async function skillsList(req, res) {
   try {
@@ -24,7 +24,7 @@ function skillsToggle(req, res) {
     try {
       const { source, name, enable } = JSON.parse(body);
       // 不加进程锁：moveSkill 里 existsSync 前置 + renameSync 原子性已能让并发
-      // toggle 落到合理分支（一个成功、另一个拿 SOURCE_MISSING 或 DEST_CONFLICT）；
+      // toggle 落到合理分支（一个成功、另一个拿 SOURCE_MISSING 或 DUPLICATE）；
       // 前端 toggling:Set 也已防同 tab 连点，两者叠加足够安全
       moveSkill({
         source, name, enable: !!enable,
@@ -35,7 +35,37 @@ function skillsToggle(req, res) {
     } catch (err) {
       const statusMap = {
         INVALID_NAME: 400, INVALID_SOURCE: 400, PATH_ESCAPE: 400, SYMLINK: 400,
-        SOURCE_MISSING: 404, DEST_CONFLICT: 409,
+        SOURCE_MISSING: 404, DUPLICATE: 409,
+      };
+      const status = statusMap[err?.code] || 500;
+      res.writeHead(status, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err?.message || 'internal_error', code: err?.code || 'unknown' }));
+    }
+  });
+}
+
+// Skill 永久删除 —— 把单个 skill 文件夹从 skills/ 或 skills-skip/ 彻底删除（不可恢复）
+// loopback-only：不可逆 rmSync 不向局域网暴露（toggle 是可逆 move，这里更严）。
+function skillsDelete(req, res, parsedUrl, isLocal) {
+  if (!isLocal) {
+    res.writeHead(403, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Loopback only' }));
+    return;
+  }
+  let body = '';
+  req.on('data', chunk => { body += chunk; if (body.length > 4096) req.destroy(); });
+  req.on('end', async () => {
+    try {
+      const { source, name, enabled } = JSON.parse(body);
+      deleteSkill({
+        source, name, enabled: !!enabled,
+        projectDir: process.env.CCV_PROJECT_DIR || process.cwd(),
+      });
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true }));
+    } catch (err) {
+      const statusMap = {
+        INVALID_NAME: 400, INVALID_SOURCE: 400, PATH_ESCAPE: 400, SYMLINK: 400, NOT_FOUND: 404,
       };
       const status = statusMap[err?.code] || 500;
       res.writeHead(status, { 'Content-Type': 'application/json' });
@@ -188,6 +218,12 @@ export async function parseSkillUpload(buf, boundary, windowsReservedRe) {
 export function writeSkillFiles(skillsRoot, skillName, files) {
   mkdirSync(skillsRoot, { recursive: true });
   const targetDir = join(skillsRoot, skillName);
+  // 根因防护：同名 skill 若已被禁用（住在兄弟 skills-skip/ 里），import 不能再往 skills/ 写一份，
+  // 否则启用/禁用目录各留一份 → 之后开关必然撞 DUPLICATE。与 moveSkill 的 skip 目录算法一致
+  // （<base>/skills 的兄弟即 <base>/skills-skip），对用户级与 IM 级 skillsRoot 都成立。
+  if (existsSync(join(dirname(skillsRoot), 'skills-skip', skillName))) {
+    throw Object.assign(new Error(`Skill already exists (disabled): ${skillName}`), { status: 409, code: 'EXISTS' });
+  }
   // 原子创建：不带 recursive 让 mkdir 在已存在时直接抛 EEXIST，消除 TOCTOU 竞争窗口。
   try {
     mkdirSync(targetDir);
@@ -272,5 +308,6 @@ function skillsImport(req, res, parsedUrl, isLocal, deps) {
 export const skillsRoutes = [
   { method: 'GET', match: 'exact', path: '/api/skills', handler: skillsList },
   { method: 'POST', match: 'exact', path: '/api/skills/toggle', handler: skillsToggle },
+  { method: 'POST', match: 'exact', path: '/api/skills/delete', handler: skillsDelete },
   { method: 'POST', match: 'exact', path: '/api/skills/import', handler: skillsImport },
 ];

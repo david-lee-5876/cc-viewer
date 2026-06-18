@@ -99,6 +99,7 @@ Your final plan must include the following elements:
 First run `git diff --quiet && git diff --cached --quiet` (or equivalent) to detect whether the working tree actually has non-trivial changes; if there are no real changes (or only whitespace/comment-only edits), skip the UltraReview step.
 Otherwise, if the project is managed with Git:
 Initiate a team (`TeamCreate`), dynamically allocating the number of teammates based on task complexity (5 is recommended);
+If the `TeamCreate` tool is unavailable, spawn teammates directly with the `Agent` tool (note: as teammates, not plain subagents);
 Task: Conduct a Code Review of the current git changes from multiple perspectives;
 Pre-requisites:
 - The git repository may be located in a subdirectory of the current directory; prefer `git rev-parse --show-toplevel` (fall back to recursive lookup) before proceeding;
@@ -115,6 +116,7 @@ Workflow:
 - Distill specific, actionable modification suggestions and annotate them with priority levels (P0/P1/P2/P3);
 - Upon completion, adopt P0 items, and selectively adopt P1 items when they are concrete and low-risk; defer P2/P3 to backlog;
 - After execution is complete, close the team (`TeamDelete`);
+- If the `TeamDelete` tool is unavailable, notify each teammate to exit individually;
 </system-reminder></textarea>
 
 ### 调研专家（researchExpert）

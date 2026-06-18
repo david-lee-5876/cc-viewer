@@ -16,7 +16,7 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import './_shims/register.mjs';
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -326,5 +326,40 @@ describe('server/routes/im.js 分支补齐', { concurrency: false }, () => {
     const route = imRoutes.find((r) => r.predicate('/api/im/feishu/skills/import', 'POST'));
     const r = await call(route, { pathname: '/api/im/feishu/skills/import', isLocal: false, deps: { WINDOWS_RESERVED_NAMES: /^$/, im: {} } });
     assert.equal(r.status, 403);
+  });
+
+  // ── imSkillsDelete: notFound + loopbackOnly + 坏 JSON + NOT_FOUND + 成功删除 ──
+  it('POST skills/delete：未知平台 → 404', async () => {
+    const route = imRoutes.find((r) => r.predicate('/api/im/feishu/skills/delete', 'POST'));
+    const r = await call(route, { pathname: '/api/im/telegram/skills/delete', body: { name: 'x', enabled: true }, deps: { MAX_POST_BODY: 1e6, im: {} } });
+    assert.equal(r.status, 404);
+  });
+  it('POST skills/delete：非本机 → 403（不可逆删除不暴露局域网）', async () => {
+    const route = imRoutes.find((r) => r.predicate('/api/im/feishu/skills/delete', 'POST'));
+    const r = await call(route, { pathname: '/api/im/feishu/skills/delete', body: { name: 'x', enabled: true }, isLocal: false, deps: { MAX_POST_BODY: 1e6, im: {} } });
+    assert.equal(r.status, 403);
+  });
+  it('POST skills/delete：坏 JSON → 400 Invalid JSON', async () => {
+    const route = imRoutes.find((r) => r.predicate('/api/im/feishu/skills/delete', 'POST'));
+    const r = await call(route, { pathname: '/api/im/feishu/skills/delete', body: '{broken', deps: { MAX_POST_BODY: 1e6, im: {} } });
+    assert.equal(r.status, 400);
+    assert.match(r.payload, /Invalid JSON/);
+  });
+  it('POST skills/delete：不存在 → 404 NOT_FOUND', async () => {
+    const route = imRoutes.find((r) => r.predicate('/api/im/dingtalk/skills/delete', 'POST'));
+    const r = await call(route, { pathname: '/api/im/dingtalk/skills/delete', body: { name: 'im-del-absent', enabled: true }, isLocal: true, deps: { MAX_POST_BODY: 1e6, im: {} } });
+    assert.equal(r.status, 404);
+    assert.equal(r.json().code, 'NOT_FOUND');
+  });
+  it('POST skills/delete：删除已禁用项 → 200 + 目录被永久移除', async () => {
+    const route = imRoutes.find((r) => r.predicate('/api/im/dingtalk/skills/delete', 'POST'));
+    const { imDir } = await import('../server/lib/im-lock.js');
+    const dir = join(imDir('dingtalk'), '.claude', 'skills-skip', 'im-del-off');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'SKILL.md'), '---\ndescription: x\n---\n');
+    const r = await call(route, { pathname: '/api/im/dingtalk/skills/delete', body: { name: 'im-del-off', enabled: false }, isLocal: true, deps: { MAX_POST_BODY: 1e6, im: {} } });
+    assert.equal(r.status, 200);
+    assert.equal(r.json().ok, true);
+    assert.equal(existsSync(dir), false);
   });
 });

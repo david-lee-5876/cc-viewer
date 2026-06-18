@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.6.317 (2026-06-18)
+
+- feat(skills): Skill 管理弹窗支持永久删除单个 skill（二次确认 + 删除中转圈防重入；loopback-only 不暴露局域网，symlink 拒删 + realpath 越界防护）
+- feat(skills): 同名 skill 同时存在于启用与禁用目录时标 ⚠ 重复徽标、开关报 DUPLICATE、import 阻止再写入，删除可化解；列表默认排序（项目级优先于用户级，同源按名）
+- refactor(skills): 开关/删除逻辑抽到共享 skillModalController（AppHeader / Mobile 共用，消除镜像漂移）；ImSkillsModal 删/切后静默重拉清除残留 ⚠ 徽标
+- test(skills): 补 deleteSkill / 重复态 / 删除路由 / skillModalController 单元测试
+- docs(concept): 新增 ToolSearch 工具说明文档（18 语言）并接入帮助索引
+- chore(ultraplan): UltraReview 预置文案补 TeamCreate / TeamDelete 不可用时回退说明（改用 Agent 起 teammate / 逐个通知退出，18 语言 + 模板源同步）
+
 ## 1.6.316 (2026-06-18)
 
 - feat(terminal): UltraPlan 工具栏按钮 hover / 打开态文字呈现彩虹流光 + 加粗

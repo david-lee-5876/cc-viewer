@@ -4,7 +4,8 @@ import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync, symlinkSync 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { validateSkillName, listSkills, moveSkill, readEnabledPluginInstalls } from '../server/lib/skills-api.js';
+import { validateSkillName, listSkills, moveSkill, deleteSkill, readEnabledPluginInstalls } from '../server/lib/skills-api.js';
+import { writeSkillFiles } from '../server/routes/skills.js';
 
 describe('validateSkillName', () => {
   it('accepts simple alphanumeric + hyphen', () => {
@@ -135,13 +136,119 @@ describe('listSkills + moveSkill', () => {
     assert.equal(existsSync(join(tmpProject, '.claude', 'skills-skip', 'proj-bar')), false);
   });
 
-  it('moveSkill throws DEST_CONFLICT when destination already exists', () => {
-    // 先在 skills-skip 里放一个同名遗留
+  it('moveSkill throws DUPLICATE when same name exists in both skills/ and skills-skip/', () => {
+    // 同名 skill 在 skills/（beforeEach 建的 proj-bar）与 skills-skip/ 各有一份 → 重复态
     mkdirSync(join(tmpProject, '.claude', 'skills-skip', 'proj-bar'), { recursive: true });
+    // 禁用向（skills/ → skills-skip/）撞上已存在的禁用副本
     assert.throws(
       () => moveSkill({ source: 'project', name: 'proj-bar', enable: false, projectDir: tmpProject, homeDir: tmpHome }),
-      (err) => err.code === 'DEST_CONFLICT',
+      (err) => err.code === 'DUPLICATE',
     );
+    // 启用向（skills-skip/ → skills/）撞上已存在的启用副本，同样 DUPLICATE
+    assert.throws(
+      () => moveSkill({ source: 'project', name: 'proj-bar', enable: true, projectDir: tmpProject, homeDir: tmpHome }),
+      (err) => err.code === 'DUPLICATE',
+    );
+  });
+
+  it('listSkills marks duplicate=true for same name in both skills/ and skills-skip/', () => {
+    // proj-bar 在 skills/（beforeEach），再在 skills-skip/ 放一份同名 → 两条都应被标 duplicate
+    mkdirSync(join(tmpProject, '.claude', 'skills-skip', 'proj-bar'), { recursive: true });
+    writeFileSync(join(tmpProject, '.claude', 'skills-skip', 'proj-bar', 'SKILL.md'),
+      '---\ndescription: disabled dup\n---\n');
+    const list = listSkills({ projectDir: tmpProject, homeDir: tmpHome });
+    const bars = list.filter(s => s.source === 'project' && s.name === 'proj-bar');
+    assert.equal(bars.length, 2);
+    assert.ok(bars.every(s => s.duplicate === true));
+    // 非重复条目不应带 duplicate 标记
+    const foo = list.find(s => s.source === 'user' && s.name === 'user-foo');
+    assert.ok(foo);
+    assert.equal(foo.duplicate, undefined);
+  });
+
+  it('listSkills does NOT mark cross-scope same-name as duplicate (user vs project 不同 scope)', () => {
+    // user 与 project 各有一个同名 same-foo（均启用）——scope 不同，不算重复
+    mkdirSync(join(tmpHome, '.claude', 'skills', 'same-foo'), { recursive: true });
+    writeFileSync(join(tmpHome, '.claude', 'skills', 'same-foo', 'SKILL.md'), '---\ndescription: u\n---\n');
+    mkdirSync(join(tmpProject, '.claude', 'skills', 'same-foo'), { recursive: true });
+    writeFileSync(join(tmpProject, '.claude', 'skills', 'same-foo', 'SKILL.md'), '---\ndescription: p\n---\n');
+    const list = listSkills({ projectDir: tmpProject, homeDir: tmpHome });
+    const sameNames = list.filter(s => s.name === 'same-foo');
+    assert.equal(sameNames.length, 2);
+    assert.ok(sameNames.every(s => !s.duplicate), 'cross-scope 同名不应被标 duplicate');
+  });
+
+  it('deleteSkill removes an enabled skill (skills/) permanently', () => {
+    deleteSkill({ source: 'project', name: 'proj-bar', enabled: true, projectDir: tmpProject, homeDir: tmpHome });
+    assert.equal(existsSync(join(tmpProject, '.claude', 'skills', 'proj-bar')), false);
+  });
+
+  it('deleteSkill removes a disabled skill (skills-skip/) permanently', () => {
+    mkdirSync(join(tmpProject, '.claude', 'skills-skip', 'proj-off'), { recursive: true });
+    writeFileSync(join(tmpProject, '.claude', 'skills-skip', 'proj-off', 'SKILL.md'), '---\ndescription: off\n---\n');
+    deleteSkill({ source: 'project', name: 'proj-off', enabled: false, projectDir: tmpProject, homeDir: tmpHome });
+    assert.equal(existsSync(join(tmpProject, '.claude', 'skills-skip', 'proj-off')), false);
+  });
+
+  it('deleteSkill tolerates a stale enabled flag (deletes the only existing copy)', () => {
+    // proj-bar 只在 skills/（启用），客户端误传 enabled:false → 仍删掉那唯一一份
+    deleteSkill({ source: 'project', name: 'proj-bar', enabled: false, projectDir: tmpProject, homeDir: tmpHome });
+    assert.equal(existsSync(join(tmpProject, '.claude', 'skills', 'proj-bar')), false);
+  });
+
+  it('deleteSkill on duplicate state removes only the clicked copy (enabled:true → skills/)', () => {
+    mkdirSync(join(tmpProject, '.claude', 'skills-skip', 'proj-bar'), { recursive: true });
+    writeFileSync(join(tmpProject, '.claude', 'skills-skip', 'proj-bar', 'SKILL.md'), '---\ndescription: dup\n---\n');
+    deleteSkill({ source: 'project', name: 'proj-bar', enabled: true, projectDir: tmpProject, homeDir: tmpHome });
+    assert.equal(existsSync(join(tmpProject, '.claude', 'skills', 'proj-bar')), false);
+    assert.equal(existsSync(join(tmpProject, '.claude', 'skills-skip', 'proj-bar', 'SKILL.md')), true);
+  });
+
+  it('deleteSkill throws NOT_FOUND when neither dir has the skill', () => {
+    assert.throws(
+      () => deleteSkill({ source: 'project', name: 'ghost', enabled: true, projectDir: tmpProject, homeDir: tmpHome }),
+      (err) => err.code === 'NOT_FOUND',
+    );
+  });
+
+  it('deleteSkill throws INVALID_NAME / INVALID_SOURCE', () => {
+    assert.throws(
+      () => deleteSkill({ source: 'project', name: '..', enabled: true, projectDir: tmpProject, homeDir: tmpHome }),
+      (err) => err.code === 'INVALID_NAME',
+    );
+    assert.throws(
+      () => deleteSkill({ source: 'builtin', name: 'simplify', enabled: true, projectDir: tmpProject, homeDir: tmpHome }),
+      (err) => err.code === 'INVALID_SOURCE',
+    );
+  });
+
+  it('deleteSkill rejects a symlink target (SYMLINK)', () => {
+    const target = join(tmpProject, '.claude', 'skills', 'proj-bar');
+    rmSync(target, { recursive: true, force: true });
+    symlinkSync('/tmp', target);
+    assert.throws(
+      () => deleteSkill({ source: 'project', name: 'proj-bar', enabled: true, projectDir: tmpProject, homeDir: tmpHome }),
+      (err) => err.code === 'SYMLINK',
+    );
+  });
+
+  it('deleteSkill PATH_ESCAPE when skills/ is a symlink pointing outside base (不越权删除)', () => {
+    const escapeProject = mkdtempSync(join(tmpdir(), 'ccv-escape-'));
+    const outsideDir = mkdtempSync(join(tmpdir(), 'ccv-outside-'));
+    mkdirSync(join(escapeProject, '.claude'), { recursive: true });
+    symlinkSync(outsideDir, join(escapeProject, '.claude', 'skills'));
+    mkdirSync(join(outsideDir, 'victim'));
+    writeFileSync(join(outsideDir, 'victim', 'SKILL.md'), '---\ndescription: x\n---\n');
+    try {
+      assert.throws(
+        () => deleteSkill({ source: 'project', name: 'victim', enabled: true, projectDir: escapeProject, homeDir: tmpHome }),
+        (err) => err.code === 'PATH_ESCAPE',
+      );
+      assert.equal(existsSync(join(outsideDir, 'victim', 'SKILL.md')), true); // 越权目标未被删
+    } finally {
+      rmSync(escapeProject, { recursive: true, force: true });
+      rmSync(outsideDir, { recursive: true, force: true });
+    }
   });
 
   it('moveSkill throws SOURCE_MISSING when source does not exist', () => {
@@ -398,5 +505,29 @@ describe('readEnabledPluginInstalls + plugin skill filtering', () => {
     });
     const list = listSkills({ projectDir: tmpProject, homeDir: tmpHome });
     assert.equal(list.filter(s => s.source === 'plugin').length, 0);
+  });
+});
+
+describe('writeSkillFiles — 根因防护：禁用态同名阻止再导入', () => {
+  let tmpHome;
+  beforeEach(() => { tmpHome = mkdtempSync(join(tmpdir(), 'ccv-home-')); });
+  afterEach(() => { try { rmSync(tmpHome, { recursive: true, force: true }); } catch {} });
+
+  it('rejects import when same name already lives in sibling skills-skip/', () => {
+    const skillsRoot = join(tmpHome, '.claude', 'skills');
+    // 禁用态：skills-skip/dup 已存在（import 只查 skills/ 会漏掉它）
+    mkdirSync(join(tmpHome, '.claude', 'skills-skip', 'dup'), { recursive: true });
+    assert.throws(
+      () => writeSkillFiles(skillsRoot, 'dup', [{ relPath: 'SKILL.md', data: Buffer.from('---\ndescription: x\n---\n') }]),
+      (err) => err.code === 'EXISTS' && err.status === 409,
+    );
+    // 不应把第二份写进 skills/，否则之后开关必撞 DUPLICATE
+    assert.equal(existsSync(join(skillsRoot, 'dup')), false);
+  });
+
+  it('writes normally when no same-named skill exists in either dir', () => {
+    const skillsRoot = join(tmpHome, '.claude', 'skills');
+    writeSkillFiles(skillsRoot, 'fresh', [{ relPath: 'SKILL.md', data: Buffer.from('---\ndescription: y\n---\n') }]);
+    assert.equal(existsSync(join(skillsRoot, 'fresh', 'SKILL.md')), true);
   });
 });

@@ -1,7 +1,10 @@
 import React from 'react';
 import { Modal, Switch, Spin, Tooltip } from 'antd';
+import { DeleteOutlined, LoadingOutlined } from '@ant-design/icons';
 import { t } from '../../i18n';
 import { isMobile } from '../../env';
+import { skillKey, skillOrderKey } from '../../utils/skillsParser';
+import ConfirmRemoveButton from '../common/ConfirmRemoveButton';
 import styles from './SkillsManagerModal.module.css';
 import headerStyles from '../common/sharedChrome.module.css';
 
@@ -32,6 +35,7 @@ export default function SkillsManagerModal({
   skills = [],
   toggling,
   onToggle,
+  onDelete,
 }) {
   const togglingSet = toggling instanceof Set ? toggling : new Set();
   const userOrProject = skills.filter(s => s.source === 'user' || s.source === 'project');
@@ -60,20 +64,40 @@ export default function SkillsManagerModal({
           {/* 只把 user / project（可切换）放 card 列表；plugin + builtin 折叠到底部 chip 行 */}
           {userOrProject.length > 0 && (
             <div className={styles.skillsList}>
-              {userOrProject.map((s, i) => {
-                const key = `${s.source}-${s.name}`;
+              {userOrProject.map((s) => {
+                // skillKey 含 path：togglingSet 查找用——同名重复两份 path 不同，点一个不会两个一起转圈。
+                const key = skillKey(s);
                 const isToggling = togglingSet.has(key);
+                // React 渲染 key 用 toggle 稳定的 skillOrderKey（开关后整卡片不 remount/不闪烁，配合 orderMap 原地保位）。
+                // 仅「重复态」两行会撞同名 → enabled 后缀消歧（重复行开关被服务端 DUPLICATE 挡住、状态不变，后缀稳定）。
+                const rowKey = s.duplicate ? `${skillOrderKey(s)}::${s.enabled ? 'on' : 'off'}` : skillOrderKey(s);
                 return (
-                  <div key={`${key}-${i}`} className={`${styles.skillCard} ${!s.enabled ? styles.skillCardDisabled : ''}`}>
+                  <div key={rowKey} className={`${styles.skillCard} ${!s.enabled ? styles.skillCardDisabled : ''}`}>
                     <div className={styles.skillCardHeader}>
                       <div className={styles.skillCardTitleRow}>
                         <span className={`${styles.skillSourceBadge} ${styles['skillSource_' + s.source]}`}>
                           {t('ui.skillSource.' + s.source)}
                         </span>
                         <div className={styles.skillCardName}>{s.name}</div>
+                        {s.duplicate && (
+                          <Tooltip title={t('ui.skillDuplicateBadge')}>
+                            <span className={styles.skillDuplicateBadge}>⚠</span>
+                          </Tooltip>
+                        )}
                       </div>
                       <div className={styles.skillCardActions}>
                         <Switch size="small" checked={s.enabled} loading={isToggling} onChange={() => onToggle && onToggle(s)} />
+                        {onDelete && (
+                          <ConfirmRemoveButton
+                            title={t('ui.skillDeleteConfirm', { name: s.name })}
+                            ariaLabel={t('ui.skillDeleteConfirm', { name: s.name })}
+                            onConfirm={() => onDelete(s)}
+                            className={styles.skillDeleteBtn}
+                            disabled={isToggling}
+                          >
+                            {isToggling ? <LoadingOutlined /> : <DeleteOutlined />}
+                          </ConfirmRemoveButton>
+                        )}
                       </div>
                     </div>
                     {s.description && <div className={styles.skillCardDesc}>{s.description}</div>}

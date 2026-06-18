@@ -9,6 +9,8 @@ import { formatTokenCount, computeTokenStats, computeCacheRebuildStats, computeT
 import { PERM_AUTO_APPROVE_OPTIONS, PLAN_AUTO_APPROVE_OPTIONS, autoApproveSelectOptions } from '../../utils/autoApproveOptions';
 import { isSystemText, classifyUserContent, isMainAgent } from '../../utils/contentFilter';
 import { parseImOrigin } from '../../utils/imOrigin';
+import { sortSkillsDefault } from '../../utils/skillsParser';
+import { handleSkillToggle, handleSkillDelete } from '../../utils/skillModalController';
 import { PINNED_KEY, parsePinned, serializePinned, togglePinned } from '../../utils/pinnedMenu';
 import { classifyRequest } from '../../utils/requestType';
 import { resolveTeammateNames } from '../../utils/contentFilter';
@@ -2189,7 +2191,8 @@ class AppHeader extends React.Component {
       _skillsModal: {
         open: true,
         loading: needFetch,
-        skills: Array.isArray(cached) ? cached : [],
+        // 默认排序只在「打开面板」时套用（项目级优先于用户级）；开关期间不重排，避免列表抖动
+        skills: Array.isArray(cached) ? sortSkillsDefault(cached) : [],
         error: null,
         toggling: prev._skillsModal?.toggling || new Set(),
       },
@@ -2200,94 +2203,17 @@ class AppHeader extends React.Component {
         _skillsModal: {
           ...prev._skillsModal,
           loading: false,
-          skills: result.ok ? result.skills : [],
+          skills: result.ok ? sortSkillsDefault(result.skills) : [],
           error: result.ok ? null : result.reason,
         },
       }));
     }
   };
 
-  handleToggleSkill = async (skill) => {
-    const key = `${skill.source}-${skill.name}`;
-    if (this.state._skillsModal?.toggling?.has(key)) return;
-    const enable = !skill.enabled;
-    // 乐观更新：先翻 Switch 让视觉立刻响应；请求失败再回滚
-    const flipEnabled = (target) => (s) =>
-      (s.source === skill.source && s.name === skill.name) ? { ...s, enabled: target } : s;
-    this.setState(prev => {
-      const next = new Set(prev._skillsModal.toggling); next.add(key);
-      return {
-        _skillsModal: {
-          ...prev._skillsModal,
-          toggling: next,
-          skills: prev._skillsModal.skills.map(flipEnabled(enable)),
-        },
-      };
-    });
-    try {
-      const r = await fetch(apiUrl('/api/skills/toggle'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ source: skill.source, name: skill.name, enable }),
-      });
-      const data = await r.json();
-      if (!r.ok) {
-        // 回滚乐观更新
-        this.setState(prev => ({
-          _skillsModal: {
-            ...prev._skillsModal,
-            skills: prev._skillsModal.skills.map(flipEnabled(!enable)),
-          },
-        }));
-        if (data.code === 'DEST_CONFLICT') {
-          message.error(t('ui.skillToggleConflict', { name: skill.name }));
-        } else {
-          message.error(t('ui.skillToggleFailed', { reason: data.error || 'unknown' }));
-        }
-        return;
-      }
-      // 切换成功不弹 toast：Switch 状态本身已反馈，再加 toast 显得吵
-      // 乐观翻 _fsSkills 里这条的 enabled —— 如果后面 reloadFsSkills 失败，chip 也能立即反映用户动作，
-      // 不会退化到历史解析让用户以为操作没生效。reload 成功会用权威数据覆盖。
-      this.setState(prev => ({
-        _fsSkills: Array.isArray(prev._fsSkills)
-          ? prev._fsSkills.map(s => (s.source === skill.source && s.name === skill.name) ? { ...s, enabled: enable } : s)
-          : prev._fsSkills,
-      }));
-      // 重拉让 popover chip 和管理弹窗用权威数据一次性对齐。拉失败保留乐观值。
-      // 关键：保持当前 modal 显示顺序，避免服务器返回顺序变化时用户看到 card 跳来跳去；
-      // 新增的 entries（modal 之前没见过的）追加到末尾。
-      const result = await this.reloadFsSkills();
-      if (result.ok) {
-        this.setState(prev => {
-          const orderMap = new Map(prev._skillsModal.skills.map((s, i) => [`${s.source}-${s.name}`, i]));
-          const merged = [...result.skills].sort((a, b) => {
-            const ai = orderMap.get(`${a.source}-${a.name}`);
-            const bi = orderMap.get(`${b.source}-${b.name}`);
-            if (ai === undefined && bi === undefined) return 0;
-            if (ai === undefined) return 1;
-            if (bi === undefined) return -1;
-            return ai - bi;
-          });
-          return { _skillsModal: { ...prev._skillsModal, skills: merged } };
-        });
-      }
-    } catch (e) {
-      // 网络异常也回滚
-      this.setState(prev => ({
-        _skillsModal: {
-          ...prev._skillsModal,
-          skills: prev._skillsModal.skills.map(flipEnabled(!enable)),
-        },
-      }));
-      message.error(t('ui.skillToggleFailed', { reason: e.message }));
-    } finally {
-      this.setState(prev => {
-        const next = new Set(prev._skillsModal.toggling); next.delete(key);
-        return { _skillsModal: { ...prev._skillsModal, toggling: next } };
-      });
-    }
-  };
+  // 开关 / 永久删除逻辑抽到 src/utils/skillModalController.js（AppHeader 与 Mobile 共用，避免镜像漂移）
+  handleToggleSkill = (skill) => handleSkillToggle(this, skill);
+
+  handleDeleteSkill = (skill) => handleSkillDelete(this, skill);
 
   renderSkillsManagerModal() {
     const modal = this.state._skillsModal || {};
@@ -2299,6 +2225,7 @@ class AppHeader extends React.Component {
         skills={modal.skills || []}
         toggling={modal.toggling}
         onToggle={(s) => this.handleToggleSkill(s)}
+        onDelete={(s) => this.handleDeleteSkill(s)}
         onClose={() => this.setState(prev => ({ _skillsModal: { ...prev._skillsModal, open: false } }))}
       />
     );

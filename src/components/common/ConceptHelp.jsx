@@ -8,7 +8,7 @@ import styles from './ConceptHelp.module.css';
 
 const KNOWN_DOCS = new Set([
   'Tool-Bash', 'Tool-Read', 'Tool-Edit', 'Tool-Write', 'Tool-Glob', 'Tool-Grep',
-  'Tool-NotebookEdit', 'Tool-WebFetch', 'Tool-WebSearch',
+  'Tool-NotebookEdit', 'Tool-WebFetch', 'Tool-WebSearch', 'Tool-ToolSearch',
   'Tool-Agent', 'Tool-TaskOutput', 'Tool-TaskStop',
   'Tool-TaskCreate', 'Tool-TaskGet', 'Tool-TaskUpdate', 'Tool-TaskList',
   'Tool-TeamCreate', 'Tool-TeamDelete', 'Tool-SendMessage',

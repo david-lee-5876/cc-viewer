@@ -161,7 +161,83 @@ export function listSkills({ projectDir = process.cwd(), homeDir = homedir() } =
   for (const name of BUILTIN_NAMES) {
     out.push({ name, source: 'builtin', enabled: true, path: null, description: null });
   }
+  // 标记「重复」：同一 scope 下同名 skill 同时出现在 skills/（启用）与 skills-skip/（禁用），
+  // 是一种不变量被破坏的状态（一个 skill 本应只在其一）。前端据此打警示徽标，切换时报 DUPLICATE。
+  // 只在可切换的 user/project 之间统计；plugin/builtin 不参与（带前缀/硬编码，天然不冲突）。
+  const dupGroups = new Map();
+  for (const s of out) {
+    if (s.source !== 'user' && s.source !== 'project') continue;
+    const k = `${s.source}/${s.name}`;
+    if (!dupGroups.has(k)) dupGroups.set(k, []);
+    dupGroups.get(k).push(s);
+  }
+  for (const group of dupGroups.values()) {
+    if (group.length > 1) for (const s of group) s.duplicate = true;
+  }
   return out;
+}
+
+// 永久删除：把 skill 文件夹从 skills/ 或 skills-skip/ 彻底 rmSync 删除（不可恢复）。
+// source 必须是 'user' 或 'project'（plugin/builtin 无 path、不在 base 内，由 INVALID_SOURCE 挡掉）。
+// 不盲信客户端 enabled（防 UI 状态过期误删）：先查双目录——只有一份直接删那份（忽略 stale enabled）；
+// 两份都在（重复态）才用 enabled 选中被点的那一份（既删对、又能顺手化解重复）；都没有 → NOT_FOUND。
+export function deleteSkill({ source, name, enabled, projectDir = process.cwd(), homeDir = homedir() }) {
+  if (!validateSkillName(name)) {
+    const err = new Error('invalid_skill_name');
+    err.code = 'INVALID_NAME';
+    throw err;
+  }
+  if (source !== 'user' && source !== 'project') {
+    const err = new Error('invalid_source');
+    err.code = 'INVALID_SOURCE';
+    throw err;
+  }
+
+  const base = source === 'user'
+    ? join(homeDir, '.claude')
+    : join(projectDir, '.claude');
+  const enabledTarget = join(base, 'skills', name);
+  const disabledTarget = join(base, 'skills-skip', name);
+  const enabledExists = existsSync(enabledTarget);
+  const disabledExists = existsSync(disabledTarget);
+
+  if (!enabledExists && !disabledExists) {
+    const err = new Error('skill_not_found');
+    err.code = 'NOT_FOUND';
+    throw err;
+  }
+  const target = (enabledExists && disabledExists)
+    ? (enabled ? enabledTarget : disabledTarget) // 重复态：删被点那一份
+    : (enabledExists ? enabledTarget : disabledTarget); // 单份：删唯一存在的那份
+
+  // 拒 symlink：target 叶子不能是符号链接，防把软链当 skill 删
+  try {
+    if (lstatSync(target).isSymbolicLink()) {
+      const err = new Error('symlink_rejected');
+      err.code = 'SYMLINK';
+      throw err;
+    }
+  } catch (e) {
+    if (e.code === 'SYMLINK') throw e;
+    // 其它 lstat 错误（如权限）让下面的 rmSync 暴露
+  }
+
+  // TOCTOU 加固（对齐 routes/files-fs.js deleteFile）：rmSync 前再 realpath，确认 target 真身
+  // 落在 base 之内，挡住「skills/ 被软链到 base 外 + 校验后再 swap」让 rmSync(recursive) 越权删除。
+  try {
+    const realBase = realpathSync(base);
+    const realTarget = realpathSync(target);
+    if (realTarget !== realBase && !realTarget.startsWith(realBase + sep)) {
+      const err = new Error('path_escape');
+      err.code = 'PATH_ESCAPE';
+      throw err;
+    }
+  } catch (e) {
+    if (e.code === 'PATH_ESCAPE') throw e;
+    // 其它 realpath 错误（如并发已删）让 rmSync force:true 静默收尾
+  }
+
+  rmSync(target, { recursive: true, force: true });
 }
 
 // 原子性 move：skill 在 skills/ 与 skills-skip/ 之间搬。
@@ -193,8 +269,10 @@ export function moveSkill({ source, name, enable, projectDir = process.cwd(), ho
     throw err;
   }
   if (existsSync(to)) {
-    const err = new Error('destination_exists');
-    err.code = 'DEST_CONFLICT';
+    // 走到这里 from 必然已存在（上面 SOURCE_MISSING 已过滤），即同名 skill 在 skills/ 与
+    // skills-skip/ 各有一份的「重复」态——切换无从消歧（移过去会撞上已存在的那份），明确报 DUPLICATE。
+    const err = new Error('duplicate_skill');
+    err.code = 'DUPLICATE';
     throw err;
   }
 

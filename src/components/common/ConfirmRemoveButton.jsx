@@ -15,13 +15,17 @@ export default function ConfirmRemoveButton({
   tag = 'button',
   children,
   onPopupOpenChange,
+  disabled = false,
 }) {
   const Tag = tag;
   const role = tag === 'button' ? undefined : 'button';
+  // tag='button' 时用原生 disabled；span 等非按钮标签靠 aria-disabled + click 守卫表达禁用态
+  const nativeDisabled = tag === 'button' ? disabled : undefined;
 
   if (isMobile) {
     const handleClick = (e) => {
       e.stopPropagation();
+      if (disabled) return;
       onPopupOpenChange?.(true);
       Modal.confirm({
         title,
@@ -39,6 +43,8 @@ export default function ConfirmRemoveButton({
         className={className}
         onClick={handleClick}
         aria-label={ariaLabel}
+        aria-disabled={disabled || undefined}
+        disabled={nativeDisabled}
         role={role}
       >
         {children}
@@ -52,6 +58,7 @@ export default function ConfirmRemoveButton({
       okText={t('ui.common.confirmYes')}
       cancelText={t('ui.common.confirmCancel')}
       okButtonProps={{ danger: true }}
+      disabled={disabled}
       onOpenChange={onPopupOpenChange}
       onConfirm={(e) => { e?.stopPropagation(); onConfirm(); }}
       onCancel={(e) => e?.stopPropagation()}
@@ -60,6 +67,8 @@ export default function ConfirmRemoveButton({
         className={className}
         onClick={(e) => e.stopPropagation()}
         aria-label={ariaLabel}
+        aria-disabled={disabled || undefined}
+        disabled={nativeDisabled}
         role={role}
       >
         {children}
