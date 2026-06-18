@@ -403,6 +403,25 @@
   border-color: var(--text-disabled);
 }
 
+/* 输入框聚焦时在 footer 中间显示的浅色粘贴提示（不显眼、可截断、不挡点击） */
+.ultraplanPasteHint {
+  flex: 1;
+  min-width: 0;
+  margin: 0 10px;
+  text-align: left;
+  font-size: 12px;
+  color: var(--text-disabled);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0;
+  transition: opacity 0.2s;
+  pointer-events: none;
+}
+.ultraplanPasteHintVisible {
+  opacity: 1;
+}
+
 /* fileList 在 inputBox 内,位于 textarea 卡片下方:
    - padding-top: 6px 给 textarea 卡片底边与 chip 之间留视觉呼吸;
    - 横向 padding 10px 与 textarea 内 padding-x 对齐,chip 起始对齐文本起始;

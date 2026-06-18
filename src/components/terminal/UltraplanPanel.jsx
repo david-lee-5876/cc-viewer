@@ -3,8 +3,9 @@
 // 完全受控：内容三态与全部行为经 props 注入；lightbox / confirming 留 host
 // （host 的 Popover onOpenChange 守卫必须同步读这两个状态，经 onPreviewImage /
 // onConfirmingChange 上报）；resize 拖拽逻辑内置（两入口共享 localStorage 尺寸记忆）。
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import { t } from '../../i18n';
+import { isMobile, isPad } from '../../env';
 import { apiUrl } from '../../utils/apiUrl';
 import { buildExpertList } from '../../utils/ultraplanExperts';
 import { calcResizedSize } from '../../utils/resizeCalc';
@@ -71,6 +72,8 @@ export default function UltraplanPanel({
 }) {
   const panelRef = useRef(null);
   const dragRef = useRef(null);
+  // 输入框聚焦时才在 footer 显示浅色粘贴提示（仅 iPad/PC，见下方 footer 渲染）
+  const [inputFocused, setInputFocused] = useState(false);
 
   // popover resize:左上 handle → 拖拽改 popover overlay 的 width/height。
   // 拖拽期直接改 .ant-popover-inner 的 inline style 不走 setState(避免高频 re-render);
@@ -240,6 +243,8 @@ export default function UltraplanPanel({
           onChange={(e) => onPromptChange(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && (prompt.trim() || files.length > 0)) { e.preventDefault(); onSend(); } }}
           onPaste={onPaste}
+          onFocus={() => setInputFocused(true)}
+          onBlur={() => setInputFocused(false)}
           placeholder={t('ui.ultraplan.placeholder')}
           /* rows={1} 让 CSS flex 完全控制高度,避免 rows*line-height 作 intrinsic baseline 干扰 grow */
           rows={1}
@@ -289,6 +294,11 @@ export default function UltraplanPanel({
       </div>
       <div className={styles.ultraplanFooter}>
         <button className={styles.ultraplanSendBtn} disabled={!prompt.trim() && files.length === 0} onClick={onSend}>{t('ui.ultraplan.send')}</button>
+        {!(isMobile && !isPad) && (
+          <span className={`${styles.ultraplanPasteHint}${inputFocused ? ` ${styles.ultraplanPasteHintVisible}` : ''}`}>
+            {t('ui.ultraplan.pasteImageHint')}
+          </span>
+        )}
         <button className={styles.ultraplanUploadBtn} onClick={onUpload}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>{t('ui.ultraplan.upload')}</button>
       </div>
       </div>

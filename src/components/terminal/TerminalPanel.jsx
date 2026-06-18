@@ -1734,9 +1734,9 @@ class TerminalPanel extends React.Component {
                   />
                 }
               >
-                <button className={styles.toolbarBtn} onClick={() => this.setState({ ultraplanOpen: true })} title={t('ui.ultraplan')}>
+                <button className={`${styles.toolbarBtn} ${this.state.ultraplanOpen ? styles.ultraToggleActive : ''}`} onClick={() => this.setState({ ultraplanOpen: true })} title={t('ui.ultraplan')}>
                   <UltraplanIcon />
-                  <span>UltraPlan</span>
+                  <span className={styles.ultraToggleLabel}>UltraPlan</span>
                 </button>
               </Popover>
             ) : (

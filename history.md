@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.6.316 (2026-06-18)
+
+- feat(terminal): UltraPlan 工具栏按钮 hover / 打开态文字呈现彩虹流光 + 加粗
+- feat(ultraplan): 输入框聚焦时 footer 显示浅色「可粘贴剪贴板图片」提示（仅 iPad/PC）
+- chore(i18n): UltraReview 预置文案适配——无 TeamCreate/TeamDelete 工具时改用 Agent 工具起 teammate / 逐个通知退出
+
 ## 1.6.315 (2026-06-18)
 
 - feat(network): Context 标签页 tools 区显示相对上一条 MainAgent 请求的 tools 变化——新增项绿色高亮、移除项追加只读占位（删除线），标题附 `+N/-N` 徽标；RequestList 时间线 tools 变化单独紫点标记

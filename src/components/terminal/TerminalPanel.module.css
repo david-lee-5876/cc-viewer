@@ -250,6 +250,51 @@
   height: 14px;
 }
 
+/* UltraPlan 工具栏按钮文字：hover / 打开态 Claude Code 同款彩虹流光 + 加粗 */
+@keyframes ultraToggleShimmer {
+  to { background-position: 200% center; }
+}
+
+/* 预留加粗后的宽度，避免 normal↔bold 切换时按钮宽度跳动：
+   inline-flex 列向，让隐藏的粗体 ::after 撑出该标签所需的最大宽度 */
+.ultraToggleLabel {
+  display: inline-flex;
+  flex-direction: column;
+}
+.ultraToggleLabel::after {
+  content: 'UltraPlan';
+  height: 0;
+  overflow: hidden;
+  visibility: hidden;
+  font-weight: 700;
+}
+
+.toolbarBtn:hover .ultraToggleLabel,
+.ultraToggleActive .ultraToggleLabel {
+  font-weight: 700;
+  /* --ultra-hi = 高光档：黑色模式用白、白色模式改黑（见下方 [data-theme=light] 覆盖） */
+  background: linear-gradient(90deg, #ff6b6b, #ffa94d, var(--ultra-hi, #fff), #51cf66, #4dabf7, #b197fc, #ff6b6b);
+  background-size: 200% auto;
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  animation: ultraToggleShimmer 2.4s linear infinite;
+}
+
+/* 浅色（白色）主题：黑色模式里那个白色高光在白底上几乎看不见，
+   仅把高光档由白改黑（其余彩虹色不变，size/clip/动画沿用上面规则） */
+:global([data-theme="light"]) .toolbarBtn:hover .ultraToggleLabel,
+:global([data-theme="light"]) .ultraToggleActive .ultraToggleLabel {
+  --ultra-hi: #000;
+}
+
+/* 尊重系统「减少动态效果」：保留彩虹与加粗，停掉流动动画 */
+@media (prefers-reduced-motion: reduce) {
+  .toolbarBtn:hover .ultraToggleLabel,
+  .ultraToggleActive .ultraToggleLabel { animation: none; }
+}
+
 .virtualKeybar {
   display: flex;
   gap: 6px;
