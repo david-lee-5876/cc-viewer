@@ -9,6 +9,7 @@ import assert from 'node:assert/strict';
 // ============================================================================
 
 const SUBAGENT_SYSTEM_RE = /command execution specialist|file search specialist|planning specialist|general-purpose agent|security monitor|performing a web search/i;
+const SUBAGENT_BILLING_RE = /cc_is_subagent=true\b/;
 const TEAMMATE_SYSTEM_RE = /running as an agent in a team|Agent Teammate Communication/i;
 
 function getSystemText(body) {
@@ -30,12 +31,14 @@ function isTeammate(req) {
 function isMainAgent(req) {
   if (!req) return false;
   if (isTeammate(req)) return false;
+  // cc_is_subagent=true ⇒ 子代理（cc 2.1.181+），早于 req.mainAgent 短路（与 contentFilter.js 源码同步）
+  if (SUBAGENT_BILLING_RE.test(getSystemText(req.body || {}))) return false;
   if (req.mainAgent) {
     const sysText = getSystemText(req.body || {});
     if (SUBAGENT_SYSTEM_RE.test(sysText)) return false;
     return true;
   }
-  return false; // simplified for test — full logic has additional checks
+  return false; // simplified for test — full logic has additional checks (轻量启发式等)
 }
 
 // From requestType.js — full implementation

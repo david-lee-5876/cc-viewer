@@ -6,11 +6,101 @@
 
 const SUBAGENT_SYSTEM_RE = /command execution specialist|file search specialist|planning specialist|general-purpose agent|security monitor|performing a web search/i;
 
+// cc_version 2.1.181+：CLI 在 billing header 显式标注子代理（cc_is_subagent=true）；真·主代理省略此字段（从不为 =false）。
+// 这类子代理继承完整 "You are Claude Code" prompt + Edit/Bash/Agent 工具，会误中轻量 MainAgent 启发式，故须显式排除。
+// 结尾 \b 锚定：仅匹配 `=true`（其后为 `;` / 空白 / 串尾），避免 `=truex` 之类误匹配。
+const SUBAGENT_BILLING_RE = /cc_is_subagent=true\b/;
+
 // Teammate 检测：system prompt 中包含 Agent Teammate Communication 标记（外部进程 teammate）
 const TEAMMATE_SYSTEM_RE = /running as an agent in a team|Agent Teammate Communication/i;
 
 // Native teammate 检测（同进程内 Agent 子代理），独立模块便于版本兼容
 import { isNativeTeammate, extractNativeTeammateName } from './teammateDetector';
+
+// ============== 跨会话 / teammate「协议通知」识别 ==============
+// harness 把跨会话 / teammate 通知作为 role=user 文本注入主会话。既有逻辑只认 <teammate-message>
+// 包裹形态与 "Another Claude session sent a message:" 前缀；这里补「裸协议 JSON」形态 + 新版 caveat 文案，
+// 统一归类为 teammate 状态气泡（非用户手输）。type 白名单与 ChatMessage 的 ui.teammate.${type} 渲染一致。
+export const INTER_SESSION_NOTIFICATION_TYPES = new Set([
+  'idle_notification', 'shutdown_request', 'shutdown_response',
+  'shutdown_approved', 'teammate_terminated',
+  'plan_approval_request', 'plan_approval_response',
+]);
+
+// harness 注入的「跨会话包裹文本」标记（英文固定）。
+const INTER_SESSION_LEAD_RE = /^Another Claude session sent a message:/i;
+// 尾部 caveat（新旧两种措辞）。刻意不用 /m：`(^|\n)` 提供行首锚定，`$` 表整串结尾——多行 caveat 会一并
+// 剥到空行 / 串尾，不会因 lazy + /m 只剥首行；行首锚定避免误伤用户正文中段引用此句。
+const INTER_SESSION_CAVEAT_RES = [
+  /(^|\n)This came from another Claude session[\s\S]*?(?=\n\n|$)/i,
+  /(^|\n)IMPORTANT: This is NOT from your user[\s\S]*?(?=\n\n|$)/i,
+];
+
+// 花括号配对扫描出顶层 {...} 候选 JSON 段（跳过字符串字面量内的花括号 / 转义），返回 { raw, start, end }
+// 区间，供调用方一次性区间拼接剔除（不逐个 replace，避免 O(n²)）。用配对而非 [^{}]* 正则以正确处理嵌套。
+function scanTopLevelJsonObjects(s) {
+  if (typeof s !== 'string' || s.indexOf('{') === -1) return [];
+  const out = [];
+  let depth = 0, start = -1, inStr = false, esc = false;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (ch === '\\') esc = true;
+      else if (ch === '"') inStr = false;
+      continue;
+    }
+    if (ch === '"') inStr = true;
+    else if (ch === '{') { if (depth === 0) start = i; depth++; }
+    else if (ch === '}' && depth > 0) { depth--; if (depth === 0 && start >= 0) { out.push({ raw: s.slice(start, i + 1), start, end: i + 1 }); start = -1; } }
+  }
+  return out;
+}
+
+// 识别 s 中的白名单协议通知 JSON：返回 { statuses:[{type,from}], rest }，rest = 剔除这些 JSON 后的剩余文本。
+// 单次扫描 + 区间拼接（O(n)）：避免对每个命中 JSON 做整串 replace 造成 O(n²)（评审 S1），同时统一原先
+// replace/split-join 两套剔除写法。非白名单 / 解析失败的 {...} 原样保留在 rest 中。
+function extractProtocolNotifications(s) {
+  const statuses = [];
+  let rest = '', cursor = 0;
+  for (const { raw, start, end } of scanTopLevelJsonObjects(s)) {
+    let j;
+    try { j = JSON.parse(raw); } catch { continue; }
+    if (j && typeof j.type === 'string' && INTER_SESSION_NOTIFICATION_TYPES.has(j.type)) {
+      statuses.push({ type: j.type, from: (typeof j.from === 'string' && j.from) ? j.from : null });
+      rest += s.slice(cursor, start);
+      cursor = end;
+    }
+  }
+  rest += s.slice(cursor);
+  return { statuses, rest };
+}
+
+// 解析「裸协议通知」文本块（不含 <teammate-message> 包裹——包裹形态由 classifyUserContent 主路径处理）。
+// 返回 { statuses:[{type,from}], rest } 或 null。必须带 harness 标记（前缀 / caveat）才认定为通知（见下）。
+export function parseInterSessionNotification(text) {
+  if (typeof text !== 'string') return null;
+  let body = text.trim();
+  if (!body) return null;
+  // 去 <teammate-message> 包裹，避免与 classifyUserContent 主路径重复计入
+  body = body.replace(/<teammate-message[\s\S]*?<\/teammate-message>/gi, '').trim();
+  if (!body) return null;
+
+  const hadLead = INTER_SESSION_LEAD_RE.test(body);
+  let work = hadLead ? body.replace(INTER_SESSION_LEAD_RE, '') : body;
+  let hadCaveat = false;
+  for (const cr of INTER_SESSION_CAVEAT_RES) {
+    if (cr.test(work)) { hadCaveat = true; work = work.replace(cr, ''); }
+  }
+  // 必须带 harness 标记（"Another Claude session…" 前缀 或 caveat 段）才认定为通知。真实跨会话通知一定
+  // 带其一（裸 <teammate-message> 包裹形态由 classifyUserContent 主路径单独处理）；据此，用户「整段粘贴一坨
+  // 协议形 JSON」绝不会被误判隐藏——彻底消除 over-filter 向量（评审 S2/F2，对齐用户「别过滤正常请求」诉求）。
+  if (!hadLead && !hadCaveat) return null;
+
+  const { statuses, rest } = extractProtocolNotifications(work);
+  if (statuses.length === 0) return null;
+  return { statuses, rest: rest.trim() };
+}
 
 /**
  * 提取请求体中的 system prompt 文本
@@ -75,6 +165,10 @@ function _isMainAgentImpl(req) {
 
   // Teammate 子进程的请求不是 MainAgent，避免污染主会话视图
   if (isTeammate(req)) return false;
+
+  // cc_is_subagent=true ⇒ 子代理，绝非 MainAgent（cc_version 2.1.181+）。须早于下方 req.mainAgent 短路，
+  // 以覆盖「已落盘旧日志」里被服务端标成 mainAgent=true 的记录（向后兼容：旧日志/真·主代理无此 token）。
+  if (SUBAGENT_BILLING_RE.test(getSystemText(req.body || {}))) return false;
 
   if (req.mainAgent) {
     // 排除被误标记的 SubAgent（旧日志兼容）
@@ -145,7 +239,7 @@ export function isSkillText(text) {
  */
 function stripSystemTags(text) {
   if (!text) return '';
-  return text
+  let out = text
     .replace(/<system-reminder>[\s\S]*?<\/system-reminder>/gi, '')
     .replace(/<local-command-caveat>[\s\S]*?<\/local-command-caveat>/gi, '')
     .replace(/<local-command-stdout>[\s\S]*?<\/local-command-stdout>/gi, '')
@@ -158,8 +252,13 @@ function stripSystemTags(text) {
     // 尾段用 ^...m 多行锚定——段落必须起行才剥，用户正文中段引用该句不受影响；
     // 只锚定句首短语、不绑定其后的破折号/措辞（harness 微调标点不致尾段泄漏成 user 气泡）
     .replace(/^Another Claude session sent a message:\s*/i, '')
-    .replace(/^IMPORTANT: This is NOT from your user\b[\s\S]*?(?=\n\n|$)/im, '')
-    .trim();
+    .replace(/^IMPORTANT: This is NOT from your user\b[\s\S]*?(?=\n\n|$)/im, '');
+  // 新版跨会话 caveat（多行安全：行首锚定，剥到空行 / 串尾）
+  out = out.replace(/(^|\n)This came from another Claude session[\s\S]*?(?=\n\n|$)/i, '');
+  // 裸协议通知 JSON（idle / shutdown_* / teammate_terminated / plan_approval_*，含嵌套）——单次扫描剔除
+  // （O(n)，评审 S1）。与 <teammate-message> 包裹的协议 JSON 同类，剥离后二次回收只剩用户追加正文（无则空）
+  out = extractProtocolNotifications(out).rest;
+  return out.trim();
 }
 
 // Claude Code 内部合成 prompt 白名单（CLI 在主会话里合成的 recap/title/compact/topic/summary 查询，
@@ -202,10 +301,29 @@ export function isSystemText(text) {
   // harness 注入的队友消息轮：包裹文本（前缀 + 尾部 IMPORTANT 段）非用户手输，
   // teammate 内容本身经 classifyUserContent 提取为 teammateBlocks 独立渲染
   if (/^Another Claude session sent a message:/i.test(trimmed)) return true;
+  // 裸协议通知（直接以协议 JSON 起头、无 "Another Claude session" 前缀）：必须 parseInterSessionNotification
+  // 命中白名单协议 JSON 才算系统文本——粘贴非协议 JSON / 含追加正文不会被误吞。caveat 是尾部 chrome
+  // （真实形态总是 JSON 在前、caveat 在后），故「起头即 caveat」的块视为用户正文，防整段消失（评审 F1）；
+  // 其 caveat chrome 在确为通知的块内由 parse / stripSystemTags 处理。
+  if (trimmed.startsWith('{') && parseInterSessionNotification(trimmed)) return true;
   // 用户拒绝 tool / 中断 Claude 时 CLI 注入的占位 user message —— 与上方 "✗ 已拒绝" badge 语义重复
   // 涵盖历史变体："[Request interrupted by user for tool use]"、"[Request interrupted by user]"、"[Request interrupted...]"
   if (/^\[Request interrupted/i.test(trimmed)) return true;
   return false;
+}
+
+// 字符串型 user/assistant message 的「可显示正文」。忠实镜像 classifyUserContent 的两段语义
+// （classifyUserContent 内「首过滤 + stripSystemTags 二次回收」两步），只是作用于字符串：
+//   Pass1：非系统文本 → 原样返回（保留用户正文中段引用的成对标签，与当前行为逐字一致，零回归）；
+//   Pass2：系统块（以 chrome 标签起首等被 isSystemText 判真）→ 剥掉已知 chrome 后再判，仍是真实正文则
+//          返回剥离后正文，否则 ''（应隐藏）。
+// 解决「系统标签起首 + 真实正文」字符串被 isSystemText 整条吞掉（数组路径有此回收，字符串路径原先没有）。
+// 注意：用户手打未闭合 <system-reminder>（无配对）仍判系统文本而隐藏——沿用当前行为，本函数不改变它。
+export function extractDisplayText(str) {
+  if (typeof str !== 'string' || !str.trim()) return '';
+  if (!isSystemText(str)) return str;                  // Pass1：已是用户文本，原样
+  const recovered = stripSystemTags(str);               // Pass2：二次回收
+  return (recovered && !isSystemText(recovered)) ? recovered : '';
 }
 
 /**
@@ -254,6 +372,30 @@ export function classifyUserContent(content) {
         summary: summaryMatch ? summaryMatch[1] : null,
         content: body, status: null,
       });
+    }
+  }
+
+  // 裸协议通知（未包 <teammate-message>）：harness 注入的 idle / shutdown_* / teammate_terminated /
+  // plan_approval_* 等，提取为 teammate 状态气泡（与包裹形态同渲染）。按 status|from 去重，避免与上面
+  // 包裹形态在「同块既有包裹又有裸 JSON」的极端场景下重复出气泡。
+  const seenStatus = new Set(teammateBlocks.filter(t => t.status).map(t => `${t.status}|${t.statusFrom}`));
+  for (const b of content) {
+    if (b.type !== 'text') continue;
+    const txt = b.text || '';
+    if (!txt.includes('"type"')) continue; // 廉价早退：协议通知必含 JSON 的 "type"
+    // 仅对「通知起头」的块出状态气泡（与 isSystemText 的隐藏条件对齐：前缀 lead 或 裸 JSON 起头）。
+    // 用户在正文里引用 / 转贴整条通知（caveat 起头、prose 起头）→ 该块仍是 user 气泡，不再额外塞一个
+    // 幽灵状态气泡，也不会双重渲染（评审 qa-A / auditor-F1）。
+    const head = txt.trimStart();
+    if (!head.startsWith('{') && !INTER_SESSION_LEAD_RE.test(head)) continue;
+    const note = parseInterSessionNotification(txt);
+    if (!note) continue;
+    for (const s of note.statuses) {
+      const from = s.from || 'teammate';
+      const k = `${s.type}|${from}`;
+      if (seenStatus.has(k)) continue;
+      seenStatus.add(k);
+      teammateBlocks.push({ id: from, color: null, summary: null, content: null, status: s.type, statusFrom: from });
     }
   }
 

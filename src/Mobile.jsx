@@ -3,7 +3,7 @@ import { ConfigProvider, Spin, Button, Badge, Switch, Select, Modal, message, Ra
 import { BranchesOutlined, DownloadOutlined, DeleteOutlined, RollbackOutlined, ReloadOutlined, UploadOutlined, FileZipOutlined, QuestionCircleOutlined } from '@ant-design/icons';
 import AppBase, { styles, OPTIMISTIC_CLEAR_PERCENT } from './AppBase';
 import { isIOS, isPad, setViewMode } from './env';
-import { isMainAgent, isSystemText, classifyUserContent } from './utils/contentFilter';
+import { isMainAgent, classifyUserContent, extractDisplayText } from './utils/contentFilter';
 import { parseImOrigin } from './utils/imOrigin';
 import { sortSkillsDefault } from './utils/skillsParser';
 import { handleSkillToggle, handleSkillDelete } from './utils/skillModalController';
@@ -381,13 +381,11 @@ class Mobile extends AppBase {
     for (const msg of messages) {
       if (msg.role !== 'user') continue;
       if (typeof msg.content === 'string') {
-        const text = parseImOrigin(msg.content).text.trim();
+        const text = extractDisplayText(parseImOrigin(msg.content).text);
         if (!text) continue;
-        if (!isSystemText(text)) {
-          if (/Implement the following plan:/i.test(text)) continue;
-          userMsgs.push(text);
-          fullTexts.push(text);
-        }
+        if (/Implement the following plan:/i.test(text)) continue;
+        userMsgs.push(text);
+        fullTexts.push(text);
       } else if (Array.isArray(msg.content)) {
         const { commands, textBlocks } = classifyUserContent(msg.content);
         if (commands.length > 0) {

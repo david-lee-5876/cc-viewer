@@ -117,6 +117,43 @@ describe('isMainAgentEntry', () => {
   it('returns false for empty entry object', () => {
     assert.equal(isMainAgentEntry({}), false);
   });
+
+  // cc_version 2.1.181+: subagents carry cc_is_subagent=true and inherit full CC prompt + Edit/Bash/Agent tools.
+  // Must be excluded here too (this classifier has its own lightweight heuristic), else they pollute KV-cache analysis.
+  const SUB_HEADER = 'x-anthropic-billing-header: cc_version=2.1.181.be0; cc_entrypoint=cli; cc_is_subagent=true;\n';
+
+  it('returns false for cc_is_subagent=true (flag baked true — old log override)', () => {
+    const entry = makeMainAgentEntry({
+      body: { system: [{ type: 'text', text: SUB_HEADER + 'You are Claude Code.' }], tools: makeTools(), messages: [] },
+    });
+    assert.equal(isMainAgentEntry(entry), false);
+  });
+
+  it('returns false for cc_is_subagent=true via heuristic (no/false mainAgent flag — new log)', () => {
+    const entry = {
+      mainAgent: false,
+      body: { system: [{ type: 'text', text: SUB_HEADER + 'You are Claude Code.' }], tools: makeTools(), messages: [] },
+    };
+    assert.equal(isMainAgentEntry(entry), false);
+  });
+
+  it('backward-compat: genuine main without the token still true', () => {
+    const entry = makeMainAgentEntry({
+      body: { system: [{ type: 'text', text: 'x-anthropic-billing-header: cc_version=2.1.181.2f7; cc_entrypoint=cli;\nYou are Claude Code.' }], tools: makeTools(), messages: [] },
+    });
+    assert.equal(isMainAgentEntry(entry), true);
+  });
+
+  it('\\b anchor: cc_is_subagent=truex / =false do not over-match → still true', () => {
+    const truex = makeMainAgentEntry({
+      body: { system: [{ type: 'text', text: 'x-anthropic-billing-header: cc_is_subagent=truex;\nYou are Claude Code.' }], tools: makeTools(), messages: [] },
+    });
+    const falseTok = makeMainAgentEntry({
+      body: { system: [{ type: 'text', text: 'x-anthropic-billing-header: cc_is_subagent=false;\nYou are Claude Code.' }], tools: makeTools(), messages: [] },
+    });
+    assert.equal(isMainAgentEntry(truex), true);
+    assert.equal(isMainAgentEntry(falseTok), true);
+  });
 });
 
 // ============================================================================

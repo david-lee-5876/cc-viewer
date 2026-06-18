@@ -7,6 +7,10 @@ import { formatToolAsXml } from './tools-xml-formatter.js';
 export { formatToolAsXml };
 
 const SUBAGENT_SYSTEM_RE = /command execution specialist|file search specialist|planning specialist|general-purpose agent|security monitor|performing a web search/i;
+// cc_version 2.1.181+: billing header marks subagents (cc_is_subagent=true); genuine main omits it (never =false).
+// Such subagents inherit the full "You are Claude Code" prompt + Edit/Bash/Agent tools and would otherwise hit the
+// lightweight heuristic below. \b anchor avoids matching =truex. KEEP IN SYNC with src/utils/contentFilter.js + interceptor-core.js.
+const SUBAGENT_BILLING_RE = /cc_is_subagent=true\b/;
 const TEAMMATE_SYSTEM_RE = /running as an agent in a team|Agent Teammate Communication/i;
 
 function getSystemText(body) {
@@ -28,6 +32,11 @@ export function isMainAgentEntry(entry) {
   if (entry.teammate) return false;
   const sysText = getSystemText(entry.body || {});
   if (TEAMMATE_SYSTEM_RE.test(sysText)) return false;
+
+  // cc_is_subagent=true ⇒ subagent (cc 2.1.181+), never MainAgent. Before the mainAgent-flag short-circuit
+  // so already-logged entries (flag baked true) are corrected too, and so new entries (flag now false) don't
+  // fall through to the lightweight heuristic below and get mis-classified.
+  if (SUBAGENT_BILLING_RE.test(sysText)) return false;
 
   if (entry.mainAgent === true) {
     if (SUBAGENT_SYSTEM_RE.test(sysText)) return false;

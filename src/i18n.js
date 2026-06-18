@@ -6499,6 +6499,22 @@ const i18nData = {
     "ar": "{name} أُنهي", "no": "{name} avsluttet", "pt-BR": "{name} finalizado",
     "th": "{name} สิ้นสุด", "tr": "{name} sonlandırıldı", "uk": "{name} завершено"
   },
+  "ui.teammate.plan_approval_request": {
+    "zh": "{name} 请求计划审批", "en": "{name} requested plan approval", "zh-TW": "{name} 請求計畫審批",
+    "ko": "{name} 계획 승인 요청", "ja": "{name} が計画の承認を要求", "de": "{name} fordert Planfreigabe an",
+    "es": "{name} solicitó aprobación del plan", "fr": "{name} a demandé l'approbation du plan", "it": "{name} ha richiesto l'approvazione del piano",
+    "da": "{name} anmodede om plangodkendelse", "pl": "{name} poprosił o zatwierdzenie planu", "ru": "{name} запросил одобрение плана",
+    "ar": "{name} طلب الموافقة على الخطة", "no": "{name} ba om plangodkjenning", "pt-BR": "{name} solicitou aprovação do plano",
+    "th": "{name} ขออนุมัติแผน", "tr": "{name} plan onayı istedi", "uk": "{name} запросив схвалення плану"
+  },
+  "ui.teammate.plan_approval_response": {
+    "zh": "{name} 已回应计划审批", "en": "{name} responded to plan approval", "zh-TW": "{name} 已回應計畫審批",
+    "ko": "{name} 계획 승인에 응답", "ja": "{name} が計画承認に応答", "de": "{name} hat auf Planfreigabe geantwortet",
+    "es": "{name} respondió a la aprobación del plan", "fr": "{name} a répondu à l'approbation du plan", "it": "{name} ha risposto all'approvazione del piano",
+    "da": "{name} svarede på plangodkendelse", "pl": "{name} odpowiedział na zatwierdzenie planu", "ru": "{name} ответил на одобрение плана",
+    "ar": "{name} رد على الموافقة على الخطة", "no": "{name} svarte på plangodkjenning", "pt-BR": "{name} respondeu à aprovação do plano",
+    "th": "{name} ตอบกลับการอนุมัติแผน", "tr": "{name} plan onayını yanıtladı", "uk": "{name} відповів на схвалення плану"
+  },
   "ui.permission.autoApprove.off": {
     "zh": "关闭", "en": "Off", "zh-TW": "關閉",
     "ko": "끄기", "ja": "オフ", "de": "Aus",

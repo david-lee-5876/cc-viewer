@@ -3,7 +3,7 @@ import { Drawer, Button, Spin, Empty, Tooltip, Tag, message } from 'antd';
 import { ReloadOutlined, SettingOutlined } from '@ant-design/icons';
 import ChatMessage from '../chat/ChatMessage';
 import { cachedBuildToolResultMap } from '../../utils/toolResultBuilder';
-import { classifyUserContent, isSystemText, isMainAgent } from '../../utils/contentFilter';
+import { classifyUserContent, isSystemText, isMainAgent, extractDisplayText } from '../../utils/contentFilter';
 import { mergeMainAgentSessions } from '../../utils/sessionMerge';
 import { reconstructEntries } from '../../../server/lib/delta-reconstructor.js';
 import { apiUrl } from '../../utils/apiUrl';
@@ -54,14 +54,21 @@ function renderSessions(sessions, senderMap, imAgent) {
             out.push(<ChatMessage key={`${kp}-user-${mi}-${ti}`} role={isPlan ? 'plan-prompt' : 'user'} text={tb.text} timestamp={ts} isHistoryLog imSenderMap={senderMap} />);
           });
           // 纯 tool_result 的 user 消息不单独渲染（其结果挂在对应 assistant 的 tool_use 上）。
-        } else if (typeof content === 'string' && !isSystemText(content)) {
-          const isPlan = /Implement the following plan:/i.test(content);
-          out.push(<ChatMessage key={`${kp}-user-${mi}`} role={isPlan ? 'plan-prompt' : 'user'} text={content} timestamp={ts} isHistoryLog imSenderMap={senderMap} />);
+        } else if (typeof content === 'string') {
+          const dispText = extractDisplayText(content);
+          if (dispText) {
+            const isPlan = /Implement the following plan:/i.test(dispText);
+            out.push(<ChatMessage key={`${kp}-user-${mi}`} role={isPlan ? 'plan-prompt' : 'user'} text={dispText} timestamp={ts} isHistoryLog imSenderMap={senderMap} />);
+          }
         }
       } else if (msg.role === 'assistant') {
         let blocks = null;
-        if (Array.isArray(content)) blocks = content.filter((b) => b.type !== 'text' || !isSystemText(b.text));
-        else if (typeof content === 'string' && !isSystemText(content)) blocks = [{ type: 'text', text: content }];
+        if (Array.isArray(content)) {
+          blocks = content.filter((b) => b.type !== 'text' || !isSystemText(b.text));
+        } else if (typeof content === 'string') {
+          const dispText = extractDisplayText(content);
+          if (dispText) blocks = [{ type: 'text', text: dispText }];
+        }
         if (blocks && blocks.length > 0) {
           out.push(
             <ChatMessage

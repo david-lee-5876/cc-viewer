@@ -13,7 +13,7 @@ import { getModelInfo, getEffectiveModel, resolveProducerModelInfo, AUTO_APPROVE
 import { formatPromptNavTime } from '../../utils/formatters';
 import { buildPromptNavItems } from '../../utils/promptNav';
 import { getTeammateAvatar } from '../../utils/teammateAvatars';
-import { isSystemText, classifyUserContent, isMainAgent, isTeammate, resolveTeammateNames } from '../../utils/contentFilter';
+import { isSystemText, classifyUserContent, isMainAgent, isTeammate, resolveTeammateNames, extractDisplayText } from '../../utils/contentFilter';
 import { classifyRequest, formatRequestTag, formatTeammateLabel } from '../../utils/requestType';
 import { playEvent as playVoiceEvent } from '../../utils/voicePackPlayer';
 import { buildChunksForAnswer, buildBracketPasteSubmitChunks, BRACKET_PASTE_SUBMIT_SETTLE_MS } from '../../utils/ptyChunkBuilder';
@@ -1415,11 +1415,14 @@ class ChatView extends React.Component {
                 />
               );
             }
-          } else if (!isSystemText(content)) {
-            const isPlan = /Implement the following plan:/i.test(content);
-            renderedMessages.push(
-              <ChatMessage key={`${keyPrefix}-user-${mi}`} role={isPlan ? 'plan-prompt' : 'user'} text={content} lang={this.props.lang} timestamp={ts} userProfile={userProfile} modelInfo={modelInfo} requestIndex={hasViewRequest ? reqIdx : undefined} onViewRequest={hasViewRequest ? onViewRequest : undefined} isHistoryLog={isHistoryLog} />
-            );
+          } else {
+            const dispText = extractDisplayText(content);
+            if (dispText) {
+              const isPlan = /Implement the following plan:/i.test(dispText);
+              renderedMessages.push(
+                <ChatMessage key={`${keyPrefix}-user-${mi}`} role={isPlan ? 'plan-prompt' : 'user'} text={dispText} lang={this.props.lang} timestamp={ts} userProfile={userProfile} modelInfo={modelInfo} requestIndex={hasViewRequest ? reqIdx : undefined} onViewRequest={hasViewRequest ? onViewRequest : undefined} isHistoryLog={isHistoryLog} />
+              );
+            }
           }
         }
       } else if (msg.role === 'assistant') {
@@ -1439,10 +1442,11 @@ class ChatView extends React.Component {
             );
           }
         } else if (typeof content === 'string') {
-          // 过滤字符串类型的系统文本
-          if (!isSystemText(content)) {
+          // 过滤字符串类型的系统文本（剥 chrome 后仍有正文才渲染）
+          const dispText = extractDisplayText(content);
+          if (dispText) {
             renderedMessages.push(
-              <ChatMessage key={`${keyPrefix}-asst-${mi}`} role="assistant" content={[{ type: 'text', text: content }]} toolResultMap={toolResultMap} readContentMap={readContentMap} editSnapshotMap={editSnapshotMap} askAnswerMap={mergedAskAnswerMap} planApprovalMap={planApprovalMap} latestPlanContent={latestPlanContent} planFileContents={this.state.planFileContents} timestamp={ts} displayTs={msg._generatedTs} modelInfo={modelInfo} collapseToolResults={collapseToolResults} expandThinking={expandThinking} showFullToolContent={showFullToolContent} showThinkingSummaries={showThinkingSummaries} ptyPrompt={this.state.ptyPrompt} activePlanPrompt={activePlanPrompt} activePtyPlanId={this.state.pendingPtyPlan?.id ?? null} planAutoApproveCountdown={this.state.planAutoApproveCountdown} onCancelPlanAutoApprove={this.cancelPlanAutoApprove} activeDangerousPrompt={activeDangerousPrompt} lastPendingPlanId={msgLastPlanId} lastPendingAskId={msgLastAskId} onPlanApprovalClick={this.handlePromptOptionClick} onPlanFeedbackSubmit={this.handlePlanFeedbackSubmit} onDangerousApprovalClick={this.handlePromptOptionClick} onAskQuestionSubmit={this.handleAskQuestionSubmit} onAskQuestionCancel={this.handleAskCancel} askMetaMap={this.state.askMetaMap} cliMode={this.props.cliMode} onOpenFile={this.handleOpenToolFilePath} cacheTotalTokens={cacheTotalTokens} requestIndex={hasViewRequest ? reqIdx : undefined} onViewRequest={hasViewRequest ? onViewRequest : undefined} isHistoryLog={isHistoryLog} />
+              <ChatMessage key={`${keyPrefix}-asst-${mi}`} role="assistant" content={[{ type: 'text', text: dispText }]} toolResultMap={toolResultMap} readContentMap={readContentMap} editSnapshotMap={editSnapshotMap} askAnswerMap={mergedAskAnswerMap} planApprovalMap={planApprovalMap} latestPlanContent={latestPlanContent} planFileContents={this.state.planFileContents} timestamp={ts} displayTs={msg._generatedTs} modelInfo={modelInfo} collapseToolResults={collapseToolResults} expandThinking={expandThinking} showFullToolContent={showFullToolContent} showThinkingSummaries={showThinkingSummaries} ptyPrompt={this.state.ptyPrompt} activePlanPrompt={activePlanPrompt} activePtyPlanId={this.state.pendingPtyPlan?.id ?? null} planAutoApproveCountdown={this.state.planAutoApproveCountdown} onCancelPlanAutoApprove={this.cancelPlanAutoApprove} activeDangerousPrompt={activeDangerousPrompt} lastPendingPlanId={msgLastPlanId} lastPendingAskId={msgLastAskId} onPlanApprovalClick={this.handlePromptOptionClick} onPlanFeedbackSubmit={this.handlePlanFeedbackSubmit} onDangerousApprovalClick={this.handlePromptOptionClick} onAskQuestionSubmit={this.handleAskQuestionSubmit} onAskQuestionCancel={this.handleAskCancel} askMetaMap={this.state.askMetaMap} cliMode={this.props.cliMode} onOpenFile={this.handleOpenToolFilePath} cacheTotalTokens={cacheTotalTokens} requestIndex={hasViewRequest ? reqIdx : undefined} onViewRequest={hasViewRequest ? onViewRequest : undefined} isHistoryLog={isHistoryLog} />
             );
           }
         }

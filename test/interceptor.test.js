@@ -230,6 +230,53 @@ describe('interceptor', () => {
       // interceptor-core treats this as MainAgent (body-level only, no req.teammate field)
       assert.equal(isMainAgentRequest(teammateBody), true);
     });
+
+    // cc_version 2.1.181+：billing header 显式带 cc_is_subagent=true 的子代理（继承完整 CC prompt + Edit/Bash/Agent）
+    it('rejects cc_is_subagent=true subagent (2.1.181+) even with main-like prompt/tools', () => {
+      const body = makeMainAgentBody({
+        system: [
+          { type: 'text', text: 'x-anthropic-billing-header: cc_version=2.1.181.be0; cc_entrypoint=cli; cc_is_subagent=true;\nYou are Claude Code, Anthropic\'s official CLI for Claude.' },
+        ],
+      });
+      assert.equal(isMainAgentRequest(body), false);
+    });
+
+    it('backward-compat: genuine main (no cc_is_subagent token) still detected', () => {
+      const body = makeMainAgentBody({
+        system: [
+          { type: 'text', text: 'x-anthropic-billing-header: cc_version=2.1.181.2f7; cc_entrypoint=cli;\nYou are Claude Code, Anthropic\'s official CLI for Claude.' },
+        ],
+      });
+      assert.equal(isMainAgentRequest(body), true);
+    });
+
+    it('does not over-match cc_is_subagent=false', () => {
+      const body = makeMainAgentBody({
+        system: [
+          { type: 'text', text: 'x-anthropic-billing-header: cc_version=2.1.181.2f7; cc_entrypoint=cli; cc_is_subagent=false;\nYou are Claude Code, Anthropic\'s official CLI for Claude.' },
+        ],
+      });
+      assert.equal(isMainAgentRequest(body), true);
+    });
+
+    it('\\b anchor: does not over-match cc_is_subagent=truex', () => {
+      const body = makeMainAgentBody({
+        system: [
+          { type: 'text', text: 'x-anthropic-billing-header: cc_version=2.1.181.2f7; cc_is_subagent=truex;\nYou are Claude Code, Anthropic\'s official CLI for Claude.' },
+        ],
+      });
+      assert.equal(isMainAgentRequest(body), true);
+    });
+
+    it('rejects cc_is_subagent=true when billing header is in a SEPARATE system block', () => {
+      const body = makeMainAgentBody({
+        system: [
+          { type: 'text', text: 'x-anthropic-billing-header: cc_version=2.1.181.be0; cc_entrypoint=cli; cc_is_subagent=true;' },
+          { type: 'text', text: 'You are Claude Code, Anthropic\'s official CLI for Claude.' },
+        ],
+      });
+      assert.equal(isMainAgentRequest(body), false);
+    });
   });
 
   // --------------------------------------------------------------------------

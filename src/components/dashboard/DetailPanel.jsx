@@ -7,7 +7,7 @@ import { t } from '../../i18n';
 import { apiUrl } from '../../utils/apiUrl';
 import { formatTokenCount, stripPrivateKeys, hasClaudeMdReminder, isClaudeMdReminder, hasSkillsReminder, isSkillsReminder, extractCachedContent } from '../../utils/helpers';
 import { classifyRequest } from '../../utils/requestType';
-import { isMainAgent, isSystemText } from '../../utils/contentFilter';
+import { isMainAgent, isSystemText, extractDisplayText } from '../../utils/contentFilter';
 import { restoreSlimmedEntry } from '../../utils/entry-slim.js';
 import AppHeader from './AppHeader';
 import ContextTab from './ContextTab';
@@ -630,9 +630,9 @@ class DetailPanel extends React.Component {
                 .map((text, i) => ({ text, msgIdx: i }))
                 .filter(({ text }) => text.startsWith('[user]'))
                 .map(({ text, msgIdx }) => {
-                  const raw = text.replace(/^\[user\]\s*/, '').trim();
-                  if (!raw || isSystemText(raw)) return { cleaned: '', msgIdx };
-                  const segments = AppHeader.parseSegments(raw);
+                  const disp = extractDisplayText(text.replace(/^\[user\]\s*/, ''));
+                  if (!disp) return { cleaned: '', msgIdx };
+                  const segments = AppHeader.parseSegments(disp);
                   const cleaned = segments
                     .filter(s => s.type === 'text')
                     .map(s => s.content.trim())

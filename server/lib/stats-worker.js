@@ -7,8 +7,21 @@ import { resolveJsonlPath } from './jsonl-archive.js';
 // 统计 schema 版本号，新增统计字段时递增，强制旧缓存失效重新解析
 const STATS_VERSION = 8;
 
+// 跨会话 / teammate 协议通知 type 白名单（须与 src/utils/contentFilter.js 的 INTER_SESSION_NOTIFICATION_TYPES
+// 一致；新增 type 时两处都要加）。单一数组派生 Set（brace 扫描用）+ 正则（isSystemText 用），避免本文件内漂移。
+// test/stats-worker-notification-filter.test.js 有 frontend↔server 同步守卫断言。
+export const INTER_SESSION_TYPES = [
+  'idle_notification', 'shutdown_request', 'shutdown_response', 'shutdown_approved',
+  'teammate_terminated', 'plan_approval_request', 'plan_approval_response',
+];
+const INTER_SESSION_TYPES_SET = new Set(INTER_SESSION_TYPES);
+const INTER_SESSION_TYPES_RE = new RegExp(`"type"\\s*:\\s*"(?:${INTER_SESSION_TYPES.join('|')})"`);
+
 /**
- * 判断文本是否为系统注入文本（与 src/utils/contentFilter.js:isSystemText 保持同步）
+ * 判断文本是否为系统注入文本。
+ * 注意：这是服务端「子集」实现，只覆盖 project-stats 预览过滤所需规则，并非 contentFilter 的完整副本——
+ * 完整分类（synthetic prompt、二次回收等）见 src/utils/contentFilter.js:isSystemText。前端(dist)与后端(server)
+ * 分属两个 bundle、无法直接共享同一模块，故此处仅同步「会泄漏进预览」的关键规则：系统标签 + 跨会话队友通知。
  */
 function isSystemText(text) {
   if (!text) return true;
@@ -16,18 +29,61 @@ function isSystemText(text) {
   if (!trimmed) return true;
   // 包含 plan 内容的文本块不应被过滤（即使开头有系统标签）
   if (/Implement the following plan:/i.test(trimmed)) return false;
-  if (/^<[a-zA-Z_][\w-]*[\s>]/i.test(trimmed)) return true;
+  if (/^<[a-zA-Z_][\w-]*[\s>]/i.test(trimmed)) return true; // 含 <teammate-message> 包裹形态
   if (/^\[SUGGESTION MODE:/i.test(trimmed)) return true;
   if (/^Your response was cut off because it exceeded the output token limit/i.test(trimmed)) return true;
   if (/^Base directory for this skill:/i.test(trimmed)) return true;
+  // 未包裹的跨会话队友通知：前缀行 / 新版 caveat / 裸协议 JSON —— 防泄漏进 stats 预览当成用户 prompt
+  if (/^Another Claude session sent a message:/i.test(trimmed)) return true;
+  if (/^This came from another Claude session\b/i.test(trimmed)) return true;
+  if (trimmed.startsWith('{') && INTER_SESSION_TYPES_RE.test(trimmed)) return true;
   return false;
+}
+
+// 单次扫描剔除顶层协议通知 JSON（brace 配对，正确处理嵌套；跳过字符串字面量内的花括号 / 转义）。
+// 与 src/utils/contentFilter.js 的 scanTopLevelJsonObjects + extractProtocolNotifications 同语义——
+// 旧的 `\{[^{}]*...[^{}]*\}` 正则无法跨嵌套花括号，含嵌套字段的协议体（如 plan_approval_*）会漏剥。
+function stripProtocolJson(s) {
+  if (typeof s !== 'string' || s.indexOf('{') === -1) return s;
+  let out = '', cursor = 0, depth = 0, start = -1, inStr = false, esc = false;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (ch === '\\') esc = true;
+      else if (ch === '"') inStr = false;
+      continue;
+    }
+    if (ch === '"') inStr = true;
+    else if (ch === '{') { if (depth === 0) start = i; depth++; }
+    else if (ch === '}' && depth > 0) {
+      depth--;
+      if (depth === 0 && start >= 0) {
+        let j; try { j = JSON.parse(s.slice(start, i + 1)); } catch { j = null; }
+        if (j && typeof j.type === 'string' && INTER_SESSION_TYPES_SET.has(j.type)) {
+          out += s.slice(cursor, start);
+          cursor = i + 1;
+        }
+        start = -1;
+      }
+    }
+  }
+  out += s.slice(cursor);
+  return out;
 }
 
 /**
  * 剥离系统注入标签，保留标签外的用户文本（仅用于 string 类型 content 的混合内容场景）
  */
 function stripSystemTags(text) {
-  return text.replace(/<(system-reminder|local-command-caveat|project-reminder|important-instruction-reminders|file-modified-reminder|todo-reminder|user-prompt-submit-hook|local-command-stdout|command-name|task-notification|environment_details|context)\b[^>]*>[\s\S]*?<\/\1>/gi, '').trim();
+  let out = text
+    .replace(/<(system-reminder|local-command-caveat|project-reminder|important-instruction-reminders|file-modified-reminder|todo-reminder|user-prompt-submit-hook|local-command-stdout|command-name|task-notification|environment_details|context|teammate-message)\b[^>]*>[\s\S]*?<\/\1>/gi, '')
+    // 未包裹跨会话队友通知的 chrome：前缀行 + 两版 caveat + 裸协议 JSON（含嵌套），剥掉后回收用户混入正文
+    .replace(/^Another Claude session sent a message:\s*/i, '')
+    .replace(/(^|\n)This came from another Claude session[\s\S]*?(?=\n\n|$)/i, '')
+    .replace(/(^|\n)IMPORTANT: This is NOT from your user[\s\S]*?(?=\n\n|$)/i, '');
+  out = stripProtocolJson(out);
+  return out.trim();
 }
 
 /**
@@ -354,6 +410,9 @@ function scanAllProjects(logDir) {
     parentPort?.postMessage({ type: 'scan-all-done' });
   }
 }
+
+// 供单元测试引用的内部纯函数（worker 入口逻辑走 parentPort，不受 export 影响）
+export { isSystemText, extractUserTexts };
 
 // Worker 消息处理
 parentPort?.on('message', (msg) => {

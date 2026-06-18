@@ -7,7 +7,7 @@ import { MessageOutlined, FileTextOutlined, ImportOutlined, DashboardOutlined, E
 import { QRCodeCanvas } from 'qrcode.react';
 import { formatTokenCount, computeTokenStats, computeCacheRebuildStats, computeToolUsageStats, computeSkillUsageStats, resolveCalibrationTokens, adaptContextWindow, sumUsageInputTokens, sumUsageContextTokens } from '../../utils/helpers';
 import { PERM_AUTO_APPROVE_OPTIONS, PLAN_AUTO_APPROVE_OPTIONS, autoApproveSelectOptions } from '../../utils/autoApproveOptions';
-import { isSystemText, classifyUserContent, isMainAgent } from '../../utils/contentFilter';
+import { classifyUserContent, isMainAgent, extractDisplayText } from '../../utils/contentFilter';
 import { parseImOrigin } from '../../utils/imOrigin';
 import { sortSkillsDefault } from '../../utils/skillsParser';
 import { handleSkillToggle, handleSkillDelete } from '../../utils/skillModalController';
@@ -795,13 +795,11 @@ class AppHeader extends React.Component {
     for (const msg of messages) {
       if (msg.role !== 'user') continue;
       if (typeof msg.content === 'string') {
-        const text = parseImOrigin(msg.content).text.trim();
+        const text = extractDisplayText(parseImOrigin(msg.content).text);
         if (!text) continue;
-        if (!isSystemText(text)) {
-          if (/Implement the following plan:/i.test(text)) continue;
-          userMsgs.push(text);
-          fullTexts.push(text);
-        }
+        if (/Implement the following plan:/i.test(text)) continue;
+        userMsgs.push(text);
+        fullTexts.push(text);
       } else if (Array.isArray(msg.content)) {
         const { commands, textBlocks } = classifyUserContent(msg.content);
         // 取最后一个 slash command（与之前行为一致）

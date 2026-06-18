@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.6.318 (2026-06-18)
+
+- fix(network): MainAgent 识别新增 `cc_is_subagent=true` 子代理排除（cc_version 2.1.181+，`\b` 锚定防 `=truex` 误匹配）——这类子代理继承完整 "You are Claude Code" prompt + Edit/Bash/Agent 工具会误中轻量判据；三处分类器同步排除（前端 `isMainAgent`、服务端 `isMainAgentRequest`、KV-cache `isMainAgentEntry`），均早于 `req.mainAgent` 短路以纠正已落盘旧日志；真·主代理无此字段（从不为 `=false`）不受影响
+- fix(chat): 修复「系统标签起首 + 真实正文」的字符串型 user prompt 被整条隐藏（如 scoped-instruction 把 `<system-reminder>` 内联拼到用户提问前）——新增 `extractDisplayText`（镜像 `classifyUserContent` 二次回收），ChatView/AppHeader/Mobile/DetailPanel/teamModalBuilder/ImConversationModal 各字符串展示口改用它剥离 chrome 后显示真实正文；纯 chrome/合成/未知标签仍隐藏，用户中段引用的标签原样保留
+- feat(chat): 跨会话 / teammate 协议通知（idle / shutdown_* / teammate_terminated / plan_approval_*）的裸协议 JSON 与新版 caveat 形态统一归为状态气泡，不再当普通用户 prompt 显示；服务端 stats-worker 同步过滤避免泄漏进 project-stats 预览（brace 配对剔除，支持嵌套 JSON）；plan_approval_* 补 teammate i18n 文案
+
 ## 1.6.317 (2026-06-18)
 
 - feat(skills): Skill 管理弹窗支持永久删除单个 skill（二次确认 + 删除中转圈防重入；loopback-only 不暴露局域网，symlink 拒删 + realpath 越界防护）

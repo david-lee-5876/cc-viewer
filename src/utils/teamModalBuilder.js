@@ -3,7 +3,7 @@
  * Pure function — no React/state dependencies.
  */
 
-import { classifyUserContent, isSystemText, isMainAgent } from './contentFilter';
+import { classifyUserContent, isMainAgent, extractDisplayText } from './contentFilter';
 import { restoreSlimmedEntry } from './entry-slim.js';
 import { classifyRequest, formatRequestTag, formatTeammateLabel } from './requestType';
 import { getModelInfo, getEffectiveModel } from './helpers';
@@ -60,9 +60,12 @@ export function buildTeamModalData(team, requests, mainAgentSessions) {
               hasUserMsg = true;
             }
           }
-        } else if (typeof content === 'string' && !isSystemText(content)) {
-          entries.push({ type: 'user', text: content, timestamp: ts });
-          hasUserMsg = true;
+        } else if (typeof content === 'string') {
+          const dispText = extractDisplayText(content);
+          if (dispText) {
+            entries.push({ type: 'user', text: dispText, timestamp: ts });
+            hasUserMsg = true;
+          }
         }
       }
     }
@@ -84,9 +87,12 @@ export function buildTeamModalData(team, requests, mainAgentSessions) {
             hasUserMsg = true;
           }
         }
-      } else if (typeof c === 'string' && !isSystemText(c)) {
-        entries.push({ type: 'user', text: c, timestamp: teamStartTime });
-        hasUserMsg = true;
+      } else if (typeof c === 'string') {
+        const dispText = extractDisplayText(c);
+        if (dispText) {
+          entries.push({ type: 'user', text: dispText, timestamp: teamStartTime });
+          hasUserMsg = true;
+        }
       }
       if (hasUserMsg) break;
     }

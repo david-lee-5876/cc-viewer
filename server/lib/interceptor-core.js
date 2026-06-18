@@ -4,6 +4,11 @@ import { join } from 'node:path';
 
 const SUBAGENT_SYSTEM_RE = /(?:command execution|file search|planning) specialist|general-purpose agent|security monitor|performing a web search/i;
 
+// cc_version 2.1.181+：CLI 在 billing header 显式标注子代理（cc_is_subagent=true）；真·主代理省略此字段（从不为 =false）。
+// 这类子代理继承完整 "You are Claude Code" prompt + Edit/Bash/Agent 工具，会误中轻量 MainAgent 启发式，故须显式排除。
+// 结尾 \b 锚定：仅匹配 `=true`（其后为 `;` / 空白 / 串尾），避免 `=truex` 之类误匹配。
+const SUBAGENT_BILLING_RE = /cc_is_subagent=true\b/;
+
 export function getSystemText(body) {
   const system = body?.system;
   if (typeof system === 'string') return system;
@@ -17,6 +22,8 @@ export function isMainAgentRequest(body) {
   if (!body?.system || !Array.isArray(body?.tools)) return false;
 
   const sysText = getSystemText(body);
+  // cc_is_subagent=true ⇒ 子代理，绝非 MainAgent（cc_version 2.1.181+）。从源头让新日志的 mainAgent 字段为 false。
+  if (SUBAGENT_BILLING_RE.test(sysText)) return false;
   if (!sysText.includes('You are Claude Code')) return false;
   if (SUBAGENT_SYSTEM_RE.test(sysText)) return false;
 
