@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.6.319 (2026-06-20)
+
+- fix(terminal): Win/Linux 终端支持 Ctrl+C 复制 / Ctrl+V 粘贴（此前 xterm 把二者当控制字符并 preventDefault，只能用 Ctrl+Shift+V / Shift+Insert）——Ctrl+C 有选区时复制、复制成功才清选区，无选区仍发 SIGINT；Ctrl+V 主动读剪贴板走 bracketed-paste 包裹 + 注入消毒（保留图片粘贴、非安全上下文回退原生 paste），主终端与 scratch 终端同步，Mac 走 Cmd 不变
+- fix(terminal): Ctrl+V 主动粘贴加 in-flight 闸防与原生 paste 叠加；剪贴板仅 text/html 时显式回退 readText；clipboard.read() 失败补诊断日志
+- test(terminal): 新增 terminalClipboard 单测（键位判定 / 粘贴包裹决策 / 复制回退 + execCommand 边界）
+
 ## 1.6.318 (2026-06-18)
 
 - fix(network): MainAgent 识别新增 `cc_is_subagent=true` 子代理排除（cc_version 2.1.181+，`\b` 锚定防 `=truex` 误匹配）——这类子代理继承完整 "You are Claude Code" prompt + Edit/Bash/Agent 工具会误中轻量判据；三处分类器同步排除（前端 `isMainAgent`、服务端 `isMainAgentRequest`、KV-cache `isMainAgentEntry`），均早于 `req.mainAgent` 短路以纠正已落盘旧日志；真·主代理无此字段（从不为 `=false`）不受影响

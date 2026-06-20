@@ -10,11 +10,12 @@ import { WebLinksAddon } from '@xterm/addon-web-links';
 import { Unicode11Addon } from '@xterm/addon-unicode11';
 import '@xterm/xterm/css/xterm.css';
 import { darkTerminalTheme, lightTerminalTheme, terminalFontFamily } from './terminalThemes';
-import { isWindows } from '../../env';
+import { isWindows, isMac } from '../../env';
 import styles from './TerminalPanel.module.css';
 import { TerminalWriteQueue, INBAND_RESET } from '../../utils/terminalWriteQueue';
 import { diagCount } from '../../utils/termDiag';
 import { sanitizeBracketPasteText } from '../../utils/ptyChunkBuilder';
+import { clipboardKeyAction, copyTextToClipboard, planPasteSend } from '../../utils/terminalClipboard';
 import { appendToken, getBasePath } from '../../utils/apiUrl';
 
 class ScratchTerminal extends React.Component {
@@ -126,6 +127,37 @@ class ScratchTerminal extends React.Component {
 
     this.terminal.open(this.containerRef.current);
 
+    // Win/Linux 智能复制粘贴（同 TerminalPanel，见 utils/terminalClipboard.js）：
+    // xterm 6 把 Ctrl+C/Ctrl+V 当控制字符并 preventDefault，压掉原生 paste。
+    this.terminal.attachCustomKeyEventHandler((e) => {
+      const clipAction = clipboardKeyAction(e, { isMac });
+      if (clipAction === 'paste') {
+        // 主动读剪贴板（scratch 是真实 shell，无图片上传，纯文本），走 _pasteScratchText 安全路径。
+        if (navigator.clipboard?.readText) {
+          e.preventDefault();
+          e.stopPropagation();
+          // 双重粘贴防护：见 TerminalPanel 同名注释。主动读期间让 _handleScratchPaste 早退。
+          this._activePasteInFlight = true;
+          setTimeout(() => { this._activePasteInFlight = false; }, 0);
+          this._activeScratchPaste();
+          return false;
+        }
+        return false; // 非安全上下文无 clipboard API：放行原生 paste → _handleScratchPaste
+      }
+      if (clipAction === 'copy') {
+        const sel = this.terminal?.getSelection?.();
+        if (sel) {
+          // 仅复制成功才清选区（失败时保留，用户可改用 Ctrl+Insert）
+          e.preventDefault();
+          e.stopPropagation();
+          copyTextToClipboard(sel).then((ok) => { if (ok) this.terminal?.clearSelection?.(); });
+          return false;
+        }
+        return true; // 无选区：交回 xterm 发 \x03（SIGINT）
+      }
+      return true;
+    });
+
     this.terminal.onData((data) => {
       if (this.ws && this.ws.readyState === WebSocket.OPEN) {
         this.ws.send(JSON.stringify({ type: 'input', data }));
@@ -137,15 +169,20 @@ class ScratchTerminal extends React.Component {
     this._handleScratchBlur = () => { try { this.props.onFocusChange?.(false); } catch {} };
     // 粘贴注入防护：含 \x1b[20[01]~ 时接管（sanitize + 自行包裹），否则交回 xterm 默认处理
     this._handleScratchPaste = (e) => {
+      // 主动粘贴进行中：阻止原生 paste 叠加（见 attachCustomKeyEventHandler 的 _activePasteInFlight 注释）
+      if (this._activePasteInFlight) { e.preventDefault?.(); e.stopPropagation?.(); return; }
       const text = e.clipboardData?.getData('text');
       if (!text || !this.ws || this.ws.readyState !== WebSocket.OPEN) return;
-      const hasInjection = /\x1b\[20[01]~/.test(text);
-      if (this.terminal?.modes?.bracketedPasteMode && !hasInjection) return; // 干净粘贴交 xterm
-      if (hasInjection || text.includes('\n') || text.includes('\r')) {
+      // 包裹/消毒决策抽到 planPasteSend（与 TerminalPanel._handlePaste 同策略）：返回 null 交 xterm 处理
+      const data = planPasteSend(text, {
+        bracketedPasteMode: this.terminal?.modes?.bracketedPasteMode,
+        active: false,
+        sanitize: sanitizeBracketPasteText,
+      });
+      if (data != null) {
         e.preventDefault();
         e.stopPropagation();
-        const wrapped = `\x1b[200~${sanitizeBracketPasteText(text)}\x1b[201~`;
-        this.ws.send(JSON.stringify({ type: 'input', data: wrapped }));
+        this.ws.send(JSON.stringify({ type: 'input', data }));
       }
     };
     const ta = this.terminal.textarea;
@@ -167,6 +204,27 @@ class ScratchTerminal extends React.Component {
       });
     }
   }
+
+  // 主动粘贴的安全送出：复用 planPasteSend（active=true，无原生 paste 事件 → bracketedPasteMode 也自行包裹）
+  _pasteScratchText = (text) => {
+    if (!text || !this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    const data = planPasteSend(text, {
+      bracketedPasteMode: this.terminal?.modes?.bracketedPasteMode,
+      active: true,
+      sanitize: sanitizeBracketPasteText,
+    });
+    if (data != null) this.ws.send(JSON.stringify({ type: 'input', data }));
+  };
+
+  // 调用前已确认 navigator.clipboard.readText 存在（见 open() 中 attachCustomKeyEventHandler 的 paste 分支）
+  _activeScratchPaste = async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text) this._pasteScratchText(text);
+    } catch (err) {
+      console.warn('[CC Viewer] scratch active paste failed; fall back to Ctrl+Shift+V', err);
+    }
+  };
 
   _throttledWrite = (data) => {
     this._writeQ.push(data);

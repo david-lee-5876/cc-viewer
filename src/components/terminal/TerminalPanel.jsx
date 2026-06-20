@@ -21,6 +21,7 @@ import { BUILTIN_PRESETS } from '../../utils/builtinPresets.js';
 import { buildLocalUltraplan } from '../../utils/ultraplanTemplates';
 import { UltraplanController } from '../../utils/ultraplanController';
 import { buildBracketPasteSubmitChunks, BRACKET_PASTE_SUBMIT_SETTLE_MS, sanitizeBracketPasteText } from '../../utils/ptyChunkBuilder';
+import { clipboardKeyAction, copyTextToClipboard, planPasteSend } from '../../utils/terminalClipboard';
 import CustomUltraplanEditModal from './CustomUltraplanEditModal';
 import UltraplanExpertManagerModal from './UltraplanExpertManagerModal';
 import { visibleExpertKeys } from '../../utils/ultraplanExperts';
@@ -696,6 +697,37 @@ class TerminalPanel extends React.Component {
     // 写进 VS Code/Cursor keybindings 的 `\x1b\r` 等价。Claude Code CLI 识别这个序列为
     // "插入换行而非提交"。之前用 bracketed-paste-LF 对老版可能有效，2.x 版已不兼容。
     this.terminal.attachCustomKeyEventHandler((e) => {
+      // Win/Linux 智能复制粘贴（见 utils/terminalClipboard.js 注释）：xterm 6 把 Ctrl+C/Ctrl+V
+      // 当控制字符并 preventDefault，压掉原生 paste。这里在最先执行的 customKeyEventHandler 接管。
+      const clipAction = clipboardKeyAction(e, { isMac });
+      if (clipAction === 'paste') {
+        // 主动读剪贴板（不依赖被 xterm 压掉的原生 paste 默认动作 → 同样修复 Electron 端），
+        // 终端走 _pasteText 安全路径（bracketed-paste 包裹 + 注入消毒，保留图片粘贴）。
+        if (navigator.clipboard && (navigator.clipboard.read || navigator.clipboard.readText)) {
+          e.preventDefault();
+          e.stopPropagation();
+          // 双重粘贴防护：主动读剪贴板期间，若个别浏览器仍触发原生 paste（preventDefault 抑制
+          // paste 是约定行为、非规范硬保证），让 _handlePaste 早退，避免叠加。下个事件循环清闸。
+          this._activePasteInFlight = true;
+          setTimeout(() => { this._activePasteInFlight = false; }, 0);
+          this._activePaste();
+          return false;
+        }
+        // 非安全上下文（如 LAN HTTP）无 clipboard API：不 preventDefault，放行原生 paste → _handlePaste
+        return false;
+      }
+      if (clipAction === 'copy') {
+        const sel = this.terminal?.getSelection?.();
+        if (sel) {
+          // 有选区：复制（对齐 VS Code / Windows Terminal）。仅复制成功才清选区——失败（非安全
+          // 上下文且 execCommand 也失败）时保留选区，用户可改用 Ctrl+Insert 重试，不致"选区被吞"。
+          e.preventDefault();
+          e.stopPropagation();
+          copyTextToClipboard(sel).then((ok) => { if (ok) this.terminal?.clearSelection?.(); });
+          return false;
+        }
+        return true; // 无选区：交回 xterm 发 \x03（SIGINT），保留中断能力
+      }
       if (e.type === 'keydown' && e.key === 'Enter' && e.shiftKey) {
         // 必须显式 preventDefault：xterm customKeyEventHandler 返回 false 只阻 xterm 内部处理，
         // 不阻浏览器 textarea 默认行为（Enter 会往隐藏 textarea 塞 \n 再被 xterm onData 转发到 PTY）。
@@ -1229,6 +1261,8 @@ class TerminalPanel extends React.Component {
   }
 
   _handlePaste = (e) => {
+    // 主动粘贴进行中：阻止原生 paste 叠加（见 attachCustomKeyEventHandler 的 _activePasteInFlight 注释）
+    if (this._activePasteInFlight) { e.preventDefault?.(); e.stopPropagation?.(); return; }
     // 检查剪贴板中是否包含图片，如有则上传并将路径插入终端
     const items = e.clipboardData?.items;
     if (items) {
@@ -1245,18 +1279,71 @@ class TerminalPanel extends React.Component {
 
     const rawText = e.clipboardData?.getData('text');
     if (!rawText || !this.ws || this.ws.readyState !== WebSocket.OPEN) return;
-    // paste-injection 防护：剪贴板里内嵌的 \x1b[201~ 会提前闭合 bracketed paste 包裹，
-    // 余下字节作为真实按键注入。xterm 6.0 自动包裹路径不 sanitize（上游 7.0 才修），
-    // 故含该序列时我们接管：剥离后自行包裹发送，不再交给 xterm。
-    const hasInjection = /\x1b\[20[01]~/.test(rawText);
-    // 当 shell 已启用 bracketedPasteMode 且无注入序列时，xterm.js 会自动包裹，无需干预
-    if (this.terminal?.modes?.bracketedPasteMode && !hasInjection) return;
-    // shell 未启用 bracketed paste（或检测到注入序列）时，手动 sanitize + 包裹
-    if (hasInjection || rawText.includes('\n') || rawText.includes('\r')) {
+    // paste-injection 防护 + bracketed-paste 包裹决策抽到 planPasteSend（见 utils/terminalClipboard.js）：
+    // 剪贴板内嵌的 \x1b[201~ 会提前闭合包裹、余下字节作真实按键注入；xterm 6.0 自动包裹不 sanitize
+    // （上游 7.0 才修），故含该序列 / 多行时我们接管（preventDefault + 自行 sanitize 包裹），
+    // 否则返回 null 交回 xterm / 浏览器原生处理。
+    const data = planPasteSend(rawText, {
+      bracketedPasteMode: this.terminal?.modes?.bracketedPasteMode,
+      active: false,
+      sanitize: sanitizeBracketPasteText,
+    });
+    if (data != null) {
       e.preventDefault();
       e.stopPropagation();
-      const wrapped = `\x1b[200~${sanitizeBracketPasteText(rawText)}\x1b[201~`;
-      this.ws.send(JSON.stringify({ type: 'input', data: wrapped }));
+      this.ws.send(JSON.stringify({ type: 'input', data }));
+    }
+  };
+
+  // 主动粘贴的安全送出：复用 planPasteSend（active=true）。区别于 _handlePaste：这里没有原生
+  // paste 事件让 xterm 自动包裹，故 bracketedPasteMode 时也自行包裹（planPasteSend 内已处理）。
+  _pasteText = (rawText) => {
+    if (!rawText || !this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    const data = planPasteSend(rawText, {
+      bracketedPasteMode: this.terminal?.modes?.bracketedPasteMode,
+      active: true,
+      sanitize: sanitizeBracketPasteText,
+    });
+    if (data != null) this.ws.send(JSON.stringify({ type: 'input', data }));
+  };
+
+  // Ctrl+V 主动读剪贴板：优先取图片（与 _handlePaste 一致地走上传），否则取文本走 _pasteText。
+  // 取不到文本（如剪贴板仅 text/html）或 read() 不可用 / 失败时，显式回退到 readText。
+  _activePaste = async () => {
+    const clip = navigator.clipboard;
+    if (clip?.read) {
+      let items = null;
+      try { items = await clip.read(); }
+      catch (err) { console.warn('[CC Viewer] clipboard.read() 失败，回退 readText', err); }
+      if (items) {
+        for (const item of items) {
+          const imgType = item.types?.find((ty) => ty.startsWith('image/'));
+          if (imgType) {
+            try {
+              const blob = await item.getType(imgType);
+              this._uploadClipboardImage(new File([blob], 'clipboard-image', { type: imgType }));
+              return;
+            } catch { /* 取图失败 → 落到文本 */ }
+          }
+        }
+        // 无图片：从 ClipboardItem 取 text/plain；取到则发送返回，取不到（仅 html 等）显式落到 readText
+        const withText = items.find((it) => it.types?.includes('text/plain'));
+        if (withText) {
+          try {
+            const text = await (await withText.getType('text/plain')).text();
+            if (text) this._pasteText(text);
+            return;
+          } catch { /* 取文本失败 → 落到 readText */ }
+        }
+      }
+    }
+    if (clip?.readText) {
+      try {
+        const text = await clip.readText();
+        if (text) this._pasteText(text);
+      } catch (err) {
+        console.warn('[CC Viewer] active paste failed; fall back to Ctrl+Shift+V', err);
+      }
     }
   };
 
