@@ -455,7 +455,18 @@
     const svgEl = b.querySelector('svg');
     if (svgEl && !svgEl.hasAttribute('aria-hidden')) svgEl.setAttribute('aria-hidden', 'true'); // 装饰性图标对 AT 隐藏
     const payload = Object.assign({ tabId: headerModelTabId }, opts && opts.payload, { type });
-    b.addEventListener('click', (e) => { e.stopPropagation(); window.tabAPI.headerAction(payload); });
+    b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      // 需锚定坐标的按钮(如二维码弹层):点击时附带「按钮右缘到窗口右缘的距离」,React 端据此把弹层
+      // 锚到图标正下方(同 menuBarOpen 传 x 的机制)。tab bar 视图未被原生缩放、React 内容视图按
+      // ccv_displayScale 缩放,故 React 端会再除以缩放系数。
+      if (opts && opts.withRect) {
+        const r = b.getBoundingClientRect();
+        window.tabAPI.headerAction(Object.assign({}, payload, { rightOffset: Math.round(window.innerWidth - r.right) }));
+      } else {
+        window.tabAPI.headerAction(payload);
+      }
+    });
     return b;
   }
   function renderClusters(){
@@ -498,7 +509,7 @@
       rightCluster.appendChild(c);
     }
     if (m.qr) {
-      rightCluster.appendChild(hBtn(HSVG.qr, (m.qr && m.qr.title) || 'QR', 'qrOpen'));
+      rightCluster.appendChild(hBtn(HSVG.qr, (m.qr && m.qr.title) || 'QR', 'qrOpen', { withRect: true }));
     }
     if (m.theme) {
       rightCluster.appendChild(hBtn(m.theme.mode === 'light' ? HSVG.sun : HSVG.moon, m.theme.title || '', 'theme'));

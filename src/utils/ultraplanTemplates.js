@@ -12,7 +12,7 @@
 export const ULTRAPLAN_VARIANTS = {
 
   codeExpert: `<system-reminder>
-[SCOPED INSTRUCTION] The following instructions apply only to the next 1–3 interactions. Once the task is complete, these instructions should gradually decrease in priority and no longer affect subsequent interactions. You should be adept at utilizing tools such as \`AskUserQuestion\`, \`EnterPlanMode\`, and \`TeamCreate\`, rather than relying solely on plain text processing.
+[SCOPED INSTRUCTION] The following instructions apply only to the next 1–3 interactions. Once the task is complete, these instructions should gradually decrease in priority and no longer affect subsequent interactions. You should be adept at utilizing tools such as \`AskUserQuestion\`, \`EnterPlanMode\`, and \`TeamCreate\`, rather than relying solely on plain text processing. Before execution, you must ensure that the \`EnterPlanMode\`, \`ExitPlanMode\`, \`TaskCreate\`, \`TaskGet\` and \`TaskList\` tools are loaded.
 
 Pre-requisite: Use \`AskUserQuestion\` to clarify user intent whenever the request is ambiguous (target element, interaction style, scope of platforms, etc.). Skip only if the intent is unambiguous.
 

@@ -92,7 +92,7 @@ class AppHeader extends React.Component {
 
   constructor(props) {
     super(props);
-    this.state = { countdownText: '', promptModalVisible: false, promptData: [], promptViewMode: 'original', settingsDrawerVisible: false, globalSettingsVisible: false, projectStatsVisible: false, projectStats: null, projectStatsLoading: false, localUrl: '', pluginModalVisible: false, processModalVisible: false, logoDropdownOpen: false, electronMenuOpen: false, electronMenuBar: null, cacheHighlightIdx: null, cacheHighlightFading: false, calibrationModel: readCalibrationModel(), proxyModalVisible: false, messagingModalVisible: false, messagingInitialTool: null, imRecordVisible: false, imRecordPlatform: null, logDirDraft: null, qrPopoverOpen: false, electronQrOpen: false, _skillsModal: { open: false, loading: false, skills: [], error: null, toggling: new Set() },
+    this.state = { countdownText: '', promptModalVisible: false, promptData: [], promptViewMode: 'original', settingsDrawerVisible: false, globalSettingsVisible: false, projectStatsVisible: false, projectStats: null, projectStatsLoading: false, localUrl: '', pluginModalVisible: false, processModalVisible: false, logoDropdownOpen: false, electronMenuOpen: false, electronMenuBar: null, cacheHighlightIdx: null, cacheHighlightFading: false, calibrationModel: readCalibrationModel(), proxyModalVisible: false, messagingModalVisible: false, messagingInitialTool: null, imRecordVisible: false, imRecordPlatform: null, logDirDraft: null, qrPopoverOpen: false, electronQrOpen: false, electronQrAnchor: null, _skillsModal: { open: false, loading: false, skills: [], error: null, toggling: new Set() },
       // 文件系统权威的 skill 列表（/api/skills 返回）；live-tail 下作为 popover chip 和管理弹窗的共享数据源。
       // null=未加载 / false=失败 / [] 或 Array=加载结果。workspace 切换由 componentDidUpdate + seq 控制。
       _fsSkills: null,
@@ -323,10 +323,40 @@ class AppHeader extends React.Component {
       case 'proxy': this.setState({ proxyModalVisible: true }); break;
       case 'im': this.setState({ imRecordVisible: true, imRecordPlatform: payload.id }); break;
       case 'menuShortcut': { const d = this._getMenuDescriptors().find(x => x.key === payload.key); if (d && d.onClick) d.onClick(); break; }
-      case 'qrOpen': this.setState((s) => ({ electronQrOpen: !s.electronQrOpen })); break;
+      case 'qrOpen': this.setState((s) => ({
+        electronQrOpen: !s.electronQrOpen,
+        // 锚点坐标仅在拿到有限数值时更新(Number.isFinite 同时挡掉 undefined/null/NaN);
+        // 关闭/异常路径保留上次值,避免误用 0/NaN 导致弹层错位。
+        electronQrAnchor: Number.isFinite(payload.rightOffset) ? payload.rightOffset : s.electronQrAnchor,
+      })); break;
       default: break;
     }
   }
+
+  // Electron「显示大小」用原生 webFrame.setZoomFactor 缩放 React 内容视图(tab bar 视图不缩放,
+  // 见 electron/tab-content-preload.js + main.js 防双重缩放注释)。tab bar 报来的按钮坐标是窗口
+  // 像素,需除以本视图缩放系数才能换算成 React CSS 像素。
+  _displayZoom() {
+    let zoom = 1;
+    try {
+      const n = Number(localStorage.getItem('ccv_displayScale'));
+      if (Number.isFinite(n) && n >= 50 && n <= 200) zoom = n / 100;
+    } catch {}
+    return zoom;
+  }
+
+  // 二维码弹层(Electron):点页面空白处 / 按 Esc 关闭。原生扫码图标在独立的 tab bar 视图,其点击
+  // 经 IPC 走 qrOpen toggle,不会在本文档产生 DOM 事件,故与此监听无「开即关」竞态。guard 在
+  // electronQrOpen 上,仅 Electron 生效,不影响 Web 版(qrPopoverOpen,trigger=['click'] 自带关闭)。
+  _onQrOutsidePointer = (e) => {
+    if (!this.state.electronQrOpen) return;
+    const tgt = e && e.target;
+    if (tgt && typeof tgt.closest === 'function' && tgt.closest('.ant-popover')) return; // 点在弹层内(含内嵌 ConceptHelp)不关
+    this.setState({ electronQrOpen: false });
+  };
+  _onQrKeyDown = (e) => {
+    if (e && e.key === 'Escape' && this.state.electronQrOpen) this.setState({ electronQrOpen: false });
+  };
 
   componentDidMount() {
     this.startCountdown();
@@ -351,6 +381,9 @@ class AppHeader extends React.Component {
     if (!this.props.isLocalLog) this.reloadFsSkills();
     // ipinfo.io 请求已移到 CountryFlag 组件里
     this._setupHeaderBridge();
+    // 二维码弹层(Electron):空白处点击 / Esc 关闭。监听内部 guard 在 electronQrOpen 上。
+    document.addEventListener('mousedown', this._onQrOutsidePointer);
+    document.addEventListener('keydown', this._onQrKeyDown);
   }
 
   componentDidUpdate(prevProps) {
@@ -699,6 +732,8 @@ class AppHeader extends React.Component {
     if (this._cacheAutoFadeTimer) clearTimeout(this._cacheAutoFadeTimer);
     if (this._cacheHighlightDelayTimer) clearTimeout(this._cacheHighlightDelayTimer);
     this._cacheUnbindScrollFade();
+    document.removeEventListener('mousedown', this._onQrOutsidePointer);
+    document.removeEventListener('keydown', this._onQrKeyDown);
     // 让任何在途的 reloadFsSkills / loadMemory / loadMemoryDetail 回包 seq 校验失败
     // → 不会 setState 到已卸载组件。React 18 下 setState-on-unmounted 本身是静默 no-op，
     // 但明确标记更稳妥（也保证三个 seq 处理一致，code review 一致性诉求）。
@@ -1579,13 +1614,7 @@ class AppHeader extends React.Component {
             const mb = this.state.electronMenuBar;
             const menu = (mb.menus || []).find((m) => m.id === mb.menuId);
             if (!menu) return null;
-            let zoom = 1;
-            try {
-              // ccv_displayScale 由「显示大小」设置维护(写入见 displayScaleHelper,首屏应用见
-              // electron/tab-content-preload.js)——存储机制若重构,此处读取需同步。
-              const n = Number(localStorage.getItem('ccv_displayScale'));
-              if (Number.isFinite(n) && n >= 50 && n <= 200) zoom = n / 100;
-            } catch {}
+            const zoom = this._displayZoom();
             const items = (menu.items || []).map((it, i) => (it.type === 'separator'
               ? { type: 'divider', key: `sep-${i}` }
               : {
@@ -1641,7 +1670,13 @@ class AppHeader extends React.Component {
           {!isLocalLog && IM_PLATFORMS.map((p) => (
             <ImStatusChip key={p.id} descriptor={p} onStatus={this._onImStatus} onClick={() => this.setState({ imRecordVisible: true, imRecordPlatform: p.id })} />
           ))}
-          {isElectronTab && (
+          {isElectronTab && (() => {
+            // 锚点 right = 「图标右缘到窗口右缘的距离」÷ 本视图缩放系数(rightOffset 由 tab bar 点击时
+            // 实测回传,自动覆盖按钮增减 / win32 右侧 140px overlay-spacer / 显示缩放)。首次未拿到坐标回退 90。
+            const anchorRight = this.state.electronQrAnchor != null
+              ? Math.round(this.state.electronQrAnchor / this._displayZoom())
+              : 90;
+            return (
             <Popover
               content={
                 <div className={styles.qrcodePopover} onClick={e => e.stopPropagation()}>
@@ -1668,9 +1703,10 @@ class AppHeader extends React.Component {
               getPopupContainer={() => document.body}
               overlayInnerStyle={{ background: 'var(--bg-elevated)', border: '1px solid var(--border-hover)', borderRadius: 8, padding: '8px 8px' }}
             >
-              <span aria-hidden="true" style={{ position: 'fixed', top: 4, right: 90, width: 1, height: 1, pointerEvents: 'none' }} />
+              <span aria-hidden="true" style={{ position: 'fixed', top: 4, right: anchorRight, width: 1, height: 1, pointerEvents: 'none' }} />
             </Popover>
-          )}
+            );
+          })()}
           {!isElectronTab && this.props.activeProxyId && this.props.activeProxyId !== 'max' && (() => {
             const p = (this.props.proxyProfiles || []).find(x => x.id === this.props.activeProxyId);
             return p ? (

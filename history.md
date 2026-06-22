@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.6.321 (2026-06-23)
+
+- fix(electron): 手机扫码编程弹窗——二维码弹层定位改用 tab bar 点击实测坐标 + 显示缩放换算（修复偏右错位），并支持点击页面空白处 / Esc 关闭（此前只能再次点图标开关）
+- feat(ultraplan): 代码专家模板首段新增「执行前须确保已加载 `EnterPlanMode`/`ExitPlanMode`/`TaskCreate`/`TaskGet`/`TaskList` 工具」一句；源模板、`ultraAgents/code-expert.json` demo 与 18 语言 `concepts/*/UltraPlan.md` 同步
+- test(ultraplan): 新增守卫单测——18 语言 `UltraPlan.md` 内嵌代码专家块须与源模板逐字节一致
+
 ## 1.6.320 (2026-06-22)
 
 - feat(im): 新增 IM 内置默认技能 `manage-ccv-projects`——列出启动过的 ccv 项目、按需在局域网启动指定项目并回单行可访问地址、纯打招呼时主动自我介绍；worker 启动时受管同步注入到 `IM_<id>/.claude/skills/`（按包内最新覆盖内容、尊重停用态不挪回、删除后重建），配套语言无关脚本 `ccv-projects.mjs`（清理继承的 CCV_* 后台起 ccv、loopback 免鉴权探测、是否带 token 自适应、纯 Node 跨平台）；18 语言 SKILL.md
