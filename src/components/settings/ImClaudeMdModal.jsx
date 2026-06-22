@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Modal, Input, Spin, message } from 'antd';
+import { Modal, Input, Spin, Button, Popconfirm, message } from 'antd';
 import { apiUrl } from '../../utils/apiUrl';
 import { imTr as _tr } from '../../utils/imTr';
 
@@ -10,6 +10,7 @@ export default function ImClaudeMdModal({ open, platform, onClose }) {
   const [content, setContent] = useState('');
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [restoring, setRestoring] = useState(false);
 
   useEffect(() => {
     if (!open || !platform) return undefined;
@@ -41,6 +42,22 @@ export default function ImClaudeMdModal({ open, platform, onClose }) {
     }
   };
 
+  // 恢复默认：拉取当前语言的预置文本（?default=1，绕过磁盘文件）载入编辑框，不落盘——由用户点保存才生效。
+  const restoreDefault = async () => {
+    setRestoring(true);
+    try {
+      const r = await fetch(apiUrl(`/api/im/${encodeURIComponent(platform)}/claude-md?default=1`));
+      if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error || `HTTP ${r.status}`); }
+      const d = await r.json();
+      setContent(typeof d.content === 'string' ? d.content : '');
+      message.success(_tr('ui.im.personaRestored', null, 'Loaded the default preset — review and save'));
+    } catch (e) {
+      message.error(_tr('ui.im.restoreFailed', null, 'Restore failed') + (e?.message ? `: ${e.message}` : ''));
+    } finally {
+      setRestoring(false);
+    }
+  };
+
   return (
     <Modal
       open={open}
@@ -58,13 +75,28 @@ export default function ImClaudeMdModal({ open, platform, onClose }) {
       {loading ? (
         <div style={{ textAlign: 'center', padding: '40px 0' }}><Spin /></div>
       ) : (
-        <Input.TextArea
-          value={content}
-          onChange={(e) => setContent(e.target.value)}
-          autoSize={{ minRows: 16, maxRows: 28 }}
-          spellCheck={false}
-          style={{ fontFamily: 'var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace)', fontSize: 13 }}
-        />
+        <>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+            <Popconfirm
+              title={_tr('ui.im.restoreDefaultConfirm', null, 'Replace the current text with the default preset? (takes effect after you save)')}
+              okText={_tr('ui.ok', null, 'OK')}
+              cancelText={_tr('ui.cancel', null, 'Cancel')}
+              onConfirm={restoreDefault}
+              disabled={saving || restoring}
+            >
+              <Button size="small" type="link" loading={restoring} disabled={saving}>
+                {_tr('ui.im.restoreDefault', null, 'Restore default')}
+              </Button>
+            </Popconfirm>
+          </div>
+          <Input.TextArea
+            value={content}
+            onChange={(e) => setContent(e.target.value)}
+            autoSize={{ minRows: 16, maxRows: 28 }}
+            spellCheck={false}
+            style={{ fontFamily: 'var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace)', fontSize: 13 }}
+          />
+        </>
       )}
     </Modal>
   );

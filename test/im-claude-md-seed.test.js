@@ -16,6 +16,7 @@ process.env.CLAUDE_CONFIG_DIR = __isoDir;
 const { LOG_DIR } = await import('../findcc.js');
 const { ensureImClaudeMd, buildImClaudeMdPreset, platformLabel, readImClaudeMd, writeImClaudeMd } = await import('../server/lib/im-claude-md.js');
 const { imDir } = await import('../server/lib/im-lock.js');
+const { IM_PRESET_DIR } = await import('../server/_paths.js');
 
 let n = 0;
 function freshId() { return `test_md_${process.pid}_${n++}`; }
@@ -59,11 +60,19 @@ describe('im-claude-md seed', () => {
 
   it('preset embeds the platform label and hard interaction constraints', () => {
     const md = buildImClaudeMdPreset('dingtalk');
-    assert.ok(md.includes(platformLabel('dingtalk')));
-    assert.match(md, /NEVER use the AskUserQuestion tool/);
-    assert.match(md, /untrusted/i);
+    assert.ok(md.includes(platformLabel('dingtalk')));     // 默认语言 zh → 「钉钉」
+    assert.match(md, /禁止使用 AskUserQuestion 工具/);       // 单语言 zh 母本
+    assert.match(md, /不可信/);                              // 来信视为不可信输入
     assert.equal(platformLabel('discord'), 'Discord');
     assert.equal(platformLabel('unknownxyz'), 'unknownxyz'); // 未知 id 回退到 id 本身
+  });
+
+  it('未知语言回退 zh 模板，但平台名按该语言显示', () => {
+    const md = buildImClaudeMdPreset('dingtalk', 'xx');     // 无 xx.md → 回退 zh.md
+    assert.match(md, /禁止使用 AskUserQuestion 工具/);       // 正文来自 zh 母本
+    assert.ok(md.includes('DingTalk'));                     // 平台名按非 zh → 英文品牌名
+    assert.equal(platformLabel('dingtalk', 'xx'), 'DingTalk');
+    assert.equal(platformLabel('dingtalk', 'zh-TW'), '钉钉'); // zh* 用中文名
   });
 });
 
@@ -120,4 +129,25 @@ describe('im-claude-md read/write (模型性格定义 editor)', () => {
     assert.deepEqual(leftover, []);
     wipe(id);
   });
+});
+
+// 守卫：随包发布的每种语言人格预置都能渲染（占位符替换干净、含关键约束）。防止某语言文件被误删/改名/结构破坏。
+describe('随包多语言人格预置完整性', () => {
+  const langs = readdirSync(IM_PRESET_DIR).filter((f) => f.endsWith('.md')).map((f) => f.replace(/\.md$/, ''));
+
+  it('至少覆盖 18 种语言', () => {
+    assert.ok(langs.length >= 18, `仅发现 ${langs.length} 种：${langs.join(',')}`);
+  });
+
+  for (const lang of langs) {
+    it(`lang=${lang}：占位符替换干净且含关键约束`, () => {
+      const md = buildImClaudeMdPreset('dingtalk', lang);
+      assert.ok(!md.includes('{platform}') && !md.includes('{id}'), '不应残留占位符');
+      assert.ok(md.includes(platformLabel('dingtalk', lang)));
+      assert.ok(md.includes('IM_dingtalk/'));
+      assert.match(md, /AskUserQuestion/);
+      assert.match(md, /dangerously-skip-permissions/);
+      assert.match(md, /manage-ccv-projects/);
+    });
+  }
 });

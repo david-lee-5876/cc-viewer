@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.6.320 (2026-06-22)
+
+- feat(im): 新增 IM 内置默认技能 `manage-ccv-projects`——列出启动过的 ccv 项目、按需在局域网启动指定项目并回单行可访问地址、纯打招呼时主动自我介绍；worker 启动时受管同步注入到 `IM_<id>/.claude/skills/`（按包内最新覆盖内容、尊重停用态不挪回、删除后重建），配套语言无关脚本 `ccv-projects.mjs`（清理继承的 CCV_* 后台起 ccv、loopback 免鉴权探测、是否带 token 自适应、纯 Node 跨平台）；18 语言 SKILL.md
+- feat(im): IM 人格预置 CLAUDE.md 改为按 `preferences.lang` 选语言（`server/imPreset/<lang>.md`，`{platform}`/`{id}` 运行时替换、目录缺失回退 zh，`openSync wx` 原子创建从不覆盖用户编辑），由中英双语改为单语言；18 语言
+- feat(im): 「模型性格定义」编辑器新增「恢复默认」按钮（GET `claude-md?default=1` 拉取当前语言预置载入编辑框、二次确认后保存；新增 4 个 i18n 键 ×18 语言）
+- test(im): 新增 `im-skills` / `im-lang` / `ccv-projects` 单测，及 imSkills/imPreset 多语言完整性守卫（遍历 18 语言验证注入与渲染、占位符替换、关键约束）
+
 ## 1.6.319 (2026-06-20)
 
 - fix(terminal): Win/Linux 终端支持 Ctrl+C 复制 / Ctrl+V 粘贴（此前 xterm 把二者当控制字符并 preventDefault，只能用 Ctrl+Shift+V / Shift+Insert）——Ctrl+C 有选区时复制、复制成功才清选区，无选区仍发 SIGINT；Ctrl+V 主动读剪贴板走 bracketed-paste 包裹 + 注入消毒（保留图片粘贴、非安全上下文回退原生 paste），主终端与 scratch 终端同步，Mac 走 Cmd 不变

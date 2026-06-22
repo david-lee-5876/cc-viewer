@@ -451,6 +451,7 @@ async function runImMode(platformId) {
 
   const { acquireImLock, releaseImLock, imDir } = await import('./server/lib/im-lock.js');
   const { ensureImClaudeMd } = await import('./server/lib/im-claude-md.js');
+  const { ensureImBuiltinSkills } = await import('./server/lib/im-skills.js');
 
   const dir = imDir(platformId);
   mkdirSync(dir, { recursive: true });
@@ -465,9 +466,13 @@ async function runImMode(platformId) {
   // SIGKILL 不触发，由 manager 的 getImLiveness 兜底清理陈旧锁）
   process.on('exit', () => { try { releaseImLock(platformId, process.pid); } catch { /* noop */ } });
 
-  // 首次缺失则生成默认 CLAUDE.md（行为约束，建议层）
+  // 首次缺失则生成默认 CLAUDE.md（行为约束，建议层）。失败非致命：worker 照常启动。
   try { ensureImClaudeMd(platformId, dir); }
-  catch (e) { console.error('[CC Viewer] ensureImClaudeMd failed:', e.message); }
+  catch (e) { console.warn('[CC Viewer] ensureImClaudeMd failed (non-fatal):', e.message); }
+
+  // 受管同步内置默认技能（manage-ccv-projects：列出/启动 ccv 项目 + 自我介绍）。失败非致命：worker 照常启动。
+  try { ensureImBuiltinSkills(platformId, dir); }
+  catch (e) { console.warn('[CC Viewer] ensureImBuiltinSkills failed (non-fatal):', e.message); }
 
   // 以下 env 必须在 import server.js（runCliMode 内）之前设置：server 顶层读 START_PORT/MAX_PORT/HOST。
   process.env.CCV_IM_PLATFORM = platformId;

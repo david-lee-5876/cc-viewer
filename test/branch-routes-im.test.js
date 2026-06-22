@@ -37,12 +37,12 @@ const fakeReq = (bodyStr) => ({
 });
 
 /** Direct route.handler call; collects status/payload, resolves on res.end. */
-function call(route, { pathname, body, isLocal = true, deps, req }) {
+function call(route, { pathname, searchParams, body, isLocal = true, deps, req }) {
   let status = 0, payload = '';
   let resolveEnd; const done = new Promise((r) => { resolveEnd = r; });
   const res = { writeHead(s) { status = s; }, end(b) { payload = b || ''; resolveEnd(); } };
   const r = req || fakeReq(body == null ? null : (typeof body === 'string' ? body : JSON.stringify(body)));
-  route.handler(r, res, { pathname }, isLocal, deps);
+  route.handler(r, res, { pathname, searchParams }, isLocal, deps);
   return done.then(() => ({ status, payload, json: () => JSON.parse(payload) }));
 }
 
@@ -236,6 +236,15 @@ describe('server/routes/im.js 分支补齐', { concurrency: false }, () => {
     const route = imRoutes.find((r) => r.predicate('/api/im/feishu/claude-md', 'GET'));
     const r = await call(route, { pathname: '/api/im/feishu/claude-md', isLocal: false, deps: { im: {} } });
     assert.equal(r.status, 403);
+  });
+  it('GET claude-md?default=1 → 返回当前语言预置（绕过磁盘文件）', async () => {
+    const route = imRoutes.find((r) => r.predicate('/api/im/dingtalk/claude-md', 'GET'));
+    const r = await call(route, { pathname: '/api/im/dingtalk/claude-md', searchParams: new URLSearchParams({ default: '1' }), deps: { im: {} } });
+    assert.equal(r.status, 200);
+    const j = r.json();
+    assert.equal(j.platform, 'dingtalk');
+    assert.match(j.content, /AskUserQuestion/);   // 预置正文（不读磁盘文件）
+    assert.match(j.content, /IM_dingtalk\//);     // {id} 已替换
   });
 
   // ── imClaudeMdPost: notFound + loopbackOnly + L254 catch（坏 JSON） + L267 `|| e` ──

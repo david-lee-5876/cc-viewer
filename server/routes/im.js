@@ -17,8 +17,9 @@
 import { getDescriptor, loadConfig, loadState, saveConfig } from '../lib/im-config.js';
 import { findRecentLog } from '../lib/interceptor-core.js';
 import { readSenders } from '../lib/im-senders.js';
-import { readImClaudeMd, writeImClaudeMd, MAX_CLAUDE_MD_CHARS } from '../lib/im-claude-md.js';
+import { readImClaudeMd, writeImClaudeMd, buildImClaudeMdPreset, MAX_CLAUDE_MD_CHARS } from '../lib/im-claude-md.js';
 import { imDir } from '../lib/im-lock.js';
+import { resolvePrefLang } from '../lib/im-lang.js';
 import { listSkills, moveSkill, deleteSkill } from '../lib/skills-api.js';
 import { importSkillTo } from './skills.js';
 import { LOG_DIR } from '../../findcc.js';
@@ -236,13 +237,17 @@ function imSenders(req, res, parsedUrl, isLocal, deps) {
 
 // 「模型性格定义」= 该 IM worker 工作目录下的 CLAUDE.md。loopback-only：本地文件内容、admin-only。
 // CLAUDE.md 仅在 worker 启动时读取一次，故保存后需重启该 IM worker 才生效（前端据此提示用户）。
+// ?default=1：返回当前语言的预置文本（绕过磁盘文件），供编辑器「恢复默认」按钮加载——不落盘，由用户保存才生效。
 function imClaudeMdGet(req, res, parsedUrl, isLocal, deps) {
   const id = platformOf(parsedUrl.pathname);
   if (!id) { notFound(res); return; }
   if (!isLocal) { loopbackOnly(res); return; }
   try {
+    const def = parsedUrl?.searchParams?.get('default');
+    const lang = resolvePrefLang();
+    const content = (def === '1' || def === 'true') ? buildImClaudeMdPreset(id, lang) : readImClaudeMd(id, lang);
     res.writeHead(200, JSON_HEADERS);
-    res.end(JSON.stringify({ platform: id, content: readImClaudeMd(id) }));
+    res.end(JSON.stringify({ platform: id, content }));
   } catch (e) {
     res.writeHead(500, JSON_HEADERS);
     res.end(JSON.stringify({ error: String(e?.message || e) }));
