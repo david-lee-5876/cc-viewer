@@ -43,6 +43,10 @@ jobs:
 
       - name: Build Electron (mac)
         if: matrix.platform == 'mac'
+        # Apple 公证(notarytool)在「开发者协议过期/未签署」时返回 HTTP 403，与代码无关。容错处理：
+        # 公证失败只让本步骤红叉、跳过 mac 产物，不阻断整条发布链——win/linux 产物、GitHub Release、
+        # Homebrew bump 照常完成。协议在 developer.apple.com 重新签署后，mac 自动恢复正常公证并上传。
+        continue-on-error: true
         timeout-minutes: 60
         run: npx electron-builder --mac --publish never
         env:
