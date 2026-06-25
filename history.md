@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.6.326 (2026-06-25)
+
+- feat(im/feishu,wecom): 飞书 / 企业微信回复新增「AI 卡片逐字流式」对标钉钉，新增通用开关 `aiCard`（默认关，opt-in）。飞书走 CardKit v1：建卡（`streaming_mode`）→ 引用 `card_id` 发 interactive 消息 → `cardElement.content` 逐字覆写正文（飞书自动 diff 出打字机）→ `card.settings` 关流+更新预览摘要，结束以 transcript 权威全文落定；缺 `cardkit:card:write` scope 或建卡失败自动回退到 1.0 占位卡片。企业微信走智能机器人长连接 stream 被动回复：入站帧 `req_id` 透传（挂进 `normalizeInbound` 的 target）→ `replyStream` 即时 ack 开流 / 逐帧 / `finish=true` 收尾，`replyStreamNonBlocking` 跳帧防积压，无 frame 回退 proactive 文本。核心流式总开关由钉钉专属 `aiCardTemplateId` 泛化为可选 `adapter.streamEnabled(cfg)`（适配器未定义则回落 `!!aiCardTemplateId`，钉钉零回归）；起流式前额外校验适配器具备 `updateAckCard`（杜绝能逐字推却无法 finalize）、飞书关流失败落诊断；`ui.im.aiCard`(+Help) 18 语言
+- test(im/feishu,wecom): 新增飞书 CardKit（`streamEnabled` / 建卡+引用发送 / 缺 cardkit 能力回退 1.0 / 建卡 code 非0+throw 回退 / `cardElement.content` sequence 单调递增+uuid / finalize 覆写全文+关流+summary）与企业微信（`streamEnabled` / `sendAckCard` 开流+整帧透传 / 无 frame 回退 / `replyStreamNonBlocking` skipped 不丢内容 / `finish=true` 收尾）适配器分支单测，及 feishu/wecom 桥接端到端流式（ack 开流→finalize 收尾 streamId 全程一致、`aiCard` 关不开流回退）；feishu/wecom config 默认补 `aiCard:false`
+
 ## 1.6.325 (2026-06-24)
 
 - feat(im/dingtalk): 钉钉回复新增「AI 卡片逐字流式 + flowStatus 状态标签」——填 `aiCardTemplateId`（AI 卡片场景模板，需声明流式变量 + flowStatus 变量）后，回复在对话过程中经 `/v1.0/card/streaming` 逐字吐字，并用 flowStatus 状态标签（处理中→执行完成/执行失败）替代「[收到]」文本，结束以 transcript 权威全文落定；未配置或流式失败时回退到普通卡片(`cardTemplateId`)单次更新或纯文本。逐字文本源复用 interceptor 主 agent SSE（仅 worker、跳过 thinking/teammate）；新增 `aiCardStreamKey` 配置（流式变量名，默认 `content`，模板用别名时填）；推送轮询 300ms；`stream-armed/stream-handle/stream-push` 审计便于诊断；help 注明「建卡失败静默回退普通卡片/纯文本」与「短/秒回回复无打字机（结果仍正确）」；`ui.dingtalk.aiCardTemplateId`/`aiCardStreamKey`(+Help) 18 语言

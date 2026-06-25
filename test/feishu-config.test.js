@@ -16,7 +16,7 @@ describe('feishu descriptor + normalize', () => {
   it('exposes the feishu defaults and allowList field', () => {
     const d = getDescriptor('feishu');
     assert.equal(d.allowListField, 'allowUserIds');
-    assert.deepEqual(d.defaults, { enabled: false, appId: '', appSecret: '', region: 'feishu', allowUserIds: [], maxChunkChars: 3800, blockOnSkipPermissions: false, ackCard: true });
+    assert.deepEqual(d.defaults, { enabled: false, appId: '', appSecret: '', region: 'feishu', allowUserIds: [], maxChunkChars: 3800, blockOnSkipPermissions: false, ackCard: true, aiCard: false });
   });
 
   it('empty config matches the default shape', () => {
@@ -25,7 +25,7 @@ describe('feishu descriptor + normalize', () => {
 
   it('coerces types, trims, de-dups allowUserIds, clamps chunk', () => {
     const n = normalize('feishu', { enabled: 1, appId: '  cli_x  ', appSecret: ' sec ', allowUserIds: ['a', 'a', ' b ', '', 7], maxChunkChars: '6000' });
-    assert.deepEqual(n, { enabled: true, appId: 'cli_x', appSecret: 'sec', region: 'feishu', allowUserIds: ['a', 'b'], maxChunkChars: 5000, blockOnSkipPermissions: false, ackCard: true });
+    assert.deepEqual(n, { enabled: true, appId: 'cli_x', appSecret: 'sec', region: 'feishu', allowUserIds: ['a', 'b'], maxChunkChars: 5000, blockOnSkipPermissions: false, ackCard: true, aiCard: false });
   });
 
   it('region normalizes to feishu unless explicitly lark', () => {
@@ -44,7 +44,7 @@ describe('feishu save / load roundtrip', () => {
   it('roundtrips (plaintext in memory, base64 cred/secret on disk), keeps region plaintext', () => {
     reset();
     saveConfig('feishu', { enabled: true, appId: 'cli_abc', appSecret: 'topsecret', region: 'lark', allowUserIds: ['ou_1'] });
-    assert.deepEqual(loadConfig('feishu'), { enabled: true, appId: 'cli_abc', appSecret: 'topsecret', region: 'lark', allowUserIds: ['ou_1'], maxChunkChars: 3800, blockOnSkipPermissions: false, ackCard: true });
+    assert.deepEqual(loadConfig('feishu'), { enabled: true, appId: 'cli_abc', appSecret: 'topsecret', region: 'lark', allowUserIds: ['ou_1'], maxChunkChars: 3800, blockOnSkipPermissions: false, ackCard: true, aiCard: false });
     const onDisk = JSON.parse(readFileSync(getPrefsPath(), 'utf-8'));
     assert.equal(onDisk.feishu.appSecret, Buffer.from('topsecret', 'utf-8').toString('base64'));
     assert.equal(onDisk.feishu.appId, Buffer.from('cli_abc', 'utf-8').toString('base64'));

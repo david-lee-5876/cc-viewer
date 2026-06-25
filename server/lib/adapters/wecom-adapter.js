@@ -11,6 +11,7 @@
 //
 // Console prerequisite (no code equivalent — surfaced in the UI help/README): create a 智能机器人,
 // set its API 接收模式 to 长连接, copy the botId + secret, and add the bot to a chat.
+import { randomUUID } from 'node:crypto';
 import { registerAdapter } from '../im-bridge-core.js';
 
 // ─── test seam: a fake SDK factory (zero real SDK / socket) ───
@@ -46,7 +47,10 @@ function normalizeInbound(frame) {
     isGroup,
     senderId,
     msgId: b.msgid,
-    target: { conversationId: receiveId, receiveId },
+    // 逐字流式（aiCard）靠被动回复 replyStream，须透传入站帧的 req_id。core 入队是浅展开
+    // `{ ...target, ... }`，故把整帧挂进 target 内层才能随队列项流转到 sendAckCard/streamCardText/
+    // updateAckCard。非流式路径不读它，无副作用。
+    target: { conversationId: receiveId, receiveId, _frame: frame },
   };
 }
 
@@ -112,6 +116,57 @@ const wecomAdapter = {
     if (res && typeof res.errcode === 'number' && res.errcode !== 0) {
       throw new Error(`send ${res.errcode}: ${res.errmsg || 'failed'}`);
     }
+  },
+
+  // ─── 逐字流式（AI 卡片）─── 用智能机器人长连接的 stream 被动回复(replyStream)：首帧即 ack(确立
+  // streamId、落 5s 首回复窗口)，streamTick 逐帧推累计全文，finalize 以 finish=true 收尾(落 10min
+  // 流式窗口内)。无模板 id 概念，开关就是 cfg.aiCard。
+  streamEnabled(cfg) { return !!cfg?.aiCard; },
+
+  async sendAckCard(cfg, target, statusText, ctx) {
+    if (!cfg?.aiCard) return null;             // 未开 aiCard → 返回 null,core 回退 proactive 文本 ack(旧行为)
+    const client = ctx.store.client;
+    const frame = target?._frame;
+    if (!client || !frame) {                   // 无连接/无帧(无法被动回复) → 回退
+      if (ctx.store && !frame) ctx.store.lastAiCardError = 'no inbound frame';
+      return null;
+    }
+    try {
+      const streamId = randomUUID();
+      // 首帧 finish=false：开流 + 即时 ack 文本。
+      await client.replyStream(frame, streamId, statusText, false);
+      return { streamId, frame, streaming: true };
+    } catch (e) {
+      if (ctx.store) ctx.store.lastAiCardError = String(e?.message || e);
+      return null;                             // 开流失败 → 回退 proactive 文本 ack
+    }
+  },
+
+  async streamCardText(cfg, target, handle, fullText, ctx) {
+    const client = ctx.store.client;
+    const frame = handle?.frame || target?._frame;
+    if (!client || !frame || !handle?.streamId) return false;
+    try {
+      // 优先非阻塞：上一帧未 ack 则跳过本帧(返回 'skipped')，避免中间帧排队积压;最终全文由 finalize 兜底。
+      if (typeof client.replyStreamNonBlocking === 'function') {
+        const r = await client.replyStreamNonBlocking(frame, handle.streamId, fullText, false);
+        return r !== 'skipped';
+      }
+      await client.replyStream(frame, handle.streamId, fullText, false);
+      return true;
+    } catch { return false; }
+  },
+
+  async updateAckCard(cfg, target, handle, fullText, status, ctx) {
+    // 流式收尾：finish=true 的最终帧 SDK 保证发送(不受非阻塞跳帧限制)。WeCom stream 无状态标签，
+    // 中断/失败语义由 core 传入的 fullText 文本自身承载，status 此处不额外渲染。
+    try {
+      const client = ctx.store.client;
+      const frame = handle?.frame || target?._frame;
+      if (!client || !frame || !handle?.streamId) return false;
+      await client.replyStream(frame, handle.streamId, fullText, true);
+      return true;
+    } catch { return false; }
   },
 
   async testConnection(cfg) {

@@ -23,6 +23,8 @@ class FakeWSClient extends EventEmitter {
   }
   disconnect() { rec.disconnected = true; }
   async sendMessage(receiveId, body) { rec.sends.push({ receiveId, body }); return { errcode: sendErrcode, errmsg: sendErrcode ? 'fail' : 'ok' }; }
+  async replyStream(frame, streamId, content, finish) { (rec.streams ||= []).push({ frame, streamId, content, finish }); return { headers: {} }; }
+  async replyStreamNonBlocking(frame, streamId, content, finish) { (rec.streams ||= []).push({ frame, streamId, content, finish, nb: true }); return { headers: {} }; }
 }
 function installFakeSdk() {
   wecom.__setClientFactory(() => ({ WSClient: FakeWSClient }));
@@ -30,7 +32,7 @@ function installFakeSdk() {
 
 const tick = () => new Promise((r) => setTimeout(r, 5));
 
-let injects, cfg, streaming, ptyKind, ptyRunning, skipPerm, injectOk;
+let injects, cfg, streaming, ptyKind, ptyRunning, skipPerm, injectOk, liveText;
 function deps() {
   return {
     writeToPty: () => {},
@@ -40,6 +42,8 @@ function deps() {
     getPtySkipPermissions: () => skipPerm,
     isStreaming: () => streaming,
     getConfig: () => cfg,
+    getLiveText: () => liveText,
+    resetLiveText: () => { liveText = ''; },
   };
 }
 
@@ -67,7 +71,7 @@ beforeEach(async () => {
   installFakeSdk();
   injects = [];
   cfg = { enabled: true, botId: 'bot_x', secret: 's', allowUserIds: [], maxChunkChars: 3800 };
-  streaming = false; ptyKind = 'claude'; ptyRunning = true; skipPerm = false; injectOk = true;
+  streaming = false; ptyKind = 'claude'; ptyRunning = true; skipPerm = false; injectOk = true; liveText = '';
   await core.startBridge('wecom', deps());
 });
 
@@ -181,6 +185,41 @@ describe('wecom testConnection', () => {
     const r = await core.testConnection('wecom', { botId: 'b', secret: 'bad' });
     assert.equal(r.ok, false);
     assert.match(r.detail, /bad creds/);
+  });
+});
+
+describe('wecom AI 卡片流式 (aiCard)', () => {
+  function writeTranscript(text) {
+    const p = join(tmpDir, 'tp-' + Math.random().toString(36).slice(2) + '.jsonl');
+    writeFileSync(p, [
+      JSON.stringify({ type: 'user', message: { content: 'q' } }),
+      JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text }] } }),
+    ].join('\n'));
+    return p;
+  }
+
+  it('开 aiCard：ack 开流(finish=false) → finalize 收尾(finish=true)，streamId 全程一致、末帧为 transcript 全文', async () => {
+    cfg = { ...cfg, aiCard: true };
+    receive({ userid: 'alice', text: { content: 'hi' } });
+    await tick();
+    const open = (rec.streams || []).find((s) => s.finish === false);
+    assert.ok(open, 'ack 应以 replyStream finish=false 开流');
+    assert.ok(open.frame?.headers?.req_id, '入站帧 req_id 应透传');
+    assert.equal(typeof open.content, 'string');
+    await core.notifyTurnEnd('s', Date.now(), writeTranscript('the streamed answer'));
+    await tick();
+    const fin = (rec.streams || []).find((s) => s.finish === true);
+    assert.ok(fin, 'finalize 应 replyStream finish=true');
+    assert.equal(fin.streamId, open.streamId, 'streamId 全程一致');
+    assert.match(fin.content, /the streamed answer/);
+    assert.equal(rec.sends.length, 0, '流式路径不应再走 proactive sendMessage');
+  });
+
+  it('关 aiCard：不开流(无 replyStream)，回退 proactive sendMessage ack', async () => {
+    receive({ userid: 'bob', text: { content: 'hi' } });
+    await tick();
+    assert.equal((rec.streams || []).length, 0);
+    assert.ok(rec.sends.length >= 1, 'proactive ack 走 sendMessage');
   });
 });
 

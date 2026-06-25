@@ -410,6 +410,149 @@ describe('feishu testConnection 分支', () => {
   });
 });
 
+describe('feishu streamEnabled 分支', () => {
+  it('aiCard true → true；false/缺失/undefined → false', () => {
+    assert.equal(fa.streamEnabled({ aiCard: true }), true);
+    assert.equal(fa.streamEnabled({ aiCard: false }), false);
+    assert.equal(fa.streamEnabled({}), false);
+    assert.equal(fa.streamEnabled(undefined), false);
+  });
+});
+
+describe('feishu sendAckCard — AI 卡片 (CardKit) 流式分支', () => {
+  function streamClient({ createRes, createThrows } = {}) {
+    const rec = { creates: [], sends: [] };
+    const client = {
+      cardkit: { v1: { card: { create: async (a) => { rec.creates.push(a); if (createThrows) throw new Error('boom'); return createRes ?? { code: 0, data: { card_id: 'card_1' } }; } } } },
+      im: { v1: { message: { create: async (a) => { rec.sends.push(a); return { code: 0, data: { message_id: 'om_x' } }; } } } },
+    };
+    return { client, rec };
+  }
+
+  it('aiCard 开 → 建卡(streaming_mode)+引用 card_id 发送，返回 streaming 句柄', async () => {
+    const { client, rec } = streamClient();
+    const ctx = { store: { sendClient: client } };
+    const r = await fa.sendAckCard({ aiCard: true }, { receiveId: 'ou_a', receiveIdType: 'open_id' }, 'thinking', ctx);
+    assert.equal(r.streaming, true);
+    assert.equal(r.cardId, 'card_1');
+    assert.equal(r.elementId, 'md');
+    assert.equal(r.seq, 0);
+    const createData = JSON.parse(rec.creates[0].data.data);
+    assert.equal(createData.config.streaming_mode, true);
+    assert.equal(createData.body.elements[0].element_id, 'md');
+    const sent = JSON.parse(rec.sends[0].data.content);
+    assert.equal(sent.type, 'card');
+    assert.equal(sent.data.card_id, 'card_1');
+    assert.equal(rec.sends[0].data.msg_type, 'interactive');
+  });
+
+  it('aiCard 开但 client 无 cardkit 能力 → 回退 1.0 占位卡片 (非流式)', async () => {
+    const rec = { sends: [] };
+    const client = { im: { v1: { message: { create: async (a) => { rec.sends.push(a); return { code: 0, data: { message_id: 'om_legacy' } }; } } } } };
+    const ctx = { store: { sendClient: client } };
+    const r = await fa.sendAckCard({ aiCard: true }, { receiveId: 'r', receiveIdType: 'open_id' }, 's', ctx);
+    assert.equal(r.streaming, undefined);
+    assert.equal(r.messageId, 'om_legacy');
+    assert.equal(JSON.parse(rec.sends[0].data.content).elements[0].tag, 'div'); // 1.0 卡片
+  });
+
+  it('建卡 code 非 0 → 落 lastAiCardError 并回退 1.0', async () => {
+    const { client, rec } = streamClient({ createRes: { code: 99, msg: 'no scope' } });
+    const ctx = { store: { sendClient: client } };
+    const r = await fa.sendAckCard({ aiCard: true }, { receiveId: 'r', receiveIdType: 'open_id' }, 's', ctx);
+    assert.equal(r.streaming, undefined);
+    assert.match(ctx.store.lastAiCardError, /99|no scope/);
+    assert.equal(rec.sends.length, 1, '回退发了 1.0 卡片');
+  });
+
+  it('建卡 throw → 回退 1.0 + lastAiCardError', async () => {
+    const { client } = streamClient({ createThrows: true });
+    const ctx = { store: { sendClient: client } };
+    const r = await fa.sendAckCard({ aiCard: true }, { receiveId: 'r', receiveIdType: 'open_id' }, 's', ctx);
+    assert.equal(r.streaming, undefined);
+    assert.match(ctx.store.lastAiCardError, /boom/);
+  });
+
+  it('aiCard 关 → 直接走 1.0 占位卡片 (不碰 cardkit)', async () => {
+    const { client, rec } = streamClient();
+    const r = await fa.sendAckCard({ aiCard: false }, { receiveId: 'r', receiveIdType: 'open_id' }, 's', { store: { sendClient: client } });
+    assert.equal(r.streaming, undefined);
+    assert.equal(rec.creates.length, 0, 'aiCard 关不应建卡');
+  });
+});
+
+describe('feishu streamCardText 分支', () => {
+  function contentClient(res) {
+    const rec = { contents: [] };
+    const client = { cardkit: { v1: { cardElement: { content: async (a) => { rec.contents.push(a); return res ?? { code: 0 }; } } } } };
+    return { client, rec };
+  }
+  it('正常推送 → sequence 单调递增、uuid 带 cardId+seq、content 全文，true', async () => {
+    const { client, rec } = contentClient();
+    const handle = { cardId: 'c1', elementId: 'md', seq: 0, streaming: true };
+    const ctx = { store: { sendClient: client } };
+    assert.equal(await fa.streamCardText({}, {}, handle, 'abc', ctx), true);
+    assert.equal(rec.contents[0].data.sequence, 1);
+    assert.equal(rec.contents[0].data.uuid, 'c_c1_1');
+    assert.equal(rec.contents[0].data.content, 'abc');
+    assert.equal(rec.contents[0].path.card_id, 'c1');
+    await fa.streamCardText({}, {}, handle, 'abcd', ctx);
+    assert.equal(rec.contents[1].data.sequence, 2);
+  });
+  it('缺 cardId → false (不调用)', async () => {
+    const { client, rec } = contentClient();
+    assert.equal(await fa.streamCardText({}, {}, { elementId: 'md', seq: 0 }, 'x', { store: { sendClient: client } }), false);
+    assert.equal(rec.contents.length, 0);
+  });
+  it('无 sendClient → false', async () => {
+    assert.equal(await fa.streamCardText({}, {}, { cardId: 'c', elementId: 'md', seq: 0 }, 'x', { store: {} }), false);
+  });
+  it('code 非 0 → false', async () => {
+    const { client } = contentClient({ code: 7 });
+    assert.equal(await fa.streamCardText({}, {}, { cardId: 'c', elementId: 'md', seq: 0 }, 'x', { store: { sendClient: client } }), false);
+  });
+  it('抛错 → false', async () => {
+    const client = { cardkit: { v1: { cardElement: { content: async () => { throw new Error('net'); } } } } };
+    assert.equal(await fa.streamCardText({}, {}, { cardId: 'c', elementId: 'md', seq: 0 }, 'x', { store: { sendClient: client } }), false);
+  });
+});
+
+describe('feishu updateAckCard — 流式收尾分支', () => {
+  function finishClient({ contentRes, settingsThrows } = {}) {
+    const rec = { contents: [], settings: [] };
+    const client = { cardkit: { v1: {
+      cardElement: { content: async (a) => { rec.contents.push(a); return contentRes ?? { code: 0 }; } },
+      card: { settings: async (a) => { rec.settings.push(a); if (settingsThrows) throw new Error('s boom'); return { code: 0 }; } },
+    } } };
+    return { client, rec };
+  }
+  it('流式句柄 → 覆写最终全文 + 关 streaming_mode(带 summary)，true', async () => {
+    const { client, rec } = finishClient();
+    const handle = { streaming: true, cardId: 'c1', elementId: 'md', seq: 3 };
+    const r = await fa.updateAckCard({}, {}, handle, 'the final answer', 'done', { store: { sendClient: client } });
+    assert.equal(r, true);
+    assert.equal(rec.contents[0].data.content, 'the final answer');
+    assert.equal(rec.contents[0].data.sequence, 4);
+    const settings = JSON.parse(rec.settings[0].data.settings);
+    assert.equal(settings.config.streaming_mode, false);
+    assert.equal(typeof settings.config.summary.content, 'string');
+    assert.equal(rec.settings[0].data.sequence, 5);
+  });
+  it('content code 非 0 → false (不再关流)', async () => {
+    const { client, rec } = finishClient({ contentRes: { code: 9 } });
+    const r = await fa.updateAckCard({}, {}, { streaming: true, cardId: 'c', elementId: 'md', seq: 0 }, 'x', 'done', { store: { sendClient: client } });
+    assert.equal(r, false);
+    assert.equal(rec.settings.length, 0);
+  });
+  it('关流 settings 抛错 → 仍 true (best-effort) + 落诊断', async () => {
+    const { client } = finishClient({ settingsThrows: true });
+    const ctx = { store: { sendClient: client } };
+    const r = await fa.updateAckCard({}, {}, { streaming: true, cardId: 'c', elementId: 'md', seq: 0 }, 'x', 'done', ctx);
+    assert.equal(r, true);
+    assert.match(ctx.store.lastAiCardError, /settings close/);
+  });
+});
+
 // 清理私有 tmp。
 import { after } from 'node:test';
 after(() => { rmSync(tmpDir, { recursive: true, force: true }); });

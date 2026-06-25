@@ -16,7 +16,7 @@ describe('wecom descriptor + normalize', () => {
   it('exposes the wecom defaults and allowList field', () => {
     const d = getDescriptor('wecom');
     assert.equal(d.allowListField, 'allowUserIds');
-    assert.deepEqual(d.defaults, { enabled: false, botId: '', secret: '', allowUserIds: [], maxChunkChars: 3800, blockOnSkipPermissions: false, ackCard: true });
+    assert.deepEqual(d.defaults, { enabled: false, botId: '', secret: '', allowUserIds: [], maxChunkChars: 3800, blockOnSkipPermissions: false, ackCard: true, aiCard: false });
   });
 
   it('empty config matches the default shape', () => {
@@ -25,7 +25,7 @@ describe('wecom descriptor + normalize', () => {
 
   it('coerces types, trims, de-dups allowUserIds, clamps chunk', () => {
     const n = normalize('wecom', { enabled: 1, botId: '  bot_x  ', secret: ' s ', allowUserIds: ['a', 'a', ' b ', '', 9], maxChunkChars: '99999' });
-    assert.deepEqual(n, { enabled: true, botId: 'bot_x', secret: 's', allowUserIds: ['a', 'b'], maxChunkChars: 5000, blockOnSkipPermissions: false, ackCard: true });
+    assert.deepEqual(n, { enabled: true, botId: 'bot_x', secret: 's', allowUserIds: ['a', 'b'], maxChunkChars: 5000, blockOnSkipPermissions: false, ackCard: true, aiCard: false });
   });
 });
 
@@ -38,7 +38,7 @@ describe('wecom save / load roundtrip', () => {
   it('roundtrips (plaintext in memory, base64 cred/secret on disk)', () => {
     reset();
     saveConfig('wecom', { enabled: true, botId: 'bot_abc', secret: 'topsecret', allowUserIds: ['zhangsan'] });
-    assert.deepEqual(loadConfig('wecom'), { enabled: true, botId: 'bot_abc', secret: 'topsecret', allowUserIds: ['zhangsan'], maxChunkChars: 3800, blockOnSkipPermissions: false, ackCard: true });
+    assert.deepEqual(loadConfig('wecom'), { enabled: true, botId: 'bot_abc', secret: 'topsecret', allowUserIds: ['zhangsan'], maxChunkChars: 3800, blockOnSkipPermissions: false, ackCard: true, aiCard: false });
     const onDisk = JSON.parse(readFileSync(getPrefsPath(), 'utf-8'));
     assert.equal(onDisk.wecom.secret, Buffer.from('topsecret', 'utf-8').toString('base64'));
     assert.equal(onDisk.wecom.botId, Buffer.from('bot_abc', 'utf-8').toString('base64'));

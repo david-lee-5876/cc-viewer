@@ -57,7 +57,7 @@ const DESCRIPTORS = {
     allowListField: 'allowUserIds',
     defaults: {
       enabled: false, appId: '', appSecret: '', region: 'feishu', allowUserIds: [],
-      maxChunkChars: 3800, blockOnSkipPermissions: false, ackCard: true,
+      maxChunkChars: 3800, blockOnSkipPermissions: false, ackCard: true, aiCard: false,
     },
     fields: [
       { key: 'enabled', type: 'bool' },
@@ -68,6 +68,9 @@ const DESCRIPTORS = {
       { key: 'maxChunkChars', type: 'chunk' },
       { key: 'blockOnSkipPermissions', type: 'bool' },
       { key: 'ackCard', type: 'bool', default: true },
+      // 开启即用 CardKit v1 流式卡片逐字回复（需应用具备 cardkit:card:write scope）；关闭/缺 scope
+      // 回退到「占位卡片 + 整段替换」。
+      { key: 'aiCard', type: 'bool', default: false },
     ],
   },
   wecom: {
@@ -75,7 +78,7 @@ const DESCRIPTORS = {
     allowListField: 'allowUserIds',
     defaults: {
       enabled: false, botId: '', secret: '', allowUserIds: [],
-      maxChunkChars: 3800, blockOnSkipPermissions: false, ackCard: true,
+      maxChunkChars: 3800, blockOnSkipPermissions: false, ackCard: true, aiCard: false,
     },
     fields: [
       { key: 'enabled', type: 'bool' },
@@ -85,6 +88,8 @@ const DESCRIPTORS = {
       { key: 'maxChunkChars', type: 'chunk' },
       { key: 'blockOnSkipPermissions', type: 'bool' },
       { key: 'ackCard', type: 'bool', default: true },
+      // 开启即用智能机器人长连接 stream 消息逐字回复；关闭回退到「整段 proactive 文本」。
+      { key: 'aiCard', type: 'bool', default: false },
     ],
   },
   discord: {

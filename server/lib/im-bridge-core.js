@@ -95,6 +95,17 @@ function newInstance(adapter) {
  * @property {(ackCtx:*, client:*)=>void} [ack]  Ack an inbound msg (platforms that redeliver if not acked).
  * @property {(cfg:Object, target:Object, content:string, ctx:{fetch,store})=>Promise<void>} sendOne  Send one chunk.
  * @property {(cfg:Object, ctx:{fetch,store})=>Promise<{ok:boolean, detail?:string}>} testConnection  Validate creds, no socket.
+ *
+ * ── Optional AI-card streaming (only platforms that support an updatable card implement these) ──
+ * @property {(cfg:Object)=>boolean} [streamEnabled]  Whether per-character streaming is on for this cfg.
+ *           When absent the core falls back to `!!cfg.aiCardTemplateId` (DingTalk's template-id switch).
+ * @property {(cfg:Object, target:Object, statusText:string, ctx:Object)=>Promise<?Object>} [sendAckCard]
+ *           Send the instant ack as an (ideally streamable) card; return a handle ({streaming:true,…})
+ *           to enable streaming, a non-streaming handle, or null to fall back to a plain-text ack.
+ * @property {(cfg:Object, target:Object, handle:Object, fullText:string, ctx:Object)=>Promise<boolean>} [streamCardText]
+ *           Push the cumulative reply text into the card (best-effort; drives the typewriter effect).
+ * @property {(cfg:Object, target:Object, handle:Object, fullText:string, status:string, ctx:Object)=>Promise<boolean>} [updateAckCard]
+ *           Finalize the card with the authoritative reply text + terminal status (done/interrupted/error).
  */
 
 /** Register a platform adapter (called at adapter-module import). Idempotent per id. */
@@ -275,10 +286,17 @@ function armActiveInjection(inst, target, since) {
   // 逐字流式（钉钉 AI 卡片）：仅当配了 aiCardTemplateId、开了 ack 卡片、且平台具备流式能力（worker
   // 注入了 getLiveText + 适配器实现 streamCardText）时启动常驻推送定时器。注入轮次开始即重置文本源。
   const cfg = inst.bridgeDeps?.getConfig?.();
-  if (cfg && cfg.aiCardTemplateId) {
+  // 流式总开关：钉钉用专属 aiCardTemplateId（非空即开）；其它平台(飞书/微信)无模板 id，改由适配器
+  // 自报 streamEnabled(cfg)（通常 !!cfg.aiCard）。适配器未定义 → 回落旧逻辑，钉钉零回归。
+  const streamEnabled = !!cfg && (typeof inst.adapter.streamEnabled === 'function'
+    ? !!inst.adapter.streamEnabled(cfg)
+    : !!cfg.aiCardTemplateId);
+  if (streamEnabled) {
     const canStream = cfg.ackCard !== false
       && typeof inst.bridgeDeps.getLiveText === 'function'
-      && typeof inst.adapter.streamCardText === 'function';
+      && typeof inst.adapter.streamCardText === 'function'
+      // 同时要求 updateAckCard：能逐字推却无法 finalize 会让卡片永远停在流式中途、停在「生成中」。
+      && typeof inst.adapter.updateAckCard === 'function';
     if (canStream) {
       inst.bridgeDeps.resetLiveText?.();
       if (inst.store) inst.store.lastAiCardError = null; // 清上一轮的诊断残留
@@ -295,7 +313,8 @@ function armActiveInjection(inst, target, since) {
       audit(inst, 'stream-skip', {
         reason: cfg.ackCard === false ? 'ackCardOff'
           : typeof inst.bridgeDeps?.getLiveText !== 'function' ? 'noGetLiveText(非 worker?)'
-            : 'noStreamCardText',
+            : typeof inst.adapter.streamCardText !== 'function' ? 'noStreamCardText'
+              : 'noUpdateAckCard',
       });
     }
   }

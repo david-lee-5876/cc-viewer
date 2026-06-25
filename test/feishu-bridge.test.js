@@ -17,7 +17,17 @@ function installFakeSdk() {
     Domain: { Feishu: 0, Lark: 1 },
     LoggerLevel: { info: 3 },
     Client: class {
-      constructor(opts) { rec.clientOpts = opts; this.im = { v1: { message: { create: async (args) => { rec.sends.push(args); return { code: 0 }; } } } }; }
+      constructor(opts) {
+        rec.clientOpts = opts;
+        this.im = { v1: { message: { create: async (args) => { rec.sends.push(args); return { code: 0 }; } } } };
+        this.cardkit = { v1: {
+          card: {
+            create: async (a) => { (rec.cardkitCreates ||= []).push(a); return { code: 0, data: { card_id: 'card_' + ((rec.cardkitCreates || []).length) } }; },
+            settings: async (a) => { (rec.cardkitSettings ||= []).push(a); return { code: 0 }; },
+          },
+          cardElement: { content: async (a) => { (rec.cardkitContents ||= []).push(a); return { code: 0 }; } },
+        } };
+      }
     },
     WSClient: class {
       constructor(opts) { rec.wsOpts = opts; }
@@ -33,7 +43,7 @@ function installFakeSdk() {
 
 const tick = () => new Promise((r) => setTimeout(r, 5));
 
-let injects, cfg, streaming, ptyKind, ptyRunning, skipPerm, injectOk;
+let injects, cfg, streaming, ptyKind, ptyRunning, skipPerm, injectOk, liveText;
 function deps() {
   return {
     writeToPty: () => {},
@@ -43,6 +53,8 @@ function deps() {
     getPtySkipPermissions: () => skipPerm,
     isStreaming: () => streaming,
     getConfig: () => cfg,
+    getLiveText: () => liveText,
+    resetLiveText: () => { liveText = ''; },
   };
 }
 
@@ -67,7 +79,7 @@ beforeEach(async () => {
   installFakeSdk();
   injects = [];
   cfg = { enabled: true, appId: 'cli_x', appSecret: 'sec', region: 'feishu', allowUserIds: [], maxChunkChars: 3800 };
-  streaming = false; ptyKind = 'claude'; ptyRunning = true; skipPerm = false; injectOk = true;
+  streaming = false; ptyKind = 'claude'; ptyRunning = true; skipPerm = false; injectOk = true; liveText = '';
   await core.startBridge('feishu', deps());
 });
 
@@ -165,6 +177,38 @@ describe('feishu testConnection', () => {
     const r = await core.testConnection('feishu', { appId: 'bad', appSecret: 'bad', region: 'feishu' });
     assert.equal(r.ok, false);
     assert.match(r.detail, /app not found/);
+  });
+});
+
+describe('feishu AI 卡片流式 (aiCard / CardKit)', () => {
+  function writeTranscript(text) {
+    const p = join(tmpDir, 'tp-' + Math.random().toString(36).slice(2) + '.jsonl');
+    writeFileSync(p, [
+      JSON.stringify({ type: 'user', message: { content: 'q' } }),
+      JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text }] } }),
+    ].join('\n'));
+    return p;
+  }
+
+  it('开 aiCard：建卡(streaming_mode)+引用 card_id 发送 → finalize 覆写全文 + 关流', async () => {
+    cfg = { ...cfg, aiCard: true };
+    await receive({ msgId: 'om1', openId: 'ou_a', content: JSON.stringify({ text: 'hi' }) });
+    await tick();
+    assert.equal((rec.cardkitCreates || []).length, 1, '应建卡');
+    assert.equal(JSON.parse(rec.cardkitCreates[0].data.data).config.streaming_mode, true);
+    const cardSend = rec.sends.find((s) => { try { return JSON.parse(s.data.content).type === 'card'; } catch { return false; } });
+    assert.ok(cardSend, '应发引用 card_id 的 interactive 消息');
+    await core.notifyTurnEnd('s', Date.now(), writeTranscript('streamed reply text'));
+    await tick();
+    assert.ok((rec.cardkitContents || []).length >= 1, 'finalize 应覆写正文');
+    assert.match(rec.cardkitContents.at(-1).data.content, /streamed reply text/);
+    assert.equal(JSON.parse(rec.cardkitSettings.at(-1).data.settings).config.streaming_mode, false, 'finalize 应关流');
+  });
+
+  it('关 aiCard：不建卡(走 1.0 占位卡片)', async () => {
+    await receive({ msgId: 'om2', openId: 'ou_b', content: JSON.stringify({ text: 'hi' }) });
+    await tick();
+    assert.equal((rec.cardkitCreates || []).length, 0);
   });
 });
 

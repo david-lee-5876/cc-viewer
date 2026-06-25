@@ -477,6 +477,103 @@ describe('wecom testConnection 分支', () => {
   });
 });
 
+describe('wecom streamEnabled 分支', () => {
+  it('aiCard true → true；false/缺失/undefined → false', () => {
+    assert.equal(wecom.streamEnabled({ aiCard: true }), true);
+    assert.equal(wecom.streamEnabled({ aiCard: false }), false);
+    assert.equal(wecom.streamEnabled({}), false);
+    assert.equal(wecom.streamEnabled(undefined), false);
+  });
+});
+
+describe('wecom sendAckCard 分支', () => {
+  const frame = { headers: { req_id: 'rq1' }, body: {} };
+  it('aiCard 关 → null (回退 proactive 文本 ack)', async () => {
+    const r = await wecom.sendAckCard({ aiCard: false }, { _frame: frame }, 'hi', { store: { client: {} } });
+    assert.equal(r, null);
+  });
+  it('aiCard 开但无 frame → null + lastAiCardError', async () => {
+    const ctx = { store: { client: {} } };
+    const r = await wecom.sendAckCard({ aiCard: true }, {}, 'hi', ctx);
+    assert.equal(r, null);
+    assert.match(ctx.store.lastAiCardError, /frame/);
+  });
+  it('aiCard 开但无 client → null', async () => {
+    const r = await wecom.sendAckCard({ aiCard: true }, { _frame: frame }, 'hi', { store: {} });
+    assert.equal(r, null);
+  });
+  it('aiCard 开 + frame → replyStream(finish=false)，返回 streaming 句柄 (透传整帧)', async () => {
+    const calls = [];
+    const client = { replyStream: async (f, id, content, finish) => { calls.push({ f, id, content, finish }); return { headers: {} }; } };
+    const ctx = { store: { client } };
+    const r = await wecom.sendAckCard({ aiCard: true }, { _frame: frame }, 'thinking', ctx);
+    assert.equal(r.streaming, true);
+    assert.ok(r.streamId);
+    assert.equal(calls[0].f, frame, '整帧透传(含 req_id)');
+    assert.equal(calls[0].content, 'thinking');
+    assert.equal(calls[0].finish, false);
+  });
+  it('replyStream 抛错 → null + lastAiCardError', async () => {
+    const client = { replyStream: async () => { throw new Error('open boom'); } };
+    const ctx = { store: { client } };
+    const r = await wecom.sendAckCard({ aiCard: true }, { _frame: frame }, 'x', ctx);
+    assert.equal(r, null);
+    assert.match(ctx.store.lastAiCardError, /open boom/);
+  });
+});
+
+describe('wecom streamCardText 分支', () => {
+  const frame = { headers: { req_id: 'rq1' } };
+  it('优先 replyStreamNonBlocking；非 skipped → true', async () => {
+    const calls = [];
+    const client = { replyStreamNonBlocking: async (f, id, c, fin) => { calls.push({ f, id, c, fin }); return { headers: {} }; } };
+    const handle = { streamId: 'sid', frame, streaming: true };
+    assert.equal(await wecom.streamCardText({}, { _frame: frame }, handle, 'abc', { store: { client } }), true);
+    assert.equal(calls[0].id, 'sid');
+    assert.equal(calls[0].c, 'abc');
+    assert.equal(calls[0].fin, false);
+  });
+  it('replyStreamNonBlocking 返回 "skipped" → false (跳帧不计推送)', async () => {
+    const client = { replyStreamNonBlocking: async () => 'skipped' };
+    assert.equal(await wecom.streamCardText({}, {}, { streamId: 'sid', frame }, 'x', { store: { client } }), false);
+  });
+  it('无 replyStreamNonBlocking → 回退 replyStream → true', async () => {
+    const calls = [];
+    const client = { replyStream: async (f, id, c, fin) => { calls.push({ fin }); return {}; } };
+    assert.equal(await wecom.streamCardText({}, {}, { streamId: 'sid', frame }, 'x', { store: { client } }), true);
+    assert.equal(calls[0].fin, false);
+  });
+  it('缺 streamId → false', async () => {
+    const client = { replyStreamNonBlocking: async () => ({}) };
+    assert.equal(await wecom.streamCardText({}, {}, { frame }, 'x', { store: { client } }), false);
+  });
+  it('抛错 → false', async () => {
+    const client = { replyStreamNonBlocking: async () => { throw new Error('x'); } };
+    assert.equal(await wecom.streamCardText({}, {}, { streamId: 'sid', frame }, 'x', { store: { client } }), false);
+  });
+});
+
+describe('wecom updateAckCard — 流式收尾分支', () => {
+  const frame = { headers: { req_id: 'rq1' } };
+  it('finish=true 收尾 → true (streamId/content 正确)', async () => {
+    const calls = [];
+    const client = { replyStream: async (f, id, c, fin) => { calls.push({ f, id, c, fin }); return {}; } };
+    const r = await wecom.updateAckCard({}, {}, { streamId: 'sid', frame }, 'final', 'done', { store: { client } });
+    assert.equal(r, true);
+    assert.equal(calls[0].fin, true);
+    assert.equal(calls[0].id, 'sid');
+    assert.equal(calls[0].c, 'final');
+  });
+  it('缺 streamId → false', async () => {
+    const client = { replyStream: async () => ({}) };
+    assert.equal(await wecom.updateAckCard({}, {}, { frame }, 'x', 'done', { store: { client } }), false);
+  });
+  it('抛错 → false', async () => {
+    const client = { replyStream: async () => { throw new Error('x'); } };
+    assert.equal(await wecom.updateAckCard({}, {}, { streamId: 'sid', frame }, 'x', 'done', { store: { client } }), false);
+  });
+});
+
 // loadSdk 的「无 factory → 真实 import」支路（line 22）+ resolveWSClient 在 CJS 命名空间下的解析，
 // 用子进程跑：用一个 module-resolve loader 把 @wecom/aibot-node-sdk 重定向到本地假实现（零网络）。
 describe('wecom loadSdk 真实 import 支路（子进程 + loader 重定向）', () => {

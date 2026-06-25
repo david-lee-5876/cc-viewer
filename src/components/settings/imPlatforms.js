@@ -88,9 +88,14 @@ export const feishuDescriptor = {
       labelKey: 'ui.im.ackCard', fallback: 'Instant acknowledgment',
       helpKey: 'ui.im.ackCardHelp', helpFallback: 'Send immediate status feedback when a message is received; update in-place when the reply is ready.',
     },
+    {
+      key: 'aiCard', type: 'switch', section: 'more',
+      labelKey: 'ui.im.aiCard', fallback: 'AI card streaming reply',
+      helpKey: 'ui.im.aiCardHelp', helpFallback: 'Stream the reply character-by-character into the card instead of replacing it all at once when finished. Requires Instant acknowledgment; if streaming is not available it safely falls back to a single replace.',
+    },
   ],
   notes: [
-    { kind: 'hint', key: 'ui.feishu.provisioningHelp', fallback: 'In the Feishu/Lark console: create a custom app, set Event Subscription to long-connection, subscribe im.message.receive_v1, grant the im:message scope, publish the app, then add the bot to a chat.' },
+    { kind: 'hint', key: 'ui.feishu.provisioningHelp', fallback: 'In the Feishu/Lark console: create a custom app, set Event Subscription to long-connection, subscribe im.message.receive_v1, grant the im:message scope (and cardkit:card:write for AI-card streaming), publish the app, then add the bot to a chat.' },
   ],
 };
 
@@ -120,6 +125,11 @@ export const wecomDescriptor = {
       key: 'ackCard', type: 'switch', section: 'more',
       labelKey: 'ui.im.ackCard', fallback: 'Instant acknowledgment',
       helpKey: 'ui.im.ackCardHelp', helpFallback: 'Send immediate status feedback when a message is received; update in-place when the reply is ready.',
+    },
+    {
+      key: 'aiCard', type: 'switch', section: 'more',
+      labelKey: 'ui.im.aiCard', fallback: 'AI card streaming reply',
+      helpKey: 'ui.im.aiCardHelp', helpFallback: 'Stream the reply character-by-character into the card instead of replacing it all at once when finished. Requires Instant acknowledgment; if streaming is not available it safely falls back to a single replace.',
     },
   ],
   notes: [

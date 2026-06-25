@@ -23,6 +23,22 @@ function tokenHost(region) {
   return region === 'lark' ? 'https://open.larksuite.com' : 'https://open.feishu.cn';
 }
 
+// AI 卡片(CardKit v1)里那个被逐字流式覆写的 markdown 组件 id（建卡与流式更新都引用它）。
+const AI_CARD_ELEMENT_ID = 'md';
+
+/** 构造一个 Card JSON 2.0 流式卡片：单 markdown 组件 + streaming_mode。建卡时 streaming=true。 */
+function buildStreamCardJson(content, { streaming, headerTemplate = 'blue' } = {}) {
+  return {
+    schema: '2.0',
+    config: { streaming_mode: !!streaming },
+    header: { title: { tag: 'plain_text', content: 'Claude' }, template: headerTemplate },
+    body: { elements: [{ tag: 'markdown', element_id: AI_CARD_ELEMENT_ID, content: content || '' }] },
+  };
+}
+
+/** Feishu 返回 HTTP 200 但 body.code 非 0 表示失败；统一判定。 */
+function isErr(r) { return r && typeof r.code === 'number' && r.code !== 0; }
+
 async function loadSdk() {
   if (sdkFactory) return sdkFactory();
   return import('@larksuiteoapi/node-sdk');
@@ -130,9 +146,39 @@ const feishuAdapter = {
     }
   },
 
+  // ─── 逐字流式（AI 卡片）─── 用 CardKit v1：建卡片实例(streaming_mode) → 引用 card_id 发消息 →
+  // cardElement.content 逐帧覆写正文(飞书自动 diff 出打字机效果) → settings 关流收尾。无模板 id 概念，
+  // 开关就是 cfg.aiCard；建卡失败(如缺 cardkit:card:write scope)安全回退到 1.0 占位卡片。
+  streamEnabled(cfg) { return !!cfg?.aiCard; },
+
   async sendAckCard(cfg, target, statusText, ctx) {
     const client = ctx.store.sendClient;
     if (!client) throw new Error('feishu send client not initialized');
+    // 流式路径：CardKit 建卡 + 引用发送。任何环节失败 → 落诊断并回退到下面的 1.0 占位卡片。
+    if (cfg?.aiCard && client.cardkit?.v1?.card?.create) {
+      try {
+        const created = await client.cardkit.v1.card.create({
+          data: { type: 'card_json', data: JSON.stringify(buildStreamCardJson(statusText, { streaming: true })) },
+        });
+        if (isErr(created)) throw new Error(`card.create ${created.code}: ${created.msg || ''}`);
+        const cardId = created?.data?.card_id;
+        if (!cardId) throw new Error('card.create returned no card_id');
+        const r = await client.im.v1.message.create({
+          params: { receive_id_type: target.receiveIdType },
+          data: {
+            receive_id: target.receiveId,
+            msg_type: 'interactive',
+            content: JSON.stringify({ type: 'card', data: { card_id: cardId } }),
+          },
+        });
+        if (isErr(r)) throw new Error(`send ${r.code}: ${r.msg || ''}`);
+        return { messageId: r?.data?.message_id, cardId, elementId: AI_CARD_ELEMENT_ID, streaming: true, seq: 0 };
+      } catch (e) {
+        if (ctx.store) ctx.store.lastAiCardError = String(e?.message || e);
+        // fall through → 1.0 占位卡片（非流式），保证 ack 不丢
+      }
+    }
+    // ── 1.0 占位卡片（非流式；aiCard 关闭或 CardKit 不可用时走这条，行为同旧版） ──
     const card = {
       config: { wide_screen_mode: true },
       header: { title: { tag: 'plain_text', content: 'Claude' }, template: 'blue' },
@@ -142,16 +188,54 @@ const feishuAdapter = {
       params: { receive_id_type: target.receiveIdType },
       data: { receive_id: target.receiveId, msg_type: 'interactive', content: JSON.stringify(card) },
     });
-    if (r && typeof r.code === 'number' && r.code !== 0) {
-      throw new Error(`sendAckCard ${r.code}: ${r.msg || 'failed'}`);
-    }
+    if (isErr(r)) throw new Error(`sendAckCard ${r.code}: ${r.msg || 'failed'}`);
     return { messageId: r?.data?.message_id };
+  },
+
+  async streamCardText(cfg, target, handle, fullText, ctx) {
+    const client = ctx.store.sendClient;
+    if (!client || !handle?.cardId || !client.cardkit?.v1?.cardElement?.content) return false;
+    try {
+      const seq = ++handle.seq; // 单 in-flight + 单调自增,保证 sequence 严格递增、不乱序
+      const r = await client.cardkit.v1.cardElement.content({
+        path: { card_id: handle.cardId, element_id: handle.elementId || AI_CARD_ELEMENT_ID },
+        data: { content: fullText, sequence: seq, uuid: `c_${handle.cardId}_${seq}` },
+      });
+      return !isErr(r);
+    } catch { return false; }
   },
 
   async updateAckCard(cfg, target, handle, content, status, ctx) {
     try {
       const client = ctx.store.sendClient;
       if (!client) return false;
+      // 流式句柄：先以权威全文覆写正文(打字机收口) → settings 关 streaming_mode + 更新预览摘要
+      //（缺摘要会让消息列表预览卡在「生成中」）。状态由文本本身承载,CardKit 无 header 状态标签。
+      if (handle?.streaming && handle.cardId && client.cardkit?.v1?.cardElement?.content) {
+        const seqC = ++handle.seq;
+        const rc = await client.cardkit.v1.cardElement.content({
+          path: { card_id: handle.cardId, element_id: handle.elementId || AI_CARD_ELEMENT_ID },
+          data: { content, sequence: seqC, uuid: `c_${handle.cardId}_${seqC}` },
+        });
+        if (isErr(rc)) return false;
+        if (client.cardkit?.v1?.card?.settings) {
+          const seqS = ++handle.seq;
+          const preview = String(content).replace(/\s+/g, ' ').trim().slice(0, 40);
+          await client.cardkit.v1.card.settings({
+            path: { card_id: handle.cardId },
+            data: {
+              settings: JSON.stringify({ config: { streaming_mode: false, summary: { content: preview } } }),
+              sequence: seqS,
+              uuid: `s_${handle.cardId}_${seqS}`,
+            },
+          }).catch((e) => {
+            // 关流失败:内容已落定,飞书 10min 后会自动关流;仅记诊断(消息列表预览可能短暂卡在「生成中」)。
+            if (ctx.store) ctx.store.lastAiCardError = 'settings close: ' + String(e?.message || e);
+          });
+        }
+        return true;
+      }
+      // 非流式句柄（1.0 占位卡片）：保持原整卡 patch + header 状态色。
       const templateMap = { done: 'green', interrupted: 'orange', error: 'red' };
       const card = {
         config: { wide_screen_mode: true },
@@ -162,7 +246,7 @@ const feishuAdapter = {
         path: { message_id: handle.messageId },
         data: { content: JSON.stringify(card) },
       });
-      if (r && typeof r.code === 'number' && r.code !== 0) return false;
+      if (isErr(r)) return false;
       return true;
     } catch { return false; }
   },
