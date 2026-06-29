@@ -15,15 +15,16 @@ const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 
 export default defineConfig(() => {
   const port = getBackendPort();
   return {
-    // CCV_BASE_PATH: 部署基础路径。
-    //   未设置 → '/' (默认，向后兼容)
-    //   '/prefix/' → 构建时硬编码前缀
-    //   '' (空字符串) → 相对路径，配合运行时 <base> 标签实现动态代理
-    // 注意：不复用 server/lib/base-path.js 的 normalizeBasePath——构建期 base 是
-    // 三态语义（undefined→'/'，''→相对路径），与运行时"未设=无前缀"语义不同。
+    // CCV_BASE_PATH: 部署基础路径（构建期决定 dist 资源引用风格）。
+    //   未设置 / '' → '' 相对路径（默认）——产出 ./assets/...，配合运行时 <base> 标签，
+    //                  一份 dist 同时支持根路径部署与反向代理子路径部署（无需源码重编）。
+    //   '/prefix/' → 构建期硬编码前缀（资源固定指向该子路径）。
+    //   '/' → 绝对路径（旧默认的逃生舱；需要 /assets/... 绝对引用时用 CCV_BASE_PATH=/ 构建）。
+    // 注意：不复用 server/lib/base-path.js 的 normalizeBasePath——构建期 base 与运行时
+    // 语义不同（这里 '/' 才是绝对、未设/'' 是相对；运行时则 '/' 与未设都表示"无前缀"）。
     base: (() => {
       const v = process.env.CCV_BASE_PATH;
-      if (v === undefined) return '/';
+      if (v === undefined) return '';          // 默认相对路径（要绝对路径用 CCV_BASE_PATH=/）
       if (v === '') return '';                 // relative paths, no trailing slash fixup
       return v.replace(/\/?$/, '/');           // ensure trailing slash
     })(),

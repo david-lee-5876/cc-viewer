@@ -3,7 +3,7 @@ import { Switch, Input, Button, Select, Tag, Tooltip, Dropdown, message } from '
 import { DownOutlined, RightOutlined, QuestionCircleOutlined, PlusOutlined, SettingOutlined, FolderOpenOutlined, FileZipOutlined, FileMarkdownOutlined } from '@ant-design/icons';
 import { apiUrl } from '../../utils/apiUrl';
 import { imTr as _tr } from '../../utils/imTr';
-import ImClaudeMdModal from './ImClaudeMdModal';
+import ImAppendSystemModal from './ImAppendSystemModal';
 import ImSkillsModal from './ImSkillsModal';
 import styles from './ImPlatformSettings.module.css';
 
@@ -47,7 +47,7 @@ export default function ImPlatformSettings({ descriptor }) {
   const [stopping, setStopping] = useState(false);
   const [testing, setTesting] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
-  const [claudeMdOpen, setClaudeMdOpen] = useState(false); // 「模型性格定义」(CLAUDE.md) 编辑弹窗
+  const [personaOpen, setPersonaOpen] = useState(false); // 「模型性格定义」(CC_APPEND_SYSTEM.md) 编辑弹窗
   const [skillsModalOpen, setSkillsModalOpen] = useState(false); // 「SKILL 管理」弹窗
   const [skillsReloadKey, setSkillsReloadKey] = useState(0);     // 新增 skill 成功后 bump，触发管理弹窗重新拉取
   const skillFileInputRef = useRef(null);
@@ -401,16 +401,16 @@ export default function ImPlatformSettings({ descriptor }) {
       {showDetails && (
         <div className={styles.details}>
           {moreFields.map(renderField)}
-          {/* 模型性格定义：编辑该 IM 工作目录下的 CLAUDE.md（弹独立窗口，不关闭配置弹窗）。 */}
+          {/* 模型性格定义：编辑该 IM 工作目录下的 CC_APPEND_SYSTEM.md（弹独立窗口，不关闭配置弹窗）。 */}
           <div className={styles.row}>
             <span className={styles.label}>
               {_tr('ui.im.persona', null, 'Model personality')}
-              <Tooltip title={_tr('ui.im.personaHelp', null, "Edit this IM's CLAUDE.md to define the bot's personality and behavior; takes effect after you restart this IM.")}>
+              <Tooltip title={_tr('ui.im.personaHelp', null, "Define the bot's personality and behavior; injected as a system prompt so it's harder to override. Takes effect after you restart this IM (requires a recent Claude build).")}>
                 <QuestionCircleOutlined className={styles.helpIcon} />
               </Tooltip>
             </span>
             <span className={styles.control}>
-              <Button size="small" onClick={() => setClaudeMdOpen(true)}>{_tr('ui.im.edit', null, 'Edit')}</Button>
+              <Button size="small" onClick={() => setPersonaOpen(true)}>{_tr('ui.im.edit', null, 'Edit')}</Button>
             </span>
           </div>
           {/* ${IM} SKILL 管理：管理该 IM 工作目录下的 .claude/skills（[+添加] 上传 / [管理] 启停）。 */}
@@ -429,7 +429,7 @@ export default function ImPlatformSettings({ descriptor }) {
         </div>
       )}
 
-      <ImClaudeMdModal open={claudeMdOpen} platform={descriptor.id} onClose={() => setClaudeMdOpen(false)} />
+      <ImAppendSystemModal open={personaOpen} platform={descriptor.id} onClose={() => setPersonaOpen(false)} />
       <ImSkillsModal open={skillsModalOpen} platform={descriptor.id} reloadKey={skillsReloadKey} onClose={() => setSkillsModalOpen(false)} />
       {/* 隐藏文件输入：放在任何 Space/flex 行之外，避免成为 flex item 撑出额外间距。 */}
       <input type="file" ref={skillFileInputRef} style={{ display: 'none' }} accept=".zip,.md" onChange={handleSkillFileSelected} />

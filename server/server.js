@@ -764,15 +764,20 @@ async function handleRequest(req, res) {
           console.warn('[serveIndexHtml] dist/index.html 没有 <html data-theme="..."> 属性，SSR theme 注入将不生效。检查 index.html 模板。');
         }
         html = html.replace(/<html([^>]*?)data-theme="[^"]*"/, `<html$1data-theme="${themeColor}"`);
-        // 运行时注入 <base> 标签：当 CCV_BASE_PATH 设置为非空非根路径时，
-        // 使浏览器将所有相对 URL 解析到代理子路径下。配合 Vite base='' 输出相对路径。
+        // 运行时始终注入 <base> 标签（根部署用 '/'，子路径用规范化前缀）：配合 Vite 默认
+        // base=''（相对路径产物），让浏览器把所有相对 URL（含任意深度 SPA-fallback 文档里的
+        // ./assets）解析到正确根/前缀下，避免深链直访（如 /a/b）时相对当前路径解析 → 白屏。
+        // window.__CCV_BASE_PATH__ 仅子路径时注入：运行时 API/WS 的 base 语义保持"未设=无前缀"不变。
         const injectBase = normalizeBasePath(process.env.CCV_BASE_PATH);
+        const baseHref = injectBase || '/';
+        const escapedBase = baseHref.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        let injectHtml = `<base href="${escapedBase}">`;
         if (injectBase) {
-          const escapedBase = injectBase.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
           // JS 双引号字符串转义：\ → \\、" → \"、</ → <\/（防 </script> 提前闭合）
           const jsSafeBase = injectBase.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/<\//g, '<\\/');
-          html = html.replace(/<head[^>]*>/i, m => m + `<base href="${escapedBase}"><script>window.__CCV_BASE_PATH__="${jsSafeBase}"</script>`);
+          injectHtml += `<script>window.__CCV_BASE_PATH__="${jsSafeBase}"</script>`;
         }
+        html = html.replace(/<head[^>]*>/i, m => m + injectHtml);
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' });
         res.end(html);
         return true;

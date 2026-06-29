@@ -3,7 +3,7 @@
 //   - L32  platformOf: URL that does NOT match IM_RE → return null → 404 (distinct from "matches but unknown descriptor")
 //   - L61  readBody: body length > MAX_POST_BODY → req.destroy()
 //   - L102 imStatus admin (isLocal) + isWorker:true → pid = process.pid arm
-//   - notFound/loopbackOnly arms for every loopback-only handler (test/process/senders/claude-md GET+POST/skills/toggle/import)
+//   - notFound/loopbackOnly arms for every loopback-only handler (test/process/senders/append-system GET+POST/skills/toggle/import)
 //   - L127 imConfigPost: incoming[allowField] not an array → `: []` arm
 //   - L146/204/243/267 `|| e`: thrown value without `.message`
 //   - L160 imTestPost: empty body → `: {}` arm ; malformed JSON → catch (fall back to stored)
@@ -226,20 +226,20 @@ describe('server/routes/im.js 分支补齐', { concurrency: false }, () => {
     assert.equal(r.status, 403);
   });
 
-  // ── imClaudeMdGet: notFound + loopbackOnly + L243 `|| e` ──
-  it('GET claude-md：未知平台 → 404', async () => {
-    const route = imRoutes.find((r) => r.predicate('/api/im/feishu/claude-md', 'GET'));
-    const r = await call(route, { pathname: '/api/im/telegram/claude-md', deps: { im: {} } });
+  // ── imAppendSystemGet: notFound + loopbackOnly + L243 `|| e` ──
+  it('GET append-system：未知平台 → 404', async () => {
+    const route = imRoutes.find((r) => r.predicate('/api/im/feishu/append-system', 'GET'));
+    const r = await call(route, { pathname: '/api/im/telegram/append-system', deps: { im: {} } });
     assert.equal(r.status, 404);
   });
-  it('GET claude-md：非本机 → 403', async () => {
-    const route = imRoutes.find((r) => r.predicate('/api/im/feishu/claude-md', 'GET'));
-    const r = await call(route, { pathname: '/api/im/feishu/claude-md', isLocal: false, deps: { im: {} } });
+  it('GET append-system：非本机 → 403', async () => {
+    const route = imRoutes.find((r) => r.predicate('/api/im/feishu/append-system', 'GET'));
+    const r = await call(route, { pathname: '/api/im/feishu/append-system', isLocal: false, deps: { im: {} } });
     assert.equal(r.status, 403);
   });
-  it('GET claude-md?default=1 → 返回当前语言预置（绕过磁盘文件）', async () => {
-    const route = imRoutes.find((r) => r.predicate('/api/im/dingtalk/claude-md', 'GET'));
-    const r = await call(route, { pathname: '/api/im/dingtalk/claude-md', searchParams: new URLSearchParams({ default: '1' }), deps: { im: {} } });
+  it('GET append-system?default=1 → 返回当前语言预置（绕过磁盘文件）', async () => {
+    const route = imRoutes.find((r) => r.predicate('/api/im/dingtalk/append-system', 'GET'));
+    const r = await call(route, { pathname: '/api/im/dingtalk/append-system', searchParams: new URLSearchParams({ default: '1' }), deps: { im: {} } });
     assert.equal(r.status, 200);
     const j = r.json();
     assert.equal(j.platform, 'dingtalk');
@@ -247,37 +247,37 @@ describe('server/routes/im.js 分支补齐', { concurrency: false }, () => {
     assert.match(j.content, /IM_dingtalk\//);     // {id} 已替换
   });
 
-  // ── imClaudeMdPost: notFound + loopbackOnly + L254 catch（坏 JSON） + L267 `|| e` ──
-  it('POST claude-md：未知平台 → 404', async () => {
-    const route = imRoutes.find((r) => r.predicate('/api/im/feishu/claude-md', 'POST'));
-    const r = await call(route, { pathname: '/api/im/telegram/claude-md', body: { content: 'x' }, deps: { MAX_POST_BODY: 1e6, im: {} } });
+  // ── imAppendSystemPost: notFound + loopbackOnly + L254 catch（坏 JSON） + L267 `|| e` ──
+  it('POST append-system：未知平台 → 404', async () => {
+    const route = imRoutes.find((r) => r.predicate('/api/im/feishu/append-system', 'POST'));
+    const r = await call(route, { pathname: '/api/im/telegram/append-system', body: { content: 'x' }, deps: { MAX_POST_BODY: 1e6, im: {} } });
     assert.equal(r.status, 404);
   });
-  it('POST claude-md：坏 JSON → 400 Invalid JSON', async () => {
-    const route = imRoutes.find((r) => r.predicate('/api/im/feishu/claude-md', 'POST'));
-    const r = await call(route, { pathname: '/api/im/feishu/claude-md', body: '{broken', deps: { MAX_POST_BODY: 1e6, im: {} } });
+  it('POST append-system：坏 JSON → 400 Invalid JSON', async () => {
+    const route = imRoutes.find((r) => r.predicate('/api/im/feishu/append-system', 'POST'));
+    const r = await call(route, { pathname: '/api/im/feishu/append-system', body: '{broken', deps: { MAX_POST_BODY: 1e6, im: {} } });
     assert.equal(r.status, 400);
     assert.match(r.payload, /Invalid JSON/);
   });
-  // ── L242 catch（imClaudeMdGet）：readImClaudeMd 抛非 ENOENT → 500 String(e?.message||e) ──
-  // 把 IM 目录下的 CLAUDE.md 造成「目录」：readFileSync 抛 EISDIR（非 ENOENT，不会回落 preset）→ rethrow → catch。
-  it('GET claude-md：CLAUDE.md 是目录 → readFileSync 抛 EISDIR → 500（catch 臂 + e.message）', async () => {
-    const route = imRoutes.find((r) => r.predicate('/api/im/dingtalk/claude-md', 'GET'));
+  // ── L242 catch（imAppendSystemGet）：readImAppendSystem 抛非 ENOENT → 500 String(e?.message||e) ──
+  // 把 IM 目录下的 CC_APPEND_SYSTEM.md 造成「目录」：readFileSync 抛 EISDIR（非 ENOENT，不会回落 preset）→ rethrow → catch。
+  it('GET append-system：CC_APPEND_SYSTEM.md 是目录 → readFileSync 抛 EISDIR → 500（catch 臂 + e.message）', async () => {
+    const route = imRoutes.find((r) => r.predicate('/api/im/dingtalk/append-system', 'GET'));
     const { imDir } = await import('../server/lib/im-lock.js');
     const dir = imDir('dingtalk');
-    mkdirSync(join(dir, 'CLAUDE.md'), { recursive: true }); // CLAUDE.md 当目录 → 读取必抛 EISDIR
-    const r = await call(route, { pathname: '/api/im/dingtalk/claude-md', isLocal: true, deps: { im: {} } });
+    mkdirSync(join(dir, 'CC_APPEND_SYSTEM.md'), { recursive: true }); // CC_APPEND_SYSTEM.md 当目录 → 读取必抛 EISDIR
+    const r = await call(route, { pathname: '/api/im/dingtalk/append-system', isLocal: true, deps: { im: {} } });
     assert.equal(r.status, 500, '非 ENOENT 的读错误走 catch → 500');
     assert.ok(r.json().error, '错误消息透出（e.message 非空 → 走 String(e?.message||e) 左臂）');
   });
-  // ── L261 catch（imClaudeMdPost）：writeImClaudeMd 抛 → 500 String(e?.message||e) ──
-  // 把 IM 目录本身造成「文件」：writeImClaudeMd 内 mkdirSync(dir,{recursive:true}) 抛 EEXIST/ENOTDIR → catch。
-  it('POST claude-md：IM 目录是文件 → mkdirSync 抛 → 500（写失败 catch 臂）', async () => {
-    const route = imRoutes.find((r) => r.predicate('/api/im/feishu/claude-md', 'POST'));
+  // ── L261 catch（imAppendSystemPost）：writeImAppendSystem 抛 → 500 String(e?.message||e) ──
+  // 把 IM 目录本身造成「文件」：writeImAppendSystem 内 mkdirSync(dir,{recursive:true}) 抛 EEXIST/ENOTDIR → catch。
+  it('POST append-system：IM 目录是文件 → mkdirSync 抛 → 500（写失败 catch 臂）', async () => {
+    const route = imRoutes.find((r) => r.predicate('/api/im/feishu/append-system', 'POST'));
     const { imDir } = await import('../server/lib/im-lock.js');
     const dir = imDir('feishu');
     writeFileSync(dir, 'iam-a-file-not-a-dir'); // IM_feishu 占成文件 → mkdirSync(recursive) 抛
-    const r = await call(route, { pathname: '/api/im/feishu/claude-md', body: { content: 'hello' }, isLocal: true, deps: { MAX_POST_BODY: 1e6, im: {} } });
+    const r = await call(route, { pathname: '/api/im/feishu/append-system', body: { content: 'hello' }, isLocal: true, deps: { MAX_POST_BODY: 1e6, im: {} } });
     assert.equal(r.status, 500, '写盘失败走 catch → 500');
     assert.ok(r.json().error, '错误消息透出');
   });

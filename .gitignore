@@ -29,3 +29,6 @@ AGENTS.md
 # 工作区 system prompt sentinel（运行时由专家设置/CCV 写入工作目录，不入库）
 CC_SYSTEM.md
 CC_APPEND_SYSTEM.md
+
+# Claude Code 反编译产物（从官方 bun --compile 二进制抽取的主 JS bundle，仅供查证术语/实现，不入库）
+claude-code-*.cli.js

@@ -210,6 +210,24 @@ describe('server.js HTTP prelude + static serving + exports', { concurrency: fal
       assert.ok(res.headers['content-type'].includes('text/html'));
     });
 
+    it('GET / 始终注入 <base href="/">（根部署稳健：配合相对路径产物）', async () => {
+      const res = await raw(port, '/');
+      assert.equal(res.status, 200);
+      assert.ok(res.body.includes('<base href="/">'),
+        '根部署也必须注入 <base href="/">，否则深链直访下相对 ./assets 解析错位 → 白屏');
+      // 根部署不注入运行时全局：API/WS 的 base 语义保持"无前缀"不变
+      assert.ok(!res.body.includes('window.__CCV_BASE_PATH__'),
+        '根部署不应注入 window.__CCV_BASE_PATH__');
+    });
+
+    it('GET 深链 SPA fallback 文档同样含 <base href="/">（Risk A 修复）', async () => {
+      const res = await raw(port, '/deep/nested/route');
+      assert.equal(res.status, 200);
+      assert.ok(res.headers['content-type'].includes('text/html'));
+      assert.ok(res.body.includes('<base href="/">'),
+        '深链 SPA fallback 必须含 <base href="/">，使 ./assets 解析到根而非 /deep/nested/assets');
+    });
+
     it('GET /api/<unknown> falls through to SPA fallback (dist present → 200 html)', async () => {
       // /api/ GET 未命中路由时不会走“非GET API 404”，而是落到静态/SPA：dist 存在 → index.html。
       const res = await raw(port, '/api/this-route-does-not-exist');

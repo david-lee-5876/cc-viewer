@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.6.329 (2026-06-29)
+
+- feat(im): IM「模型性格定义」从工作目录 `CLAUDE.md` 改用 `CC_APPEND_SYSTEM.md`——启动 claude 时注入为 `--append-system-prompt-file`(作为追加系统提示，比旧的 CLAUDE.md 项目记忆更难被来信指令绕过)；worker 启动时一次性把遗留 `CLAUDE.md` 迁为 `CC_APPEND_SYSTEM.md`(幂等：目标有内容则不动 CLAUDE.md、迁移=rename 移动内容不丢、符号链接/目录/空文件守卫)；旧 claude 不支持该 flag 时沿用 onExit 自愈(此时无人格回退)
+- refactor(im): 模块 `im-claude-md.js` → `im-append-system.js`、导出/编辑弹窗/状态去 `ClaudeMd` 命名；编辑器路由 `/api/im/:platform/claude-md` → `/append-system`；`runImMode` 清 `CCV_DISABLE_AUTO_SYSTEM_PROMPT` 使手动 `ccv --im` 也注入人格；`ui.im.personaHelp` 18 语言改写
+- test(im): 新增 `migrateImClaudeMd` 迁移矩阵(非空迁移/目标存在幂等不删/空文件/目录守卫/无遗留/重复调用)，路由与 cli 单测改 `append-system` / `CC_APPEND_SYSTEM.md`
+- feat(反代/构建): 发布 dist 默认改相对路径(vite `base=''`，产出 `./assets/...`)，一份产物同时支持根路径部署与 `CCV_BASE_PATH` 子路径反代，免源码重编(`CCV_BASE_PATH=/` 可构回绝对路径)；server `serveIndexHtml` 根部署也注入 `<base href="/">`(修深链直访相对资源解析错位白屏)，`window.__CCV_BASE_PATH__` 仍仅子路径注入
+- test(构建): 新增 vite.config base 解析单测(未设/`''`→相对、`/`→绝对、`/prefix`→补尾斜杠)；server-http-extra 补根部署/深链 `<base href="/">` 注入断言
+
 ## 1.6.328 (2026-06-29)
 
 - feat(偏好/专家设置): 偏好设置新增「专家设置」卡 + 「系统文本修改」模态(文本框 + 追加/覆盖 switch)，写当前工作区的 CC_SYSTEM.md(覆盖) / CC_APPEND_SYSTEM.md(追加)，两模式互斥、空文本即关闭、卡标题 (?) 功能说明、下次启动 claude 生效(GET/POST `/api/expert/system-text`，目录服务端解析、不收客户端路径)；`ui.expert.*` 18 语言

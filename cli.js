@@ -454,7 +454,7 @@ async function runCliMode(extraClaudeArgs = [], cwd, noOpen = false) {
 }
 
 // 启动一个独立常驻 IM worker。本质是「在 IM_<id>/ 工作目录、绑 127.0.0.1、skip-permissions」的 runCliMode，
-// 外加：全局唯一锁、CLAUDE.md 预置、IM 专属 env。由 im-process-manager 以 detached 子进程拉起，
+// 外加：全局唯一锁、CC_APPEND_SYSTEM.md 人格预置/迁移、IM 专属 env。由 im-process-manager 以 detached 子进程拉起，
 // 也可手动 `ccv --im <id>` 启动。
 async function runImMode(platformId) {
   const { getDescriptor } = await import('./server/lib/im-config.js');
@@ -464,7 +464,7 @@ async function runImMode(platformId) {
   }
 
   const { acquireImLock, releaseImLock, imDir } = await import('./server/lib/im-lock.js');
-  const { ensureImClaudeMd } = await import('./server/lib/im-claude-md.js');
+  const { ensureImAppendSystem, migrateImClaudeMd } = await import('./server/lib/im-append-system.js');
   const { ensureImBuiltinSkills } = await import('./server/lib/im-skills.js');
 
   const dir = imDir(platformId);
@@ -480,9 +480,13 @@ async function runImMode(platformId) {
   // SIGKILL 不触发，由 manager 的 getImLiveness 兜底清理陈旧锁）
   process.on('exit', () => { try { releaseImLock(platformId, process.pid); } catch { /* noop */ } });
 
-  // 首次缺失则生成默认 CLAUDE.md（行为约束，建议层）。失败非致命：worker 照常启动。
-  try { ensureImClaudeMd(platformId, dir); }
-  catch (e) { console.warn('[CC Viewer] ensureImClaudeMd failed (non-fatal):', e.message); }
+  // 一次性把遗留的 CLAUDE.md 迁为 CC_APPEND_SYSTEM.md（幂等：迁移=rename 移动、内容不丢；目标已有内容时不动 CLAUDE.md）；再确保默认存在。
+  // 该文件由 pty-manager 启动 claude 时自动注入为 --append-system-prompt-file（追加系统提示，比旧
+  // CLAUDE.md 项目记忆更难被来信指令绕过）。失败非致命：worker 照常启动。
+  try { migrateImClaudeMd(platformId, dir); }
+  catch (e) { console.warn('[CC Viewer] migrateImClaudeMd failed (non-fatal):', e.message); }
+  try { ensureImAppendSystem(platformId, dir); }
+  catch (e) { console.warn('[CC Viewer] ensureImAppendSystem failed (non-fatal):', e.message); }
 
   // 受管同步内置默认技能（manage-ccv-projects：列出/启动 ccv 项目 + 自我介绍）。失败非致命：worker 照常启动。
   try { ensureImBuiltinSkills(platformId, dir); }
@@ -494,6 +498,9 @@ async function runImMode(platformId) {
   process.env.CCV_MAX_PORT = process.env.CCV_MAX_PORT || '7099';
   process.env.CCV_HOST = '127.0.0.1';  // 仅 loopback：不把 skip-perms 端点暴露到局域网
   process.env.CCV_IM_DENY = '1';       // 启用 perm-bridge 的 IM 硬拦截层
+  // IM 人格(CC_APPEND_SYSTEM.md)必须始终注入：清掉全局 opt-out，使手动 `ccv --im` 也不被它关掉
+  // （manager 拉起的 worker 由 buildChildEnv 已剥离全部 CCV_*，此处对其为 no-op，仅覆盖手动启动路径）。
+  delete process.env.CCV_DISABLE_AUTO_SYSTEM_PROMPT;
 
   // worker 全自动：skip-permissions + 不开浏览器，工作目录设为 IM_<id>/
   return runCliMode(['--dangerously-skip-permissions'], dir, true);

@@ -325,7 +325,7 @@ describe('branch-cli: --im 全程启动 → updateImLockPort 回填端口（351/
 
     assert.equal(r.exitCode, 0, `IM SIGINT cleanup 应 exit 0；实得 code=${r.exitCode} sig=${r.signal}`);
     assert.ok(existsSync(join(fx.logDir, 'IM_dingtalk')), 'runImMode 应建 IM_dingtalk/');
-    assert.ok(existsSync(join(fx.logDir, 'IM_dingtalk', 'CLAUDE.md')), 'ensureImClaudeMd 应写默认 CLAUDE.md');
+    assert.ok(existsSync(join(fx.logDir, 'IM_dingtalk', 'CC_APPEND_SYSTEM.md')), 'ensureImAppendSystem 应写默认 CC_APPEND_SYSTEM.md');
     assert.ok(/Local:\s+http:\/\/127\.0\.0\.1:188\d\d/.test(r.stdout), '应打印 Local URL（server 启动成功）');
     const boundPort = parseLocalPort(r.stdout);
     assert.ok(boundPort >= 18868 && boundPort <= 18871, `IM 端口应在私有子窗，实得 ${boundPort}`);

@@ -1,5 +1,5 @@
 // IM worker 的语言解析 —— 读用户在 UI 选择的语言（持久化在 LOG_DIR/preferences.json 的 lang 字段）。
-// 供 IM 内置技能注入（im-skills.js）与人格预置（im-claude-md.js）共用，避免各自重复读 preferences。
+// 供 IM 内置技能注入（im-skills.js）与人格预置（im-append-system.js）共用，避免各自重复读 preferences。
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { LOG_DIR } from '../../findcc.js';

@@ -3,12 +3,12 @@
 //   - 144-147  imConfigPost 进程操作（restart/stop）抛错 → catch 记日志但仍 200
 //   - 194-199  imProcessPost action:'start' 正常臂 + 未知 action → 400
 //   - 203-205  imProcessPost 进程操作抛错 → 500
-//   - 242-244  imClaudeMdGet readImClaudeMd 抛非 ENOENT（EISDIR）→ 500
-//   - 266-268  imClaudeMdPost writeImClaudeMd rename 抛错（EISDIR）→ 500
+//   - 242-244  imAppendSystemGet readImAppendSystem 抛非 ENOENT（EISDIR）→ 500
+//   - 266-268  imAppendSystemPost writeImAppendSystem rename 抛错（EISDIR）→ 500
 //
 // 手法：沿用 api-im.test.js 的「直接调 route.handler + deps 替身 + fake req/res」模式（不起真 server）。
 // 进程类分支用 deps.im 替身注入抛错；两个文件系统 catch 分支用真实临时 LOG_DIR——预先把
-// IM_dingtalk/CLAUDE.md 造成一个「目录」，使 readFileSync 抛 EISDIR（非 ENOENT 不回 preset）
+// IM_dingtalk/CC_APPEND_SYSTEM.md 造成一个「目录」，使 readFileSync 抛 EISDIR（非 ENOENT 不回 preset）
 // 与 renameSyncWithRetry 抛 EISDIR，分别命中 GET/POST 的 catch。
 //
 // 放过（确认不可达）：287-289 imSkills 的 catch——listSkills 内部 scanDir 对 readdir 失败是空 catch
@@ -27,9 +27,9 @@ process.env.CLAUDE_CONFIG_DIR = tmpDir;
 process.env.CCV_WORKSPACE_MODE = '1';
 process.env.CCV_CLI_MODE = '0';
 
-// 预置：把 IM_dingtalk/CLAUDE.md 造成一个目录 → readFileSync/rename 都会抛 EISDIR。
+// 预置：把 IM_dingtalk/CC_APPEND_SYSTEM.md 造成一个目录 → readFileSync/rename 都会抛 EISDIR。
 mkdirSync(join(tmpDir, 'IM_dingtalk'), { recursive: true });
-mkdirSync(join(tmpDir, 'IM_dingtalk', 'CLAUDE.md'), { recursive: true });
+mkdirSync(join(tmpDir, 'IM_dingtalk', 'CC_APPEND_SYSTEM.md'), { recursive: true });
 
 /** fake req：按 readBody 约定投递 data/end。 */
 const fakeReq = (bodyStr) => ({
@@ -117,20 +117,20 @@ describe('server/routes/im.js gap branches', { concurrency: false }, () => {
     assert.match(r.json().error, /manager boom/);
   });
 
-  // ── 242-244: claude-md GET readImClaudeMd 抛 EISDIR → 500 ──
-  it('claude-md GET → 500 when CLAUDE.md is a directory (readFileSync EISDIR, not ENOENT)', async () => {
-    // IM_dingtalk/CLAUDE.md 已在 before-import 阶段造成目录 → readImClaudeMd 抛 EISDIR（非 ENOENT 不回 preset）。
-    const route = imRoutes.find((r) => r.predicate('/api/im/dingtalk/claude-md', 'GET'));
-    const r = await call(route, { pathname: '/api/im/dingtalk/claude-md', deps: { MAX_POST_BODY: 1e6 } });
+  // ── 242-244: append-system GET readImAppendSystem 抛 EISDIR → 500 ──
+  it('append-system GET → 500 when CC_APPEND_SYSTEM.md is a directory (readFileSync EISDIR, not ENOENT)', async () => {
+    // IM_dingtalk/CC_APPEND_SYSTEM.md 已在 before-import 阶段造成目录 → readImAppendSystem 抛 EISDIR（非 ENOENT 不回 preset）。
+    const route = imRoutes.find((r) => r.predicate('/api/im/dingtalk/append-system', 'GET'));
+    const r = await call(route, { pathname: '/api/im/dingtalk/append-system', deps: { MAX_POST_BODY: 1e6 } });
     assert.equal(r.status, 500);
     assert.ok(r.json().error, 'error message surfaced');
     assert.match(r.json().error, /EISDIR|directory/i);
   });
 
-  // ── 266-268: claude-md POST writeImClaudeMd rename 抛 EISDIR → 500 ──
-  it('claude-md POST → 500 when target CLAUDE.md is a directory (rename EISDIR)', async () => {
-    const route = imRoutes.find((r) => r.predicate('/api/im/dingtalk/claude-md', 'POST'));
-    const r = await call(route, { pathname: '/api/im/dingtalk/claude-md', body: { content: '# persona' }, deps: { MAX_POST_BODY: 1e6 } });
+  // ── 266-268: append-system POST writeImAppendSystem rename 抛 EISDIR → 500 ──
+  it('append-system POST → 500 when target CC_APPEND_SYSTEM.md is a directory (rename EISDIR)', async () => {
+    const route = imRoutes.find((r) => r.predicate('/api/im/dingtalk/append-system', 'POST'));
+    const r = await call(route, { pathname: '/api/im/dingtalk/append-system', body: { content: '# persona' }, deps: { MAX_POST_BODY: 1e6 } });
     assert.equal(r.status, 500);
     assert.ok(r.json().error, 'rename failure surfaced as 500');
   });

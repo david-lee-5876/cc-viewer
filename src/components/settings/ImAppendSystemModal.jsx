@@ -3,10 +3,10 @@ import { Modal, Input, Spin, Button, Popconfirm, message } from 'antd';
 import { apiUrl } from '../../utils/apiUrl';
 import { imTr as _tr } from '../../utils/imTr';
 
-// 「模型性格定义」编辑器：读/写该 IM 工作目录下的 CLAUDE.md。叠加在「通讯软件集成」配置弹窗之上
-// （antd Modal 走 portal 自动堆叠，不关闭下层）；保存/取消后回到配置弹窗。CLAUDE.md 仅在 worker
-// 启动时读取一次，故保存后提示「下次重启该 IM 生效」。
-export default function ImClaudeMdModal({ open, platform, onClose }) {
+// 「模型性格定义」编辑器：读/写该 IM 工作目录下的 CC_APPEND_SYSTEM.md（启动 claude 时注入为
+// --append-system-prompt-file）。叠加在「通讯软件集成」配置弹窗之上（antd Modal 走 portal 自动堆叠，
+// 不关闭下层）；保存/取消后回到配置弹窗。该文件仅在 worker 启动时读取一次，故保存后提示「下次重启该 IM 生效」。
+export default function ImAppendSystemModal({ open, platform, onClose }) {
   const [content, setContent] = useState('');
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -16,7 +16,7 @@ export default function ImClaudeMdModal({ open, platform, onClose }) {
     if (!open || !platform) return undefined;
     let cancelled = false;
     setLoading(true);
-    fetch(apiUrl(`/api/im/${encodeURIComponent(platform)}/claude-md`))
+    fetch(apiUrl(`/api/im/${encodeURIComponent(platform)}/append-system`))
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error('load failed'))))
       .then((d) => { if (!cancelled) setContent(typeof d.content === 'string' ? d.content : ''); })
       .catch(() => { if (!cancelled) message.error(_tr('ui.imRecord.loadFailed', null, 'Load failed')); })
@@ -27,7 +27,7 @@ export default function ImClaudeMdModal({ open, platform, onClose }) {
   const save = async () => {
     setSaving(true);
     try {
-      const r = await fetch(apiUrl(`/api/im/${encodeURIComponent(platform)}/claude-md`), {
+      const r = await fetch(apiUrl(`/api/im/${encodeURIComponent(platform)}/append-system`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ content }),
@@ -46,7 +46,7 @@ export default function ImClaudeMdModal({ open, platform, onClose }) {
   const restoreDefault = async () => {
     setRestoring(true);
     try {
-      const r = await fetch(apiUrl(`/api/im/${encodeURIComponent(platform)}/claude-md?default=1`));
+      const r = await fetch(apiUrl(`/api/im/${encodeURIComponent(platform)}/append-system?default=1`));
       if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error || `HTTP ${r.status}`); }
       const d = await r.json();
       setContent(typeof d.content === 'string' ? d.content : '');

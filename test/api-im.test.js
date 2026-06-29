@@ -282,42 +282,42 @@ describe('IM routes: allowlist optional / process control / logs (manager-backed
     assert.deepEqual(calls, [['restart', 'feishu']]);
   });
 
-  it('GET /api/im/:platform/claude-md returns the preset when no file exists yet', async () => {
+  it('GET /api/im/:platform/append-system returns the preset when no file exists yet', async () => {
     const { imRoutes } = await import('../server/routes/im.js');
-    const route = imRoutes.find((r) => r.predicate('/api/im/discord/claude-md', 'GET'));
-    const r = await call(route, { pathname: '/api/im/discord/claude-md', deps: { MAX_POST_BODY: 1e6 } });
+    const route = imRoutes.find((r) => r.predicate('/api/im/discord/append-system', 'GET'));
+    const r = await call(route, { pathname: '/api/im/discord/append-system', deps: { MAX_POST_BODY: 1e6 } });
     assert.equal(r.status, 200);
     assert.equal(r.json().platform, 'discord');
     assert.match(r.json().content, /AskUserQuestion/); // preset content
   });
 
-  it('POST /api/im/:platform/claude-md persists content; GET reads it back', async () => {
+  it('POST /api/im/:platform/append-system persists content; GET reads it back', async () => {
     const { imRoutes } = await import('../server/routes/im.js');
-    const post = imRoutes.find((r) => r.predicate('/api/im/discord/claude-md', 'POST'));
-    const get = imRoutes.find((r) => r.predicate('/api/im/discord/claude-md', 'GET'));
-    const w = await call(post, { pathname: '/api/im/discord/claude-md', body: { content: '# custom persona\nbe brief' }, deps: { MAX_POST_BODY: 1e6 } });
+    const post = imRoutes.find((r) => r.predicate('/api/im/discord/append-system', 'POST'));
+    const get = imRoutes.find((r) => r.predicate('/api/im/discord/append-system', 'GET'));
+    const w = await call(post, { pathname: '/api/im/discord/append-system', body: { content: '# custom persona\nbe brief' }, deps: { MAX_POST_BODY: 1e6 } });
     assert.equal(w.status, 200);
     assert.equal(w.json().ok, true);
-    const r = await call(get, { pathname: '/api/im/discord/claude-md', deps: { MAX_POST_BODY: 1e6 } });
+    const r = await call(get, { pathname: '/api/im/discord/append-system', deps: { MAX_POST_BODY: 1e6 } });
     assert.equal(r.json().content, '# custom persona\nbe brief');
   });
 
-  it('POST /api/im/:platform/claude-md rejects non-string content (400) and non-local caller (403)', async () => {
+  it('POST /api/im/:platform/append-system rejects non-string content (400) and non-local caller (403)', async () => {
     const { imRoutes } = await import('../server/routes/im.js');
-    const post = imRoutes.find((r) => r.predicate('/api/im/discord/claude-md', 'POST'));
-    const bad = await call(post, { pathname: '/api/im/discord/claude-md', body: { content: 123 }, deps: { MAX_POST_BODY: 1e6 } });
+    const post = imRoutes.find((r) => r.predicate('/api/im/discord/append-system', 'POST'));
+    const bad = await call(post, { pathname: '/api/im/discord/append-system', body: { content: 123 }, deps: { MAX_POST_BODY: 1e6 } });
     assert.equal(bad.status, 400);
-    const remote = await call(post, { pathname: '/api/im/discord/claude-md', body: { content: 'x' }, isLocal: false, deps: { MAX_POST_BODY: 1e6 } });
+    const remote = await call(post, { pathname: '/api/im/discord/append-system', body: { content: 'x' }, isLocal: false, deps: { MAX_POST_BODY: 1e6 } });
     assert.equal(remote.status, 403);
   });
 
-  it('POST /api/im/:platform/claude-md rejects content over MAX_CLAUDE_MD_CHARS (413)', async () => {
+  it('POST /api/im/:platform/append-system rejects content over MAX_IM_APPEND_SYSTEM_CHARS (413)', async () => {
     const { imRoutes } = await import('../server/routes/im.js');
-    const { MAX_CLAUDE_MD_CHARS } = await import('../server/lib/im-claude-md.js');
-    const post = imRoutes.find((r) => r.predicate('/api/im/discord/claude-md', 'POST'));
-    const tooBig = 'a'.repeat(MAX_CLAUDE_MD_CHARS + 1);
+    const { MAX_IM_APPEND_SYSTEM_CHARS } = await import('../server/lib/im-append-system.js');
+    const post = imRoutes.find((r) => r.predicate('/api/im/discord/append-system', 'POST'));
+    const tooBig = 'a'.repeat(MAX_IM_APPEND_SYSTEM_CHARS + 1);
     // MAX_POST_BODY must exceed the JSON body so the size guard (413), not the body-limit, is what trips.
-    const r = await call(post, { pathname: '/api/im/discord/claude-md', body: { content: tooBig }, deps: { MAX_POST_BODY: MAX_CLAUDE_MD_CHARS * 2 } });
+    const r = await call(post, { pathname: '/api/im/discord/append-system', body: { content: tooBig }, deps: { MAX_POST_BODY: MAX_IM_APPEND_SYSTEM_CHARS * 2 } });
     assert.equal(r.status, 413);
   });
 
@@ -385,7 +385,7 @@ describe('IM routes: allowlist optional / process control / logs (manager-backed
 
 // Per-IM skill management endpoints (GET /skills, POST /skills/import, POST /skills/toggle).
 // Scoped to IM_<id>/.claude/skills under the isolated CCV_LOG_DIR temp. Uses 'wecom' to avoid
-// colliding with the claude-md tests that wrote under IM_discord.
+// colliding with the append-system tests that wrote under IM_discord.
 describe('IM skill management endpoints (per-IM .claude/skills)', () => {
   const RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
   const jsonReq = (bodyStr) => ({ on(ev, cb) { if (ev === 'data' && bodyStr) cb(Buffer.from(bodyStr)); if (ev === 'end') cb(); return this; } });

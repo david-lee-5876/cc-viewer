@@ -1,6 +1,6 @@
 // IM worker 的内置默认技能注入 —— 每次 worker 启动把随包发布的「manage-ccv-projects」技能
 // 受管同步到 IM_<id>/.claude/skills/（或用户已停用时同步到 skills-skip/）。
-// 对比 server/lib/im-claude-md.js（人格预置）：那边是 wx「永不覆盖」尊重用户编辑；本模块是「受管同步」包内为准、覆盖内容。
+// 对比 server/lib/im-append-system.js（人格预置）：那边是 wx「永不覆盖」尊重用户编辑；本模块是「受管同步」包内为准、覆盖内容。
 //
 // 受管语义（本轮决策）：
 //  - 内容以包内最新版为准：每次启动覆盖 SKILL.md + scripts/ccv-projects.mjs（随升级更新；用户手改会被覆盖）。
