@@ -31,15 +31,15 @@ export default {
 
 ## Plugin Directory
 
-All plugins live in:
+Plugins are loaded from the user's cc-viewer config directory:
 
 ```
 ~/.claude/cc-viewer/plugins/
 ```
 
-This is `LOG_DIR/plugins/` — the same base directory cc-viewer uses for logs and preferences. Enterprise IT teams can pre-populate this directory for all users.
+This is `LOG_DIR/plugins/` — the same base directory cc-viewer uses for logs and preferences. Enterprise IT teams can pre-populate this directory for all users. The directory is created automatically on first startup if it does not exist.
 
-The loader scans for all `*.js` and `*.mjs` files in this directory. Each file is one plugin.
+The loader scans for all `*.js` and `*.mjs` files in this directory. Each file is one plugin. Files are loaded in filename-sorted order, which determines waterfall execution sequence.
 
 ## Plugin Format
 

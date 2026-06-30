@@ -16,6 +16,9 @@
  * If git is unavailable or this is not a git work tree (extracted tarball, clean-room CI), the
  * check skips gracefully (exit 0) rather than breaking `npm test`.
  * Exit 0 = clean (or skipped), exit 1 = violations (printed as path:line:col (offset) + byte).
+ *
+ * Invoked as a pretest hook via package.json "pretest" to ensure the codebase stays
+ * grep-friendly.
  */
 import { execSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';

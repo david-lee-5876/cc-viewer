@@ -1,6 +1,6 @@
 {
   "name": "default-butler",
-  "displayName": "Butler · 皇上系列 (默认)",
+  "displayName": "Butler (Default)",
   "placeholder": false,
   "events": {
     "planApproval": {

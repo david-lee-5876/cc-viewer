@@ -1,5 +1,7 @@
 # CC-Viewer Configuration Reference
 
+> Also available in [简体中文](../zh/GlobalSettings.md) and other languages.
+
 ## 1. Global Settings Panel (UI)
 
 Open via top-left menu → "Global Settings".

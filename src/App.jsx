@@ -23,30 +23,31 @@ import { apiUrl } from './utils/apiUrl';
 class App extends AppBase {
   constructor(props) {
     super(props);
-    // PC 专属 state
+    // Desktop-only state
     Object.assign(this.state, {
       leftPanelWidth: 380,
       terminalVisible: true,
       currentTab: 'context',
       pendingCacheHighlight: null,
-      contextBarSlot: null, // TerminalPanel 工具栏 / ChatInputBar 底部按钮区注册的 DOM slot；AppHeader 通过 createPortal 把血条渲染过去
-      planUsage: null, // 套餐用量快照(仅 OAuth):自动跟随最新响应，仅在 requests 引用变化且解析值改变时更新(见 componentDidUpdate)
-      installMethod: null, // 'electron' | 'brew' | 'npm'：打开版本信息弹窗时按需拉取，精准匹配升级命令
+      contextBarSlot: null, // DOM slot registered by TerminalPanel toolbar / ChatInputBar bottom button area; AppHeader renders the usage pill bar there via createPortal
+      planUsage: null, // Plan usage snapshot (OAuth only): auto-follows the latest response, updates only when requests reference changes and the parsed value differs (see componentDidUpdate)
+      installMethod: null, // 'electron' | 'brew' | 'npm': fetched on demand when opening the version-info modal, for precise upgrade command matching
     });
     this.appHeaderRef = React.createRef();
     this._getTokenStatsContent = (closeParent) => this.appHeaderRef.current?.renderTokenStats?.(closeParent) ?? null;
   }
 
-  // 子组件（TerminalPanel / ChatInputBar）通过 ref callback 注册血条 slot DOM；
-  // 切换 terminalVisible 时旧 slot 先 ref(null) → 新 slot ref(el)，AppHeader 接住 prop 变化触发 portal 重定位。
-  // 守卫：1) 跳过已脱离 DOM 的节点（防御 transient race）；2) 引用相同时不重复 setState（避免 render loop）。
+  // Child components (TerminalPanel / ChatInputBar) register the usage-bar slot DOM via ref callback;
+  // when terminalVisible toggles, old slot unregisters (ref(null)) → new slot registers (ref(el)),
+  // and AppHeader responds to the prop change by relocating the portal.
+  // Guards: 1) skip disconnected DOM nodes (defense against transient race); 2) skip setState when reference is unchanged (avoid render loop).
   setContextBarSlot = (el) => {
     if (el && !el.isConnected) return;
     if (el === this.state.contextBarSlot) return;
     this.setState({ contextBarSlot: el });
   };
 
-  // 按安装渠道渲染升级指引：electron 走 GitHub Releases 步骤，brew / npm 展示对应命令。
+  // Render upgrade guidance by install channel: electron uses GitHub Releases steps, brew / npm show the corresponding command.
   renderUpdateInstructions = (method) => {
     const codeStyle = { display: 'block', background: 'var(--bg-code)', padding: '8px 12px', borderRadius: 6, fontSize: 13 };
     if (method === 'electron') {

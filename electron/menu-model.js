@@ -1,18 +1,23 @@
 /**
- * 应用菜单的单一数据源(纯数据,无 Electron 依赖,可被 node:test 直接单测)。
+ * Single data source for the application menu (pure data, no Electron dependency,
+ * directly testable with node:test).
  *
- * 两个消费方:
- * - electron/main.js buildMenu():映射为原生菜单模板(macOS 菜单栏 / 全平台 accelerator 注册);
- * - tab-bar.html(win32):HTML 菜单栏按钮 + React 端(AppHeader)跟随皮肤的下拉,
- *   经 serializeMenuModel() 拿到已翻译的可序列化模型。
+ * Two consumers:
+ * - electron/main.js buildMenu(): maps to native menu template (macOS menu bar /
+ *   cross-platform accelerator registration);
+ * - tab-bar.html (win32): HTML menu bar buttons + React (AppHeader) theme-aware
+ *   dropdown, via serializeMenuModel() which returns a translated, serializable model.
  *
- * 字段约定:
- * - id:命令 id,dispatchMenuCommand(main.js) 按它派发;
- * - labelKey:server/i18n.js 的翻译 key;
- * - accel:Electron accelerator 串(CmdOrCtrl+T 等),原生注册 + HTML 端展示;
- * - role:edit 类条目走 webContents 编辑命令(undo/cut/...),id 与方法名一致;
- * - darwinRole:macOS 原生菜单上改用该 role(如 zoom ≠ maximize,不能改变 mac 既有行为);
- * - type:'separator' 分隔线。
+ * Field conventions:
+ * - id: command identifier, dispatched by dispatchMenuCommand(main.js);
+ * - labelKey: i18n key from server/i18n.js;
+ * - accel: Electron accelerator string (CmdOrCtrl+T etc.), registered natively and
+ *   displayed in the HTML menu;
+ * - role: edit-type entries use webContents editing commands (undo/cut/...), id
+ *   matches the method name;
+ * - darwinRole: on macOS native menus, use this role instead (e.g. zoom ≠ maximize,
+ *   must not alter existing macOS behavior);
+ * - type: 'separator' for separator lines.
  */
 
 export function buildMenuModel(platform = process.platform) {

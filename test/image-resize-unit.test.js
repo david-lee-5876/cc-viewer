@@ -1,13 +1,14 @@
-// 覆盖目标：src/utils/imageResize.js —— resizeImageIfNeeded() / loadImageBitmap / canvasToBlob 等
-// （pickOutputType/renameForType 已由既有 test/image-resize.test.js 覆盖，这里不重复，专注浏览器路径）
-// mock：createImageBitmap、URL.createObjectURL/revokeObjectURL、Image、document.createElement('canvas')。
-// after() 还原，beforeEach 重置配置。
+// Target module: src/utils/imageResize.js — resizeImageIfNeeded() / loadImageBitmap / canvasToBlob etc.
+// (pickOutputType / renameForType are already covered by existing test/image-resize.test.js;
+//  this file focuses on the browser code path.)
+// Mocks: createImageBitmap, URL.createObjectURL/revokeObjectURL, Image, document.createElement('canvas').
+// after() restores originals; beforeEach() resets the config to default.
 
 import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { resizeImageIfNeeded } from '../src/utils/imageResize.js';
 
-// ── 全局 mock 可调状态 ──
+// ── Global mock state (tunable per test) ──
 let bitmapConfig;  // { enabled, fail, width, height, hasClose, closeThrows }
 let imgConfig;     // { fail, naturalWidth, naturalHeight }
 let canvasConfig;  // { noCtx, drawThrows, blob, nullBlob, toBlobThrows }

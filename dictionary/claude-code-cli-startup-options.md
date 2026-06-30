@@ -1,23 +1,24 @@
-# Claude Code CLI 启动参数完整手册
+# Claude Code CLI Startup Options — Complete Reference
 
-> 适用版本：**Claude Code 2.1.195**（`claude --version`）
-> 本文档逐条翻译并整理自该版本 `claude --help` 输出，按用途分组。
-> 标注「仅 `--print`」的参数只在非交互（打印 / SDK）模式下生效。
+> Target version: **Claude Code 2.1.195** (`claude --version`)
+> This document is translated and organized from the `claude --help` output of that version,
+> grouped by use case.
+> Items marked `--print` only are effective only in non-interactive (print / SDK) mode.
 
 ---
 
-## 基本用法
+## Basic Usage
 
 ```
 claude [options] [command] [prompt]
 ```
 
-- 默认启动**交互式会话**。
-- 加 `-p` / `--print` 进入**非交互模式**（打印结果后退出，便于管道 / 脚本）。
-- `prompt`：直接作为首条提示词传入（位置参数）。
+- Default: starts an **interactive session**.
+- Add `-p` / `--print` for **non-interactive mode** (prints result and exits, suitable for pipes / scripts).
+- `prompt`: passed directly as the first prompt (positional argument).
 
 ```bash
-claude                          # 交互式会话
+claude                          # Interactive session
 claude "帮我看下这个目录"         # 交互式会话 + 首条提示
 claude -p "总结 README"          # 非交互，打印后退出
 echo "代码内容" | claude -p "审查"  # 管道输入
